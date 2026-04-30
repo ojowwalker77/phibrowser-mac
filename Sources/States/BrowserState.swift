@@ -1246,6 +1246,22 @@ class BrowserState {
         guard let tab = tabs.first(where: { $0.guid == tabId }) else {
             return
         }
+        // Phi-side pinning bypasses Chromium's TabStripModel (it stores
+        // the tab as a bookmark-backed local entry instead), so the
+        // automatic "pinning detaches from group" behavior in
+        // `TabStripModel::SetTabPinned` doesn't fire. Detach explicitly
+        // here so all five paths into pinning — the right-click "Pin"
+        // menu plus the four drag-to-pinned-area drop sites (sidebar
+        // and horizontal strip, same- and cross-window) — keep
+        // Chromium's group state and Phi's `tab.groupToken` consistent.
+        // Local clear avoids a transient "pinned + grouped" frame
+        // before the kLeft event round-trips back through the bridge.
+        if tab.groupToken != nil,
+           let bridge = ChromiumLauncher.sharedInstance().bridge {
+            bridge.removeTabsFromGroup(withWindowId: windowId.int64Value,
+                                        tabIds: [NSNumber(value: Int64(tabId))])
+            tab.groupToken = nil
+        }
         let affectedChildren = nativeRelationGraph.directChildren(of: tabId)
         nativeRelationGraph.fixOpenersAfterMovingTab(tabId)
         for childId in affectedChildren {
@@ -1313,6 +1329,20 @@ class BrowserState {
         guard let tab = tabs.first(where: { $0.guid == tabId }),
               let url = tab.url, !url.isEmpty else {
             return
+        }
+        // Symmetric to the detach in `moveNormalTab(toPinnd:)`. Phi's
+        // bookmark-backed tab is a Mac-only concept layered on top of
+        // Chromium's normal tab, so Chromium's GroupModel doesn't learn
+        // that a grouped tab has been "converted" until we explicitly
+        // tell it. Without this, Chromium keeps the tab as a group
+        // member, breaking last-tab-closes-group detection and leaving
+        // a stale `groupToken` on the tab if it is later re-opened
+        // through the bookmark.
+        if tab.groupToken != nil,
+           let bridge = ChromiumLauncher.sharedInstance().bridge {
+            bridge.removeTabsFromGroup(withWindowId: windowId.int64Value,
+                                        tabIds: [NSNumber(value: Int64(tabId))])
+            tab.groupToken = nil
         }
         let affectedChildren = nativeRelationGraph.directChildren(of: tabId)
         nativeRelationGraph.fixOpenersAfterMovingTab(tabId)
