@@ -47,6 +47,7 @@ class OmniBoxTextField: NSView {
     // Preserve user caret/selection when toggling inline/temp strings
     private var savedSelection: NSRange? = nil
     private var inlineCompletionSelection: NSRange? = nil
+    private var appliedInlineCompletionText: String? = nil
     private var suppressSelectionSave = false
     var stringValue: String {
         get { textFiled.stringValue }
@@ -112,6 +113,8 @@ class OmniBoxTextField: NSView {
     
     func updateDisplayText(_ text: String, isURL: Bool = false) {
         self.originalText = text
+        self.inlineCompletionSelection = nil
+        self.appliedInlineCompletionText = nil
         self.stringValue = text
     }
     
@@ -152,6 +155,7 @@ extension OmniBoxTextField {
             let fillLen = (fill as NSString).length
             fieldEditor.selectedRange = NSRange(location: fillLen, length: 0)
             inlineCompletionSelection = nil
+            appliedInlineCompletionText = nil
             return
         }
 
@@ -182,6 +186,7 @@ extension OmniBoxTextField {
             let completionRange = NSRange(location: baseLen, length: inlineLen)
             fieldEditor.selectedRange = completionRange
             inlineCompletionSelection = completionRange
+            appliedInlineCompletionText = combined
             return
         }
 
@@ -196,6 +201,7 @@ extension OmniBoxTextField {
         suppressSelectionSave = true
         fieldEditor.selectedRange = NSRange(location: loc, length: len)
         inlineCompletionSelection = nil
+        appliedInlineCompletionText = nil
     }
 }
 
@@ -221,6 +227,7 @@ extension OmniBoxTextField: NSTextFieldDelegate {
         guard obj.object as? NSTextField == self.textFiled else {
             return
         }
+        let previousSelection = savedSelection
 
         if let fieldEditor = window?.fieldEditor(false, for: textFiled) {
             let raw = fieldEditor.string
@@ -241,12 +248,14 @@ extension OmniBoxTextField: NSTextFieldDelegate {
         AppLogDebug("[Omnibox] textDidChange: new:\(newText), old:\(originalText), savedSel:\(String(describing: savedSelection))")
 
         var suppressAutoComplete = false
-        if newText.count < originalText.count || newText == originalText {
+        if (previousSelection?.length ?? 0) > 0 {
+            suppressAutoComplete = false
+        } else if newText.count < originalText.count || newText == originalText {
             suppressAutoComplete = true
         } else if newText.count > originalText.count {
             suppressAutoComplete = false
         }
-        
+
         originalText = newText
         omniBoxDelegate?.omniBoxTextFieldDidChange(self, suppressAutoComplete: suppressAutoComplete)
     }
@@ -262,13 +271,19 @@ extension OmniBoxTextField: NSTextFieldDelegate {
         let currentText = textView.string
         
         AppLogDebug("[Omnibox] selectionChanged: \(current) str:\(currentText), suppress:\(suppressSelectionSave)")
-        
+
         if let inlineRange = inlineCompletionSelection,
            inlineRange.length > 0,
            !suppressSelectionSave {
-            originalText = currentText
+            let acceptedInlineCompletion = appliedInlineCompletionText == currentText
+            if acceptedInlineCompletion {
+                originalText = currentText
+            }
             inlineCompletionSelection = nil
-            AppLogDebug("[Omnibox] user modified completion, originalText -> \(currentText)")
+            appliedInlineCompletionText = nil
+            if acceptedInlineCompletion {
+                AppLogDebug("[Omnibox] user accepted completion, originalText -> \(currentText)")
+            }
         }
         
         if !suppressSelectionSave {
