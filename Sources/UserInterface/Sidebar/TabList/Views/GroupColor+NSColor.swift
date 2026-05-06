@@ -23,6 +23,27 @@ extension GroupColor {
         case .orange: return NSColor(resource: .tabGroupOrange)
         }
     }
+
+    /// Background tint for `TabGroupChipView`. ~18% of the saturated group
+    /// color over whatever the strip background happens to be — the mix
+    /// picks up the ambient surface so light and dark modes both get an
+    /// "appropriately deep" chip behind the label.
+    var chipTintColor: NSColor {
+        nsColor.withAlphaComponent(0.18)
+    }
+
+    /// Hover variant of `chipTintColor` — slightly more saturated. Used
+    /// when the cursor is over the chip to invite the click-to-collapse
+    /// affordance.
+    var chipHoverTintColor: NSColor {
+        nsColor.withAlphaComponent(0.28)
+    }
+
+    /// Compact-mode swatch color. Sits to the right of the 4pt color bar
+    /// to give compact chips a recognizable color signature without text.
+    var chipCompactSwatchColor: NSColor {
+        nsColor.withAlphaComponent(0.45)
+    }
 }
 
 extension NSImage {
