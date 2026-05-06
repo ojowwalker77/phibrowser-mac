@@ -90,9 +90,14 @@ class TabSectionController: NSObject {
         previousItemIds = initialItems.map { $0.id }
         previousGroupMembers = Self.computeGroupMembers(tabs: currentTabs)
 
-        // dropFirst() skips the initial synchronous delivery we already handled above.
+        // dropFirst() skips the initial synchronous delivery we already handled
+        // above. receive(on: .main) defers until after @Published's willSet
+        // settles — same reason as the $groups subscription below — so that
+        // TabGroupSidebarItem.childrenItems (queried by NSOutlineView during
+        // reloadItem) reads the post-mutation normalTabs.
         browserState.$normalTabs
             .dropFirst()
+            .receive(on: DispatchQueue.main)
             .sink { [weak self] tabs in
                 self?.refreshTabItems(tabs, isInitial: false)
             }
