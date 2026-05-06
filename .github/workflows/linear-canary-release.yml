@@ -24,6 +24,7 @@ jobs:
         id: dev-check
         run: |
           git fetch --no-tags origin dev:refs/remotes/origin/dev
+          git fetch --force origin "refs/tags/${GITHUB_REF_NAME}:refs/tags/${GITHUB_REF_NAME}"
 
           tagged_commit="$(git rev-parse HEAD^{commit})"
           short_sha="$(git rev-parse --short "$tagged_commit")"
