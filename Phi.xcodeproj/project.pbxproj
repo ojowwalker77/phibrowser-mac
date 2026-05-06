@@ -181,6 +181,9 @@
 		8EC70E162F0BBF3D009FE2CD /* BookmarkItemView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8EC70E152F0BBF3D009FE2CD /* BookmarkItemView.swift */; };
 		8EC70E182F0BC77E009FE2CD /* NSImageView+Favicon.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8EC70E172F0BC77E009FE2CD /* NSImageView+Favicon.swift */; };
 		8EE5BEEC2F14FF9800698D7D /* TabCloseButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8EE5BEEB2F14FF9800698D7D /* TabCloseButton.swift */; };
+		8EEBD7692FAB137E008CBD9A /* TabGroupRun.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8EEBD7682FAB137E008CBD9A /* TabGroupRun.swift */; };
+		8EEBD76C2FAB1731008CBD9A /* TabGroupChipView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8EEBD76A2FAB1731008CBD9A /* TabGroupChipView.swift */; };
+		8EEBD76D2FAB1731008CBD9A /* TabGroupUnderlineLayer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8EEBD76B2FAB1731008CBD9A /* TabGroupUnderlineLayer.swift */; };
 		8EEC91C22F8623EB00C5336E /* ExtensionPopupAnchor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8EEC91C12F8623EB00C5336E /* ExtensionPopupAnchor.swift */; };
 		8EF36C032F4E9E7000FCC91E /* TabViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8EF36C012F4E9E7000FCC91E /* TabViewModel.swift */; };
 		8EF36C062F4E9EC100FCC91E /* TabContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8EF36C052F4E9EC100FCC91E /* TabContentView.swift */; };
@@ -554,6 +557,9 @@
 		8EC70E152F0BBF3D009FE2CD /* BookmarkItemView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BookmarkItemView.swift; sourceTree = "<group>"; };
 		8EC70E172F0BC77E009FE2CD /* NSImageView+Favicon.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "NSImageView+Favicon.swift"; sourceTree = "<group>"; };
 		8EE5BEEB2F14FF9800698D7D /* TabCloseButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TabCloseButton.swift; sourceTree = "<group>"; };
+		8EEBD7682FAB137E008CBD9A /* TabGroupRun.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TabGroupRun.swift; sourceTree = "<group>"; };
+		8EEBD76A2FAB1731008CBD9A /* TabGroupChipView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TabGroupChipView.swift; sourceTree = "<group>"; };
+		8EEBD76B2FAB1731008CBD9A /* TabGroupUnderlineLayer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TabGroupUnderlineLayer.swift; sourceTree = "<group>"; };
 		8EEC91C12F8623EB00C5336E /* ExtensionPopupAnchor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExtensionPopupAnchor.swift; sourceTree = "<group>"; };
 		8EF36C012F4E9E7000FCC91E /* TabViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TabViewModel.swift; sourceTree = "<group>"; };
 		8EF36C052F4E9EC100FCC91E /* TabContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TabContentView.swift; sourceTree = "<group>"; };
@@ -1112,6 +1118,7 @@
 		8E9E96A72F0F6E64002D0D21 /* Core */ = {
 			isa = PBXGroup;
 			children = (
+				8EEBD7682FAB137E008CBD9A /* TabGroupRun.swift */,
 				8E4C94992F10D01500B09A80 /* TabStripLayout.swift */,
 				8E9E96A52F0F6E64002D0D21 /* TabStripMetrics.swift */,
 				8E9E96A62F0F6E64002D0D21 /* TabStripState.swift */,
@@ -1122,6 +1129,8 @@
 		8E9E96A92F0F6E64002D0D21 /* Views */ = {
 			isa = PBXGroup;
 			children = (
+				8EEBD76A2FAB1731008CBD9A /* TabGroupChipView.swift */,
+				8EEBD76B2FAB1731008CBD9A /* TabGroupUnderlineLayer.swift */,
 				8EE5BEEB2F14FF9800698D7D /* TabCloseButton.swift */,
 				8E4C949B2F10DA5800B09A80 /* NewTabButton.swift */,
 				8E4C94952F10AEED00B09A80 /* TabBackgroundLayer.swift */,
@@ -1882,6 +1891,7 @@
 				37C1B2F92EE2B18700DD4496 /* OverlayToastViewController.swift in Sources */,
 				CC4351C92ECAD209009D8FC3 /* CustomSlider.swift in Sources */,
 				375B2D4F2ED07C780053FECC /* ConchFrameAnimationBaseViewController.swift in Sources */,
+				8EEBD7692FAB137E008CBD9A /* TabGroupRun.swift in Sources */,
 				CC6B00322E7941C300D4F133 /* PinnedTabItem.swift in Sources */,
 				CCBF0E912ECD7DE7005E729B /* ProfileCardViewController.swift in Sources */,
 				37DEB33A2F63F0F500129429 /* TabDataModelSchemaV1.swift in Sources */,
@@ -2076,6 +2086,8 @@
 				CC376D252EC6D5EE00270B93 /* DynamicColor+Mixing.swift in Sources */,
 				CC376D262EC6D5EE00270B93 /* DynamicColor+Color.swift in Sources */,
 				3777EEF42FC4442700C85E41 /* FloatingNewTabView.swift in Sources */,
+				8EEBD76C2FAB1731008CBD9A /* TabGroupChipView.swift in Sources */,
+				8EEBD76D2FAB1731008CBD9A /* TabGroupUnderlineLayer.swift in Sources */,
 				374BCE992F7157FD0043C656 /* TabAreaContextMenuHelper.swift in Sources */,
 				37604F632F14C52300B9FB37 /* DefaultColors.swift in Sources */,
 				37B978102EF403AB007E0568 /* GradientBorderButton.swift in Sources */,

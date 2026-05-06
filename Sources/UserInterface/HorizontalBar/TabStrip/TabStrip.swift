@@ -1659,7 +1659,7 @@ extension TabStrip: TabStripDragDelegate {
                 // B1 auto-leave: detach if the drop falls outside the
                 // pre-move range (in the run's pre-move index space).
                 if let sourceToken, let run = preMoveRun,
-                   !run.range.contains(toIndex) {
+                   toIndex < run.range.lowerBound || toIndex > run.range.upperBound + 1 {
                     AppLogDebug(
                         "[TAB_GROUPS][STRIP_DRAG] auto-leave windowId=\(browserState.windowId) " +
                         "tabId=\(tab.guid) token=\(sourceToken) " +

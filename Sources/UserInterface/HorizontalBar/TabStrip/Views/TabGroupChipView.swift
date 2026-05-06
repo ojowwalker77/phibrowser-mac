@@ -222,7 +222,7 @@ final class TabGroupChipView: NSView {
 
             countBackgroundLayer.frame = CGRect(x: countX, y: countY, width: countWidth, height: countHeight)
             countField.frame = CGRect(x: countX, y: countY + Self.countVerticalPadding,
-                                       width: countWidth, height: ceil(countTextWidth))
+                                       width: countWidth, height: countHeight - Self.countVerticalPadding * 2)
 
             let labelMaxX = countX - Self.countToLabelGap
             labelField.frame = CGRect(x: labelX, y: (bounds.height - labelHeight) / 2,
