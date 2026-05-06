@@ -32,6 +32,43 @@ struct TabStripLayoutInput {
     let gapAtIndex: Int?
     /// Gap width.
     let gapWidth: CGFloat?
+
+    /// Visible groups in this strip, in tab-strip order. Empty (default)
+    /// → engine takes the byte-equivalent ungrouped fast path.
+    let groupRuns: [GroupRun]
+
+    /// Pre-measured chip widths in `.full` mode, keyed by token.
+    /// Computed by `TabStrip` (via `TabGroupChipView.fullModeWidth(...)`)
+    /// once per chip when title / color / member count change.
+    let chipFullWidths: [String: CGFloat]
+
+    init(containerWidth: CGFloat,
+         tabCount: Int,
+         activeTabIndex: Int?,
+         spacing: CGFloat,
+         idealTabWidth: CGFloat,
+         minTabWidth: CGFloat,
+         activeTabWidth: CGFloat,
+         tabHeight: CGFloat,
+         excludedTabIndex: Int? = nil,
+         gapAtIndex: Int? = nil,
+         gapWidth: CGFloat? = nil,
+         groupRuns: [GroupRun] = [],
+         chipFullWidths: [String: CGFloat] = [:]) {
+        self.containerWidth = containerWidth
+        self.tabCount = tabCount
+        self.activeTabIndex = activeTabIndex
+        self.spacing = spacing
+        self.idealTabWidth = idealTabWidth
+        self.minTabWidth = minTabWidth
+        self.activeTabWidth = activeTabWidth
+        self.tabHeight = tabHeight
+        self.excludedTabIndex = excludedTabIndex
+        self.gapAtIndex = gapAtIndex
+        self.gapWidth = gapWidth
+        self.groupRuns = groupRuns
+        self.chipFullWidths = chipFullWidths
+    }
 }
 
 // MARK: - Layout Output
@@ -57,6 +94,29 @@ struct TabStripLayoutOutput {
     let newTabButtonFrame: CGRect
     /// Total logical content width including tabs, spacing, button, and trailing inset.
     let totalContentWidth: CGFloat
+
+    /// Frame + chosen render mode for each visible group's chip. Empty
+    /// when `groupRuns` was empty in input.
+    let chipFrames: [String: ChipPlacement]
+
+    /// Rounded-rect underline rect per **expanded** group. Collapsed
+    /// groups have no member run on the strip, so no underline. Empty
+    /// when `groupRuns` was empty in input.
+    let underlineFrames: [String: CGRect]
+
+    init(tabFrames: [CGRect],
+         separatorXPositions: [CGFloat],
+         newTabButtonFrame: CGRect,
+         totalContentWidth: CGFloat,
+         chipFrames: [String: ChipPlacement] = [:],
+         underlineFrames: [String: CGRect] = [:]) {
+        self.tabFrames = tabFrames
+        self.separatorXPositions = separatorXPositions
+        self.newTabButtonFrame = newTabButtonFrame
+        self.totalContentWidth = totalContentWidth
+        self.chipFrames = chipFrames
+        self.underlineFrames = underlineFrames
+    }
 }
 
 enum TabStripLayoutEngine {
@@ -111,6 +171,15 @@ enum TabStripLayoutEngine {
     }
 
     static func layoutNormal(input: TabStripLayoutInput) -> TabStripLayoutOutput {
+        // Fast path: no groups in this window — execute the original
+        // ungrouped logic byte-equivalent.
+        if input.groupRuns.isEmpty {
+            return layoutNormalUngrouped(input: input)
+        }
+        return layoutNormalWithGroups(input: input)
+    }
+
+    private static func layoutNormalUngrouped(input: TabStripLayoutInput) -> TabStripLayoutOutput {
         // Start offset keeps the leading inverse corner visible.
         let startOffsetX = calculateStartXOffset()
         // Fixed spacing and separator overhead per tab.
@@ -236,6 +305,200 @@ enum TabStripLayoutEngine {
             totalContentWidth: totalWidth
         )
     }
+    /// Group-aware variant. Decides chip mode (all-or-nothing — every
+    /// chip in the strip switches together) by trying `.full` first; if
+    /// the resulting `baseWidth` would force tabs below the
+    /// compact-mode threshold (64pt, mirroring
+    /// `TabStripMetrics.Content.compactModeThreshold`), all chips switch
+    /// to `.compact` and the allocation re-runs. The three-tier width
+    /// allocation (Spacious / Medium / Tight) and active-tab protection
+    /// are byte-identical to `layoutNormalUngrouped` — they just receive
+    /// a smaller `availableForTabs`.
+    private static func layoutNormalWithGroups(input: TabStripLayoutInput) -> TabStripLayoutOutput {
+        let startOffsetX = calculateStartXOffset()
+        let perTabOverhead: CGFloat = input.spacing * 2 + 1.0
+        let btnSize = TabStripMetrics.NewTabButton.size
+        let buttonOverhead = btnSize.width + TabStripMetrics.NewTabButton.insets.right
+        let chipModeThreshold: CGFloat = TabStripMetrics.Content.compactModeThreshold
+
+        // ── Effective tab count: exclude collapsed-group members and
+        // (optionally) the dragged tab.
+        let collapsedMemberSet: Set<Int> = input.groupRuns
+            .filter { $0.isCollapsed }
+            .reduce(into: Set<Int>()) { acc, run in
+                for i in run.range { acc.insert(i) }
+            }
+        var effectiveTabCount = input.tabCount - collapsedMemberSet.count
+        if let excluded = input.excludedTabIndex,
+           !collapsedMemberSet.contains(excluded) {
+            effectiveTabCount -= 1
+        }
+        effectiveTabCount = max(0, effectiveTabCount)
+
+        // ── Per-chip slot width = chip width + spacing-after-chip.
+        // Visible groups are all groups (collapsed and expanded both have
+        // a chip on the strip).
+        let visibleTokens = input.groupRuns.map { $0.token }
+
+        let chipsFullOverhead: CGFloat = visibleTokens.reduce(0.0) { acc, token in
+            acc + (input.chipFullWidths[token] ?? 0) + input.spacing
+        }
+        let chipsCompactOverhead: CGFloat =
+            CGFloat(visibleTokens.count) * (TabGroupChipView.compactWidth + input.spacing)
+
+        var fixedOverheadBase = startOffsetX
+                              + CGFloat(effectiveTabCount) * perTabOverhead
+                              + input.spacing
+                              + buttonOverhead
+        if let gapWidth = input.gapWidth, input.gapAtIndex != nil {
+            fixedOverheadBase += gapWidth
+        }
+
+        // ── Try full mode first.
+        var chipMode: ChipMode = .full
+        var availableForTabs = input.containerWidth - fixedOverheadBase - chipsFullOverhead
+        var baseWidth: CGFloat = effectiveTabCount > 0
+            ? max(0, availableForTabs / CGFloat(effectiveTabCount))
+            : 0
+        if baseWidth < chipModeThreshold {
+            chipMode = .compact
+            availableForTabs = input.containerWidth - fixedOverheadBase - chipsCompactOverhead
+            baseWidth = effectiveTabCount > 0
+                ? max(0, availableForTabs / CGFloat(effectiveTabCount))
+                : 0
+        }
+
+        // ── Width allocation — byte-identical logic to ungrouped path.
+        var activeW: CGFloat = input.idealTabWidth
+        var inactiveW: CGFloat = input.idealTabWidth
+        if effectiveTabCount > 0 {
+            if baseWidth >= input.idealTabWidth {
+                activeW = input.idealTabWidth
+                inactiveW = input.idealTabWidth
+            } else if baseWidth >= input.activeTabWidth {
+                activeW = baseWidth
+                inactiveW = baseWidth
+            } else {
+                let activeIdx = input.activeTabIndex
+                let isActiveExcluded = (input.excludedTabIndex != nil && input.excludedTabIndex == activeIdx)
+                let isActiveCollapsed = activeIdx.map { collapsedMemberSet.contains($0) } ?? false
+                if activeIdx != nil && !isActiveExcluded && !isActiveCollapsed {
+                    activeW = input.activeTabWidth
+                    let remainingForInactive = availableForTabs - activeW
+                    let inactiveCount = effectiveTabCount - 1
+                    inactiveW = inactiveCount > 0 ? remainingForInactive / CGFloat(inactiveCount) : 0
+                } else {
+                    activeW = baseWidth
+                    inactiveW = baseWidth
+                }
+            }
+            if inactiveW < input.minTabWidth { inactiveW = input.minTabWidth }
+            if activeW < input.minTabWidth { activeW = input.minTabWidth }
+        }
+
+        // ── Build a fast lookup for "which run starts at this index".
+        let runStarts: [Int: GroupRun] = Dictionary(
+            uniqueKeysWithValues: input.groupRuns.map { ($0.range.lowerBound, $0) }
+        )
+
+        var tabFrames: [CGRect] = []
+        var separatorXs: [CGFloat] = []
+        var chipFrames: [String: ChipPlacement] = [:]
+        var memberMinX: [String: CGFloat] = [:]
+        var memberMaxX: [String: CGFloat] = [:]
+
+        var currentX = startOffsetX
+
+        for i in 0..<input.tabCount {
+            // Insert chip slot at every group start.
+            if let run = runStarts[i] {
+                let chipWidth: CGFloat = (chipMode == .full)
+                    ? (input.chipFullWidths[run.token] ?? TabGroupChipView.compactWidth)
+                    : TabGroupChipView.compactWidth
+                // Chip Y centers within the tab cell (not the full strip),
+                // so chip baseline sits 5pt above tab-cell baseline:
+                // Strip.bottomSpacing (4) + (Strip.tabHeight (32) - Chip.height (22)) / 2 = 9.
+                let chipY = TabStripMetrics.Strip.bottomSpacing
+                          + (TabStripMetrics.Strip.tabHeight - TabGroupChipView.height) / 2.0
+                let chipFrame = CGRect(x: currentX, y: chipY,
+                                        width: chipWidth, height: TabGroupChipView.height)
+                chipFrames[run.token] = ChipPlacement(frame: chipFrame, mode: chipMode)
+                currentX += chipWidth + input.spacing
+            }
+
+            // Drag-gap insertion (unchanged behavior).
+            if let gapIndex = input.gapAtIndex, let gapW = input.gapWidth, i == gapIndex {
+                currentX += gapW
+            }
+
+            // Excluded (dragged) tab placeholder.
+            if let excluded = input.excludedTabIndex, i == excluded {
+                tabFrames.append(.zero)
+                separatorXs.append(-1000)
+                continue
+            }
+
+            // Collapsed-group member: skip frame allocation.
+            if collapsedMemberSet.contains(i) {
+                tabFrames.append(.zero)
+                separatorXs.append(-1000)
+                continue
+            }
+
+            currentX += input.spacing
+            let isActive = (input.activeTabIndex != nil && i == input.activeTabIndex!)
+            let width = isActive ? activeW : inactiveW
+            let frame = CGRect(x: currentX, y: TabStripMetrics.Strip.bottomSpacing,
+                                width: width, height: input.tabHeight)
+            tabFrames.append(frame)
+
+            // Track group min/max X for underline derivation.
+            for run in input.groupRuns where run.range.contains(i) {
+                memberMinX[run.token] = min(memberMinX[run.token] ?? CGFloat.infinity, frame.minX)
+                memberMaxX[run.token] = max(memberMaxX[run.token] ?? -CGFloat.infinity, frame.maxX)
+            }
+
+            currentX += width
+            let separatorX = currentX + input.spacing
+            separatorXs.append(separatorX)
+            currentX += input.spacing + 1.0
+        }
+
+        if let gapIndex = input.gapAtIndex, let gapW = input.gapWidth,
+           gapIndex >= input.tabCount {
+            currentX += gapW
+        }
+        currentX += input.spacing
+
+        let newTabFrame = CGRect(x: currentX, y: TabStripMetrics.Strip.bottomSpacing,
+                                  width: btnSize.width, height: btnSize.height)
+        currentX += btnSize.width + TabStripMetrics.NewTabButton.insets.right
+        let totalWidth = currentX
+
+        // ── Underline rects: only for expanded groups with members.
+        var underlineFrames: [String: CGRect] = [:]
+        for run in input.groupRuns where !run.isCollapsed {
+            guard let lo = memberMinX[run.token], let hi = memberMaxX[run.token] else {
+                continue
+            }
+            let x = lo + 2
+            let w = max(0, hi - lo - 4)
+            // Strip-local Y: 1pt above strip bottom, 3pt tall.
+            underlineFrames[run.token] = CGRect(
+                x: x, y: 1, width: w, height: TabGroupUnderlineLayer.height
+            )
+        }
+
+        return TabStripLayoutOutput(
+            tabFrames: tabFrames,
+            separatorXPositions: separatorXs,
+            newTabButtonFrame: newTabFrame,
+            totalContentWidth: totalWidth,
+            chipFrames: chipFrames,
+            underlineFrames: underlineFrames
+        )
+    }
+
     private static func calculateStartXOffset() -> CGFloat {
         // Preserve enough leading room so the inverse corner does not get clipped.
         return max(0, TabStripMetrics.Tab.inverseCornerRadius - TabStripMetrics.Tab.spacing)
