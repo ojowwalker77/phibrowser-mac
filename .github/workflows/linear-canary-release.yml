@@ -62,3 +62,12 @@ jobs:
           version: ${{ steps.dev-check.outputs.version }}
           name: ${{ steps.dev-check.outputs.name }}
           log_level: verbose
+
+      - name: Complete Linear canary release
+        if: steps.dev-check.outputs.should_publish == 'true'
+        uses: linear/linear-release-action@v0
+        with:
+          access_key: ${{ secrets.LINEAR_CANARY_ACCESS_KEY }}
+          command: complete
+          version: ${{ steps.dev-check.outputs.version }}
+          log_level: verbose
