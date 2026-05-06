@@ -66,6 +66,16 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
     private var normalTabViews: [String: TabItemView] = [:]
     /// Reusable separator views.
     private var separatorViews: [NSView] = []
+
+    // MARK: - Group view pools
+    private var chipViews: [String: TabGroupChipView] = [:]
+    private var underlineLayers: [String: TabGroupUnderlineLayer] = [:]
+
+    /// Pre-measured chip widths in `.full` mode, keyed by token. Refreshed
+    /// when title / color / member count changes; passed to the layout
+    /// engine via `TabStripLayoutInput.chipFullWidths`.
+    private var chipFullWidths: [String: CGFloat] = [:]
+
     /// Hovered normal-tab index.
     private var hoveredTabIndex: Int?
 
@@ -434,6 +444,11 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
         pinnedTabViews.removeAll()
         normalTabViews.removeAll()
         separatorViews.removeAll()
+        chipViews.values.forEach { $0.removeFromSuperview() }
+        chipViews.removeAll()
+        underlineLayers.values.forEach { $0.removeFromSuperlayer() }
+        underlineLayers.removeAll()
+        chipFullWidths.removeAll()
 
         hoveredTabIndex = nil
         currentScrollOffset = 0
@@ -467,13 +482,18 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
                     self.pinnedContainer.layer?.backgroundColor = NSColor(resource: .sidebarTabHovered).cgColor
                 }
 
-                // Detect tab close by watching the normal-tab count drop.
                 let isTabClosed = normalTabs.count < self.previousNormalTabCount
                 self.previousNormalTabCount = normalTabs.count
 
-                // Keep widths stable when the pointer is still inside the strip.
                 if isTabClosed && self.isMouseInside() {
                     self.lockLayoutIfNeeded()
+                }
+
+                // Refresh chip widths for any group whose member count
+                // affects the rendered title (auto-named groups always;
+                // user-named groups only the count badge).
+                for token in self.browserState.groups.keys {
+                    self.refreshChipWidth(for: token)
                 }
 
                 self.performLayout(context: .dataChanged) {
@@ -482,6 +502,23 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
                     }
                 }
                 self.needsLayout = true
+            }
+            .store(in: &cancellables)
+
+        // Group dictionary itself: handle add / remove / visual changes.
+        browserState.$groups
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] groups in
+                guard let self = self, self.isActive else { return }
+                // Drop chip-width entries for vanished groups.
+                let liveTokens = Set(groups.keys)
+                self.chipFullWidths = self.chipFullWidths.filter { liveTokens.contains($0.key) }
+                // Refresh widths for surviving groups (color / title /
+                // collapsed flag may have flipped).
+                for token in groups.keys {
+                    self.refreshChipWidth(for: token)
+                }
+                self.performLayout(context: .dataChanged)
             }
             .store(in: &cancellables)
     }
@@ -647,6 +684,7 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
             )
         } else {
             let activeIndex = tabs.firstIndex { isTabActive($0, activeTab: activeTab) }
+            let runs = currentGroupRuns()
             let input = TabStripLayoutInput(
                 containerWidth: containerWidth,
                 tabCount: tabs.count,
@@ -658,7 +696,9 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
                 tabHeight: TabStripMetrics.Strip.tabHeight,
                 excludedTabIndex: excludedIndex,
                 gapAtIndex: gapIndex,
-                gapWidth: gapWidth
+                gapWidth: gapWidth,
+                groupRuns: isPinned ? [] : runs,
+                chipFullWidths: isPinned ? [:] : chipFullWidths
             )
             return TabStripLayoutEngine.layoutNormal(input: input)
         }
@@ -800,6 +840,9 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
                     frame.origin.x -= currentScrollOffset
                 }
                 view.frame = frame
+                // Collapsed members: engine emitted .zero; hide alpha so
+                // hidden cells don't leak hover/click hit-testing.
+                view.alphaValue = (frame == .zero) ? 0 : 1
             }
         }
 
@@ -833,6 +876,111 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
             lastContentWidth = layoutOutput.totalContentWidth
             updateNormalContainerMask()
         }
+
+        // Chip + underline placement runs only for the normal zone and
+        // only when the engine output carries placements (ungrouped
+        // strips emit empty dictionaries).
+        if !isPinned {
+            applyGroupPlacements(
+                container: container,
+                chipFrames: layoutOutput.chipFrames,
+                underlineFrames: layoutOutput.underlineFrames
+            )
+        }
+    }
+
+    /// Allocates / reuses chip views and underline layers, sets their
+    /// frames (with scroll offset baked in), and tears down stale
+    /// entries. Called from `applyLayout` for the normal zone only.
+    private func applyGroupPlacements(
+        container: NSView,
+        chipFrames: [String: ChipPlacement],
+        underlineFrames: [String: CGRect]
+    ) {
+        // ── Chip views.
+        for (token, placement) in chipFrames {
+            let chip: TabGroupChipView
+            if let existing = chipViews[token] {
+                chip = existing
+            } else {
+                chip = TabGroupChipView()
+                container.addSubview(chip)
+                chipViews[token] = chip
+                chip.onClick = { [weak self] tappedToken in
+                    self?.handleChipClick(token: tappedToken)
+                }
+                chip.onMenuRequest = { [weak self] tappedToken in
+                    self?.makeChipMenu(token: tappedToken)
+                }
+            }
+            guard let group = browserState.groups[token] else { continue }
+            let memberCount = browserState.normalTabs
+                .lazy.filter { $0.groupToken == token }.count
+            chip.configure(
+                token: token,
+                color: group.color,
+                displayTitle: group.displayTitle(memberCount: memberCount),
+                memberCount: memberCount,
+                hasUserSetTitle: group.hasUserSetTitle,
+                mode: placement.mode
+            )
+            var f = placement.frame
+            f.origin.x -= currentScrollOffset
+            chip.frame = f
+            chip.layer?.zPosition = 50  // Above tab cells (10) and below drag overlay (999).
+        }
+        // Tear down chips for vanished groups.
+        for (token, view) in chipViews where chipFrames[token] == nil {
+            view.removeFromSuperview()
+            chipViews.removeValue(forKey: token)
+        }
+
+        // ── Underline layers.
+        for (token, rect) in underlineFrames {
+            let layer: TabGroupUnderlineLayer
+            if let existing = underlineLayers[token] {
+                layer = existing
+            } else {
+                layer = TabGroupUnderlineLayer()
+                container.layer?.addSublayer(layer)
+                layer.zPosition = -10  // Below TabItemView layers.
+                underlineLayers[token] = layer
+            }
+            if let group = browserState.groups[token] {
+                layer.setColor(group.color.nsColor)
+            }
+            var r = rect
+            r.origin.x -= currentScrollOffset
+            layer.setFrameAndPath(r)
+        }
+        // Tear down underlines for collapsed or vanished groups.
+        for (token, layer) in underlineLayers where underlineFrames[token] == nil {
+            layer.removeFromSuperlayer()
+            underlineLayers.removeValue(forKey: token)
+        }
+    }
+
+    private func handleChipClick(token: String) {
+        guard let group = browserState.groups[token] else { return }
+        let next = !group.isCollapsed
+        AppLogDebug(
+            "[TAB_GROUPS][STRIP] chip click windowId=\(browserState.windowId) " +
+            "token=\(token) collapsed=\(group.isCollapsed)→\(next)"
+        )
+        ChromiumLauncher.sharedInstance().bridge?.updateTabGroupCollapsed(
+            withWindowId: Int64(browserState.windowId),
+            tokenHex: token,
+            isCollapsed: next
+        )
+    }
+
+    @MainActor
+    private func makeChipMenu(token: String) -> NSMenu? {
+        guard let group = browserState.groups[token] else { return nil }
+        let item = TabGroupSidebarItem(group: group, browserState: browserState)
+        let menu = NSMenu()
+        item.makeContextMenu(on: menu)
+        return menu.items.isEmpty ? nil : menu
     }
 
     private func performLayout(context: TabStripAnimationContext, completion: (() -> Void)? = nil) {
@@ -886,6 +1034,46 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
     // MARK: - Helper Methods
     private func tabId(for tab: Tab) -> String {
         return tab.uniqueId
+    }
+
+    /// Walks `browserState.normalTabs` and emits one `GroupRun` per
+    /// maximal stretch of adjacent tabs sharing the same `groupToken`.
+    /// Used both by the layout engine input and the drag-end auto-leave
+    /// check, so both agree on group ranges within a single layout cycle.
+    private func currentGroupRuns() -> [GroupRun] {
+        let tabs = browserState.normalTabs
+        var runs: [GroupRun] = []
+        var i = 0
+        while i < tabs.count {
+            guard let token = tabs[i].groupToken else { i += 1; continue }
+            var j = i
+            while j + 1 < tabs.count && tabs[j + 1].groupToken == token {
+                j += 1
+            }
+            let isCollapsed = browserState.groups[token]?.isCollapsed ?? false
+            runs.append(GroupRun(token: token, range: i...j, isCollapsed: isCollapsed))
+            i = j + 1
+        }
+        return runs
+    }
+
+    /// Re-measures the full-mode chip width for `token`. Called on group
+    /// creation and whenever the group's title / color / member count
+    /// changes (or when the tab list changes for an auto-named group).
+    private func refreshChipWidth(for token: String) {
+        guard let group = browserState.groups[token] else {
+            chipFullWidths.removeValue(forKey: token)
+            return
+        }
+        let memberCount = browserState.normalTabs
+            .lazy.filter { $0.groupToken == token }.count
+        let title = group.displayTitle(memberCount: memberCount)
+        let width = TabGroupChipView.fullModeWidth(
+            forTitle: title,
+            hasUserSetTitle: group.hasUserSetTitle,
+            memberCount: memberCount
+        )
+        chipFullWidths[token] = width
     }
 
     private func updateNormalContainerMask() {
