@@ -1732,6 +1732,30 @@ extension TabStrip: TabStripDragDelegate {
                         tabIds: [NSNumber(value: Int64(tab.guid))]
                     )
                 }
+
+                // Auto-join: detect when the post-move position is
+                // sandwiched between two members of a *different*
+                // group and join that group, so the strip never holds
+                // a non-grouped tab interrupting a group's run (which
+                // would split the run in two and trigger the
+                // empty-chip-slot artifact in layoutNormalWithGroups).
+                let postMoveIdx = (originalIndex < toIndex) ? max(0, toIndex - 1) : toIndex
+                let postMoveTabs = browserState.normalTabs
+                if postMoveIdx > 0, postMoveIdx < postMoveTabs.count - 1,
+                   let leftToken = postMoveTabs[postMoveIdx - 1].groupToken,
+                   let rightToken = postMoveTabs[postMoveIdx + 1].groupToken,
+                   leftToken == rightToken,
+                   leftToken != tab.groupToken {
+                    AppLogDebug(
+                        "[TAB_GROUPS][STRIP_DRAG] auto-join windowId=\(browserState.windowId) " +
+                        "tabId=\(tab.guid) token=\(leftToken) postMoveIdx=\(postMoveIdx)"
+                    )
+                    ChromiumLauncher.sharedInstance().bridge?.addTabsToGroup(
+                        withWindowId: Int64(browserState.windowId),
+                        tabIds: [NSNumber(value: Int64(tab.guid))],
+                        tokenHex: leftToken
+                    )
+                }
             }
         }
 
