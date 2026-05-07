@@ -48,6 +48,13 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
     // MARK: - Dependencies
     private let browserState: BrowserState
     private var cancellables = Set<AnyCancellable>()
+    /// Per-group `objectWillChange` subscriptions. `WebContentGroupInfo`
+    /// is a class — its title / color / collapsed mutations don't
+    /// republish `BrowserState.$groups`, and tab → group membership
+    /// flips don't republish `$normalTabs` either. Both nudge
+    /// `info.objectWillChange.send()`, so we mirror the sidebar's
+    /// approach and re-subscribe whenever the dictionary changes.
+    private var groupChangeCancellables: [String: AnyCancellable] = [:]
     private let dragController = TabStripDragController()
     private var isActive = false
 
@@ -410,6 +417,7 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
         guard isActive else { return }
         isActive = false
         cancellables.removeAll()
+        groupChangeCancellables.removeAll()
         clearInactiveContent()
     }
 
@@ -518,9 +526,33 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
                 for token in groups.keys {
                     self.refreshChipWidth(for: token)
                 }
+                self.rebuildGroupChangeSubscriptions(groups: groups)
                 self.performLayout(context: .dataChanged)
             }
             .store(in: &cancellables)
+    }
+
+    /// (Re)subscribes to each `WebContentGroupInfo.objectWillChange` so
+    /// the strip relays out when membership flips (`Tab.groupToken` set
+    /// via `handleTabJoinedGroup` / `handleTabLeftGroup`) or when a
+    /// group's title / color / collapsed flag mutates without a
+    /// `groups` dictionary reassignment (`handleTabGroupVisualDataChanged`).
+    /// Without this, the chip's auto-name count badge and underline
+    /// color stay stale until the next unrelated relayout.
+    private func rebuildGroupChangeSubscriptions(groups: [String: WebContentGroupInfo]) {
+        let liveTokens = Set(groups.keys)
+        // Drop subscriptions for vanished groups.
+        groupChangeCancellables = groupChangeCancellables.filter { liveTokens.contains($0.key) }
+        // Add subscriptions for new groups.
+        for (token, info) in groups where groupChangeCancellables[token] == nil {
+            groupChangeCancellables[token] = info.objectWillChange
+                .receive(on: DispatchQueue.main)
+                .sink { [weak self] _ in
+                    guard let self = self, self.isActive else { return }
+                    self.refreshChipWidth(for: token)
+                    self.performLayout(context: .dataChanged)
+                }
+        }
     }
 
     private func isMouseInside() -> Bool {
