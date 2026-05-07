@@ -220,11 +220,11 @@ final class PhiBrowserTests: XCTestCase {
 
         XCTAssertEqual(folderItem.title, "Empty Folder")
         XCTAssertEqual(
-            emptyItem??.title,
+            emptyItem?.title,
             NSLocalizedString("Empty", comment: "Bookmarks menu - Disabled placeholder item shown when a bookmark folder has no child bookmarks")
         )
         XCTAssertFalse(
-            emptyItem??.isEnabled == true,
+            emptyItem?.isEnabled == true,
             "Empty bookmark folders should show a disabled placeholder item so the submenu still renders a stable empty state."
         )
     }
@@ -267,6 +267,7 @@ final class PhiBrowserTests: XCTestCase {
         )
     }
 
+    @MainActor
     func testExtensionPopupAnchorUsesPrimaryScreenHeightForChromiumFlip() {
         let point = NSPoint(x: 240, y: 320)
         let primaryFrame = NSRect(x: 0, y: 0, width: 1920, height: 900)
@@ -284,6 +285,7 @@ final class PhiBrowserTests: XCTestCase {
         )
     }
 
+    @MainActor
     func testExtensionPopupAnchorPreservesLegitimateNegativeChromiumY() {
         let point = NSPoint(x: 120, y: 960)
         let primaryFrame = NSRect(x: 0, y: 0, width: 1920, height: 900)
