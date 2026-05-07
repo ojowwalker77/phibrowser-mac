@@ -245,6 +245,21 @@ class WebContentContainerViewController: NSViewController {
             guard let self else { return }
             self.outerBorderLayer.strokeColor = ThemedColor.border.resolve(in: self.view).cgColor
         }
+
+        // Group-tint stroke for the active tab outline. Same path geometry
+        // as the corresponding portion of `outerBorderLayer`, painted on
+        // top to mask the default gray with the group color.
+        activeTabGroupTintLayer.fillColor = NSColor.clear.cgColor
+        activeTabGroupTintLayer.strokeColor = NSColor.clear.cgColor
+        activeTabGroupTintLayer.lineWidth = 1
+        activeTabGroupTintLayer.lineCap = .butt
+        activeTabGroupTintLayer.lineJoin = .round
+        activeTabGroupTintLayer.zPosition = LayerZIndex.contentOuterBorder + 1
+        activeTabGroupTintLayer.actions = [
+            "strokeColor": NSNull(),
+            "lineWidth": NSNull()
+        ]
+        view.layer?.addSublayer(activeTabGroupTintLayer)
         
         // Add resize handle for sidebar adjustment
         view.addSubview(resizeHandle)
