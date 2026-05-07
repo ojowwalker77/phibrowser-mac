@@ -917,6 +917,18 @@ class BrowserState {
     /// existing last member.
     private func relocateJoinerIntoGroupRun(tabId: Int, token: String) {
         guard let currentIdx = normalTabOrder.firstIndex(of: tabId) else { return }
+        // If the joiner is already next to an existing member of the
+        // same group, the run is contiguous as-is — preserve the
+        // joiner's current position. Important for the drag-drop
+        // auto-join path, where the user just chose where to insert
+        // the tab (e.g. on the group's leading edge); forcing it to
+        // the trailing edge would override that choice.
+        let leftIsMember = currentIdx > 0
+            && tabs.first(where: { $0.guid == normalTabOrder[currentIdx - 1] })?.groupToken == token
+        let rightIsMember = currentIdx + 1 < normalTabOrder.count
+            && tabs.first(where: { $0.guid == normalTabOrder[currentIdx + 1] })?.groupToken == token
+        if leftIsMember || rightIsMember { return }
+
         var lastOtherIdx: Int?
         for (idx, guid) in normalTabOrder.enumerated() where idx != currentIdx {
             guard let other = tabs.first(where: { $0.guid == guid }),
@@ -926,8 +938,6 @@ class BrowserState {
             }
         }
         guard let lastOther = lastOtherIdx else { return }
-        // Already directly after the last existing member — no-op.
-        if currentIdx == lastOther + 1 { return }
         // Post-removal indexing: removing currentIdx shifts everything
         // after it down by one, so when the joiner was *after* the
         // last member we re-insert at lastOther+1, otherwise at
