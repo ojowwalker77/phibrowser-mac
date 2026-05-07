@@ -423,6 +423,12 @@ enum TabStripLayoutEngine {
                 let chipFrame = CGRect(x: currentX, y: chipY,
                                         width: chipWidth, height: TabGroupChipView.height)
                 chipFrames[run.token] = ChipPlacement(frame: chipFrame, mode: chipMode)
+                // Seed the underline range with the chip's leading
+                // edge so the underline runs continuously from chip
+                // through the last member tab. Without this seed the
+                // underline starts at the first tab's minX, leaving
+                // a visual gap that makes the chip look unrelated.
+                memberMinX[run.token] = chipFrame.minX
                 currentX += chipWidth + input.spacing
             }
 
