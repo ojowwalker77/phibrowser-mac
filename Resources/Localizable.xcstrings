@@ -103,6 +103,28 @@
     "/**/Window Background" : {
       "comment" : "[EXAMPLE] Theme example: window background label"
     },
+    "%@ · %d tabs" : {
+      "comment" : "Tab Groups - auto-generated group title, e.g. 'Blue · 3 tabs'",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@ · %2$d tabs"
+          }
+        }
+      }
+    },
+    "%@ tab group, %d tabs" : {
+      "comment" : "Tab Groups - VoiceOver label for horizontal-strip group chip",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@ tab group, %2$d tabs"
+          }
+        }
+      }
+    },
     "%d days ago" : {
       "comment" : "Download item row - Relative time showing days since download completed"
     },
@@ -111,6 +133,9 @@
     },
     "%d min ago" : {
       "comment" : "Download item row - Relative time showing minutes since download completed"
+    },
+    "%lld" : {
+
     },
     "%lld/%lld" : {
       "localizations" : {
@@ -139,6 +164,9 @@
     },
     "Add to Folder" : {
       "comment" : "Tab context menu - Menu item to add tab to bookmarks"
+    },
+    "Add to Group" : {
+      "comment" : "Tab context menu - Submenu to add this tab to an existing tab group"
     },
     "Additional browser settings" : {
       "comment" : "General settings - Title for always more settings"
@@ -209,6 +237,9 @@
     "Balanced" : {
       "comment" : "Layout option - Vertical tabs with address bar at the top of webcontent\nOnboarding layout selection - Balanced option"
     },
+    "Blue" : {
+      "comment" : "Tab Groups - color name shown in auto-named group title and color picker"
+    },
     "Bookmark All Tabs" : {
       "comment" : "Tab area context menu - Bookmark all open tabs"
     },
@@ -273,6 +304,9 @@
     "Certificate is valid" : {
       "comment" : "Address bar menu - Certificate validity status"
     },
+    "Change Color" : {
+      "comment" : "Tab group context menu - Submenu to change the group color"
+    },
     "Change Name" : {
       "comment" : "Account settings - Dialog title for changing user name"
     },
@@ -300,17 +334,26 @@
     "Click " : {
       "comment" : "Phi Link - Custom bot guide prefix"
     },
+    "Click to collapse or expand group" : {
+      "comment" : "Tab Groups - cursor tooltip for horizontal-strip group chip"
+    },
     "Click to install update" : {
       "comment" : "Phi menu - Menu item text when update is ready to install"
     },
     "Close" : {
       "comment" : "Sidebar update reminder - Accessibility description for close button\nTab context menu - Menu item to close the selected tab"
     },
+    "Close Group" : {
+      "comment" : "Tab group context menu - Close the group and all its tabs"
+    },
     "Close Other Tabs" : {
       "comment" : "Tab context menu - Menu item to close all tabs except the selected one"
     },
     "Code Examples" : {
 
+    },
+    "Collapse Group" : {
+      "comment" : "Tab group context menu - Collapse an expanded group"
     },
     "Color" : {
       "comment" : "General settings - Theme color row title"
@@ -371,6 +414,9 @@
     },
     "Custom Telegram bot" : {
       "comment" : "Phi Link - Custom bot title"
+    },
+    "Cyan" : {
+      "comment" : "Tab Groups - color name shown in auto-named group title and color picker"
     },
     "Dark" : {
       "comment" : "Appearance choice: always dark mode"
@@ -452,6 +498,9 @@
     },
     "Error" : {
       "comment" : "Phi Link - Custom bot generic error text"
+    },
+    "Expand Group" : {
+      "comment" : "Tab group context menu - Expand a collapsed group"
     },
     "Export" : {
       "comment" : "Help menu - NSSavePanel primary button title for confirming log export save location"
@@ -536,6 +585,12 @@
     },
     "Go to the browser to complete log in" : {
       "comment" : "Waiting view title shown during login process in onboarding"
+    },
+    "Green" : {
+      "comment" : "Tab Groups - color name shown in auto-named group title and color picker"
+    },
+    "Grey" : {
+      "comment" : "Tab Groups - color name shown in auto-named group title and color picker"
     },
     "here to begin the @BotFather" : {
       "comment" : "Phi Link - Custom bot guide link text"
@@ -633,6 +688,9 @@
     "Layout selection" : {
       "comment" : "Onboarding layout selection - Page title"
     },
+    "Leave empty to use the auto-generated name." : {
+      "comment" : "Tab group rename alert - Hint that empty title clears to auto-name"
+    },
     "Light" : {
       "comment" : "Appearance choice: always light mode"
     },
@@ -681,6 +739,12 @@
     "More Settings" : {
       "comment" : "Address bar menu - Settings submenu item to open settings page\nExtension list - Website settings item to open more settings"
     },
+    "Move to Group" : {
+      "comment" : "Tab context menu - Submenu to move this tab to another tab group"
+    },
+    "Move to New Group" : {
+      "comment" : "Tab context menu - Move this tab out of its current group into a newly created group"
+    },
     "Mute" : {
       "comment" : "Notification menu option - Disable auto popup for notification cards\nTab mute button tooltip - mute"
     },
@@ -710,6 +774,12 @@
     },
     "New tab behavior" : {
       "comment" : "General settings - Row title for configuring new tab behavior"
+    },
+    "New Tab Group" : {
+      "comment" : "Tab context menu - Add this tab to a newly created tab group"
+    },
+    "New Tab in Group" : {
+      "comment" : "Tab group context menu - Open a new tab inside this group"
     },
     "New Tab Page" : {
       "comment" : "AI settings - Section title for new tab page options\nGeneral settings - Option to open New Tab Page when pressing ⌘+T"
@@ -789,6 +859,9 @@
     "Open User Data Directory" : {
       "comment" : "Debug menu item to reveal the current user's data storage directory in Finder"
     },
+    "Orange" : {
+      "comment" : "Tab Groups - color name shown in auto-named group title and color picker"
+    },
     "Passwords Manager" : {
       "comment" : "Onboarding password manager - Page title"
     },
@@ -852,6 +925,9 @@
     "Pure" : {
       "comment" : "Pure theme name"
     },
+    "Purple" : {
+      "comment" : "Tab Groups - color name shown in auto-named group title and color picker"
+    },
     "QR code expired. Generate a fresh one to continue." : {
       "comment" : "Phi Link - Official bot QR expired hint"
     },
@@ -870,6 +946,9 @@
     "Recommended" : {
       "comment" : "Onboarding password manager - Recommended label for iCloud Passwords"
     },
+    "Red" : {
+      "comment" : "Tab Groups - color name shown in auto-named group title and color picker"
+    },
     "Refresh" : {
       "comment" : "Phi Link - Official bot refresh QR action\nWeb content header - Accessibility description for refresh page button"
     },
@@ -879,11 +958,17 @@
     "Remove" : {
       "comment" : "Bookmark editor - Remove bookmark button title (CMD+D toggle)\nDownload item row - Tooltip for remove download button\nIM Channels - Custom bot remove action"
     },
+    "Remove from Group" : {
+      "comment" : "Tab context menu - Remove this tab from its tab group"
+    },
     "Remove from list" : {
       "comment" : "Download item row - Menu option to remove download from list"
     },
     "Rename" : {
       "comment" : "Rename folder or bookmark dialog title"
+    },
+    "Rename Group" : {
+      "comment" : "Tab group context menu - Rename the group\nTab group rename alert - Title"
     },
     "Rename..." : {
       "comment" : "Bookmark Rename menu item"
@@ -916,7 +1001,7 @@
       "comment" : "Notification card run button - Executes the suggested action"
     },
     "Save" : {
-      "comment" : "Account settings - Save button in rename dialog\nDebug clear data - NSSavePanel confirm button title when saving Phi user data backup zip\nEditor - Save button title\nIM Channels - Custom bot save button"
+      "comment" : "Account settings - Save button in rename dialog\nDebug clear data - NSSavePanel confirm button title when saving Phi user data backup zip\nEditor - Save button title\nIM Channels - Custom bot save button\nTab group rename alert - Confirm button"
     },
     "Scan the QR code with your phone camera or click on the button below to add Phi Link bot to your Telegram" : {
       "comment" : "Phi Link - Official bot QR hint"
@@ -1053,6 +1138,9 @@
     "Turn Off Connectors?" : {
       "comment" : "AI settings - Confirmation alert title when disabling external data connectors"
     },
+    "Ungroup" : {
+      "comment" : "Tab group context menu - Dissolve the group, keeping the tabs"
+    },
     "Unknown" : {
       "comment" : "Address bar menu - Website security unknown\nWebsite security unknown"
     },
@@ -1129,6 +1217,9 @@
     },
     "What's New" : {
       "comment" : "Help menu - Menu item that opens the chrome://whats-new page in a new tab, placed right below 'Report an Issue'"
+    },
+    "Yellow" : {
+      "comment" : "Tab Groups - color name shown in auto-named group title and color picker"
     },
     "Yesterday" : {
       "comment" : "Download item row - Relative time when download completed yesterday"

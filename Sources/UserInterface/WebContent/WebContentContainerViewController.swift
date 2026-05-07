@@ -122,6 +122,20 @@ class WebContentContainerViewController: NSViewController {
     private let outerBorderLayer = CAShapeLayer()
     private var outerBorderThemeObservation: AnyObject?
 
+    /// Sibling stroke that traces *just* the active tab's outline portion
+    /// (the part `appendActiveTabOutline` produces). Painted in the active
+    /// tab's group color when the tab belongs to a group, with the same
+    /// 1pt lineWidth as `outerBorderLayer`, so it covers the underlying
+    /// gray pixel-for-pixel along the same path. `path = nil` whenever the
+    /// active tab is ungrouped or no horizontal-strip outline applies.
+    private let activeTabGroupTintLayer = CAShapeLayer()
+
+    /// Per-group `objectWillChange` subscriptions — needed because the
+    /// active tab's group color and the active tab's groupToken can both
+    /// flip without `BrowserState.$focusingTab` or `$groups` republishing.
+    /// Mirrors the pattern used in `TabStrip.bindData`.
+    private var groupChangeCancellables: [String: AnyCancellable] = [:]
+
     enum LayerZIndex {
         /// Stacks above every sibling sublayer in `view.layer` so the active
         /// tab's fill (in barController.view) and splitViewContainer's fill
@@ -225,6 +239,21 @@ class WebContentContainerViewController: NSViewController {
             guard let self else { return }
             self.outerBorderLayer.strokeColor = ThemedColor.border.resolve(in: self.view).cgColor
         }
+
+        // Group-tint stroke for the active tab outline. Same path geometry
+        // as the corresponding portion of `outerBorderLayer`, painted on
+        // top to mask the default gray with the group color.
+        activeTabGroupTintLayer.fillColor = NSColor.clear.cgColor
+        activeTabGroupTintLayer.strokeColor = NSColor.clear.cgColor
+        activeTabGroupTintLayer.lineWidth = 1
+        activeTabGroupTintLayer.lineCap = .butt
+        activeTabGroupTintLayer.lineJoin = .round
+        activeTabGroupTintLayer.zPosition = LayerZIndex.contentOuterBorder + 1
+        activeTabGroupTintLayer.actions = [
+            "strokeColor": NSNull(),
+            "lineWidth": NSNull()
+        ]
+        view.layer?.addSublayer(activeTabGroupTintLayer)
         
         // Add resize handle for sidebar adjustment
         view.addSubview(resizeHandle)
@@ -378,6 +407,32 @@ class WebContentContainerViewController: NSViewController {
                 self?.updateStatusURL(url)
             }
             .store(in: &cancellables)
+
+        // Active-tab outline tinting follows group state. `$groups` only
+        // fires on dict add/remove, so we (re)subscribe to each group's
+        // `objectWillChange` to catch color flips and active-tab join/
+        // leave events that nudge `info.objectWillChange.send()`. This
+        // mirrors `TabStrip.rebuildGroupChangeSubscriptions`.
+        browserState?.$groups
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] groups in
+                guard let self else { return }
+                self.rebuildGroupChangeSubscriptions(groups: groups)
+                self.updateContentOuterBorder()
+            }
+            .store(in: &cancellables)
+    }
+
+    private func rebuildGroupChangeSubscriptions(groups: [String: WebContentGroupInfo]) {
+        let liveTokens = Set(groups.keys)
+        groupChangeCancellables = groupChangeCancellables.filter { liveTokens.contains($0.key) }
+        for (token, info) in groups where groupChangeCancellables[token] == nil {
+            groupChangeCancellables[token] = info.objectWillChange
+                .receive(on: DispatchQueue.main)
+                .sink { [weak self] _ in
+                    self?.updateContentOuterBorder()
+                }
+        }
     }
     
     private func setupConfigObserver() {
@@ -405,11 +460,13 @@ class WebContentContainerViewController: NSViewController {
     private func updateContentOuterBorder() {
         guard let controller = currentWebContentController else {
             outerBorderLayer.path = nil
+            activeTabGroupTintLayer.path = nil
             return
         }
         let r = controller.splitViewContainerFrame(in: view)
         guard r.width > 0, r.height > 0 else {
             outerBorderLayer.path = nil
+            activeTabGroupTintLayer.path = nil
             return
         }
 
@@ -515,6 +572,30 @@ class WebContentContainerViewController: NSViewController {
         CATransaction.setDisableActions(!shouldAnimate)
         outerBorderLayer.path = path
         outerBorderLayer.strokeColor = ThemedColor.border.resolve(in: view).cgColor
+
+        // Group tint sits on top of the unified border, following only the
+        // active-tab outline portion. Drawn iff the active tab is in a
+        // group AND the unified-path active-tab branch was taken (same
+        // geometric guard as above).
+        if let af = activeFrame,
+           af.minX - invR > leftX + cornerR,
+           af.maxX + invR < rightX - cornerR,
+           let token = controller.associatedTab?.groupToken,
+           let groupColor = browserState?.groups[token]?.color {
+            let tintPath = CGMutablePath()
+            TabStripMetrics.appendActiveTabOutline(
+                to: tintPath,
+                leftX: af.minX,
+                rightX: af.maxX,
+                apexY: topY,
+                tabTopY: af.maxY
+            )
+            activeTabGroupTintLayer.path = tintPath
+            activeTabGroupTintLayer.strokeColor = groupColor.nsColor.cgColor
+        } else {
+            activeTabGroupTintLayer.path = nil
+        }
+
         CATransaction.commit()
     }
     
