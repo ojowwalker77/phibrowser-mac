@@ -26,7 +26,7 @@ final class TabGroupChipView: NSView {
     static let cornerRadius: CGFloat = 4
     static let barWidth: CGFloat = 4
     static let labelLeftPadding: CGFloat = 7
-    static let labelRightPadding: CGFloat = 9
+    static let labelRightPadding: CGFloat = 6  // tightened to leave room for chevron
     static let labelFont = NSFont.systemFont(ofSize: 11, weight: .semibold)
     static let countFont = NSFont.systemFont(ofSize: 10, weight: .bold)
     static let countHorizontalPadding: CGFloat = 6
@@ -37,6 +37,13 @@ final class TabGroupChipView: NSView {
     static let compactWidth: CGFloat = 24
     static let compactSwatchWidth: CGFloat = 16
     static let compactRightPad: CGFloat = 4
+
+    // Chevron — collapse/expand state indicator. Shown in full mode at
+    // the trailing edge (after label / count), and overlaid on the
+    // color swatch in compact mode (replacing it visually) so the
+    // collapsed/expanded state is visible regardless of chip width.
+    static let chevronSize: CGFloat = 9
+    static let chevronToContentGap: CGFloat = 4
 
     // MARK: - Callbacks (set by TabStrip)
 
@@ -68,6 +75,7 @@ final class TabGroupChipView: NSView {
     private(set) var memberCount: Int = 0
     private(set) var hasUserSetTitle: Bool = false
     private(set) var mode: ChipMode = .full
+    private(set) var isCollapsed: Bool = false
 
     // MARK: - Subviews / sublayers
 
@@ -99,6 +107,12 @@ final class TabGroupChipView: NSView {
         return tf
     }()
     private let countBackgroundLayer = CALayer()
+    private let chevronImageView: NSImageView = {
+        let iv = NSImageView()
+        iv.imageScaling = .scaleProportionallyDown
+        iv.translatesAutoresizingMaskIntoConstraints = true
+        return iv
+    }()
 
     // MARK: - Init
 
@@ -122,6 +136,7 @@ final class TabGroupChipView: NSView {
 
         addSubview(labelField)
         addSubview(countField)
+        addSubview(chevronImageView)
 
         toolTip = NSLocalizedString(
             "Click to collapse or expand group",
@@ -142,7 +157,8 @@ final class TabGroupChipView: NSView {
         displayTitle: String,
         memberCount: Int,
         hasUserSetTitle: Bool,
-        mode: ChipMode
+        mode: ChipMode,
+        isCollapsed: Bool
     ) {
         self.token = token
         self.color = color
@@ -150,6 +166,7 @@ final class TabGroupChipView: NSView {
         self.memberCount = memberCount
         self.hasUserSetTitle = hasUserSetTitle
         self.mode = mode
+        self.isCollapsed = isCollapsed
 
         labelField.stringValue = displayTitle
         countField.stringValue = "\(memberCount)"
@@ -170,9 +187,29 @@ final class TabGroupChipView: NSView {
         countBackgroundLayer.cornerRadius = (TabGroupChipView.countFont.pointSize +
                                               Self.countVerticalPadding * 2) / 2.0
 
+        // Chevron points right when collapsed (suggests "click to
+        // expand"), down when expanded (suggests "tabs are below /
+        // click to collapse"). In full mode the chevron uses
+        // secondaryLabelColor so it doesn't compete with the title;
+        // in compact mode it uses the saturated group color so the
+        // 24pt-wide chip still carries a strong color presence (it
+        // replaces the swatch — see layoutCompactMode).
+        let symbolName = isCollapsed ? "chevron.right" : "chevron.down"
+        let config = NSImage.SymbolConfiguration(pointSize: Self.chevronSize, weight: .semibold)
+        chevronImageView.image = NSImage(
+            systemSymbolName: symbolName,
+            accessibilityDescription: nil
+        )?.withSymbolConfiguration(config)
+        chevronImageView.contentTintColor = (mode == .compact)
+            ? color.nsColor
+            : .secondaryLabelColor
+
         let showLabel = (mode == .full)
         let showCount = (mode == .full) && hasUserSetTitle
-        let showCompactSwatch = (mode == .compact)
+        // Compact mode: the chevron stands in for the swatch as the
+        // single visible symbol next to the bar. Hiding the swatch
+        // keeps the 24pt width unchanged.
+        let showCompactSwatch = false
 
         labelField.isHidden = !showLabel
         countField.isHidden = !showCount
@@ -211,13 +248,19 @@ final class TabGroupChipView: NSView {
         let labelX = Self.barWidth + Self.labelLeftPadding
         let labelHeight = ceil(Self.labelFont.ascender - Self.labelFont.descender + Self.labelFont.leading)
 
+        // Chevron pinned to the trailing edge of the chip.
+        let chevronX = bounds.width - Self.labelRightPadding - Self.chevronSize
+        let chevronY = (bounds.height - Self.chevronSize) / 2
+        chevronImageView.frame = CGRect(x: chevronX, y: chevronY,
+                                         width: Self.chevronSize, height: Self.chevronSize)
+
         if hasUserSetTitle {
-            // Count badge sits at the trailing edge.
+            // Count badge sits between the label and the chevron.
             let countString = countField.stringValue as NSString
             let countTextWidth = countString.size(withAttributes: [.font: Self.countFont]).width
             let countWidth = ceil(countTextWidth) + Self.countHorizontalPadding * 2
             let countHeight = Self.countFont.pointSize + Self.countVerticalPadding * 2
-            let countX = bounds.width - Self.labelRightPadding - countWidth
+            let countX = chevronX - Self.chevronToContentGap - countWidth
             let countY = (bounds.height - countHeight) / 2
 
             countBackgroundLayer.frame = CGRect(x: countX, y: countY, width: countWidth, height: countHeight)
@@ -228,20 +271,21 @@ final class TabGroupChipView: NSView {
             labelField.frame = CGRect(x: labelX, y: (bounds.height - labelHeight) / 2,
                                        width: max(0, labelMaxX - labelX), height: labelHeight)
         } else {
-            // No badge — label fills to right padding.
-            let labelMaxX = bounds.width - Self.labelRightPadding
+            // No badge — label fills up to the chevron's left edge.
+            let labelMaxX = chevronX - Self.chevronToContentGap
             labelField.frame = CGRect(x: labelX, y: (bounds.height - labelHeight) / 2,
                                        width: max(0, labelMaxX - labelX), height: labelHeight)
         }
     }
 
     private func layoutCompactMode() {
-        compactSwatchLayer.frame = CGRect(
-            x: Self.barWidth,
-            y: 0,
-            width: Self.compactSwatchWidth,
-            height: bounds.height
-        )
+        // Chevron centered in the swatch region (replaces the swatch
+        // visually so chip width stays at compactWidth = 24pt).
+        let chevronAreaX = Self.barWidth
+        let chevronX = chevronAreaX + (Self.compactSwatchWidth - Self.chevronSize) / 2
+        let chevronY = (bounds.height - Self.chevronSize) / 2
+        chevronImageView.frame = CGRect(x: chevronX, y: chevronY,
+                                         width: Self.chevronSize, height: Self.chevronSize)
         // labelField / countField hidden via applyAppearance().
     }
 
@@ -257,7 +301,10 @@ final class TabGroupChipView: NSView {
         let labelWidth = (title as NSString)
             .size(withAttributes: [.font: labelFont])
             .width
-        var width = barWidth + labelLeftPadding + ceil(labelWidth) + labelRightPadding
+        // Trailing edge reserves space for the chevron with the same
+        // labelRightPadding gap to the chip's right border.
+        let chevronOverhead = chevronToContentGap + chevronSize + labelRightPadding
+        var width = barWidth + labelLeftPadding + ceil(labelWidth) + chevronOverhead
 
         if hasUserSetTitle {
             let countString = "\(memberCount)" as NSString
@@ -265,8 +312,9 @@ final class TabGroupChipView: NSView {
                 .size(withAttributes: [.font: countFont])
                 .width
             let countWidth = ceil(countTextWidth) + countHorizontalPadding * 2
-            // With badge: bar + leftPad + textW + gap + countW + rightPad
-            // (no-badge already accounts for bar + leftPad + textW + rightPad)
+            // With badge: + countToLabelGap + countW (count sits
+            // between label and the chevron overhead already
+            // accounted for above).
             width += countToLabelGap + countWidth
         }
 
@@ -325,9 +373,13 @@ final class TabGroupChipView: NSView {
     // MARK: - Accessibility
 
     override func accessibilityLabel() -> String? {
-        let format = NSLocalizedString(
-            "%@ tab group, %d tabs",
-            comment: "Tab Groups - VoiceOver label for horizontal-strip group chip")
+        let format = isCollapsed
+            ? NSLocalizedString(
+                "%@ tab group, %d tabs, collapsed",
+                comment: "Tab Groups - VoiceOver label for collapsed horizontal-strip group chip")
+            : NSLocalizedString(
+                "%@ tab group, %d tabs, expanded",
+                comment: "Tab Groups - VoiceOver label for expanded horizontal-strip group chip")
         return String(format: format, color.localizedName, memberCount)
     }
 

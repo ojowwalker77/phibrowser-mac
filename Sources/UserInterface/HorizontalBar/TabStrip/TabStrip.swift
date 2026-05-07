@@ -999,7 +999,8 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
                 displayTitle: group.displayTitle(memberCount: memberCount),
                 memberCount: memberCount,
                 hasUserSetTitle: group.hasUserSetTitle,
-                mode: placement.mode
+                mode: placement.mode,
+                isCollapsed: group.isCollapsed
             )
             var f = placement.frame
             f.origin.x -= currentScrollOffset
