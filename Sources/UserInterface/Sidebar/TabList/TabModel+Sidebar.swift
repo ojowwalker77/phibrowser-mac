@@ -244,15 +244,14 @@ extension Tab: ContextMenuRepresentable {
     ///     strip order with color swatches.
     ///   * Grouped tab → "Remove from Group".
     ///
-    /// Skipped entirely for pinned tabs and bookmark-backed tabs:
-    /// Chromium's TabStripModel doesn't allow pinned tabs to participate
-    /// in groups, and Phi's bookmark-backed tabs are an in-app concept
-    /// that pre-empts any group affiliation (the tab's identity is the
-    /// bookmark, not a free-floating page). Bookmark sidebar rows use a
-    /// separate `Bookmark.makeContextMenu` and never reach this method;
-    /// this guard catches the case where the tab strip itself contains a
-    /// tab whose `guidInLocalDB` resolves to a bookmark (legacy /
-    /// traditional layout, where bookmark-opened tabs sit in normalTabs).
+    /// Skipped entirely for pinned tabs (Chromium's TabStripModel
+    /// doesn't allow them in groups). Also skipped for
+    /// bookmark-backed tabs, but only in sidebar layouts: there the
+    /// tab's identity is the bookmark itself and group affiliation
+    /// would conflict with the bookmark binding. In the Comfortable
+    /// horizontal-strip layout these tabs are surfaced as regular
+    /// tabs in the strip, so the group menu is available like any
+    /// other tab.
     @MainActor
     private func appendTabGroupMenuItems(into items: inout [NSMenuItem]) {
         if isPinned {
@@ -260,7 +259,8 @@ extension Tab: ContextMenuRepresentable {
         }
         let browserState = MainBrowserWindowControllersManager.shared
             .getBrowserState(for: windowId)
-        if isBookmarkBackedTab(state: browserState) {
+        let inHorizontalStrip = PhiPreferences.GeneralSettings.loadLayoutMode().isTraditional
+        if !inHorizontalStrip, isBookmarkBackedTab(state: browserState) {
             return
         }
         if groupToken == nil {
