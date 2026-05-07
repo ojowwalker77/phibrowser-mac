@@ -159,36 +159,35 @@ final class TabStripDragController {
             return cursorInContainer < chip.frame.midX
         }()
 
-        // Auto-join leading edge fires only when the cursor sits
-        // *on* the chip (≥ chip.minX) or further right. Cursor
-        // strictly before chip.minX is the "outside group on left"
-        // zone — the only way for a drop at the leading edge to NOT
-        // join. Without this gate, drops in the strip's leading
-        // whitespace before the first group would always auto-join
-        // because targetIndex = 0 maps to the first member's index
-        // and there's no left neighbor to suppress it.
+        // Auto-join leading edge fires when the cursor sits on the
+        // chip's right half (≥ chip.midX) or further right. Mirrors
+        // `gapBeforeChip` so visual and commit agree: gap-after-chip
+        // visualization (cursor on right half) ⇒ join; gap-before-chip
+        // visualization (cursor on left half / leading whitespace)
+        // ⇒ park before the group, no join.
         let leadingJoinToken: String? = {
             guard let chip = leadingChip,
                   chip.token != context.draggingTab.groupToken,
-                  cursorInContainer >= chip.frame.minX else { return nil }
+                  cursorInContainer >= chip.frame.midX else { return nil }
             return chip.token
         }()
 
         // Symmetric leading-edge LEAVE: when the dragged tab is in
-        // some group AND the cursor sits strictly before that
-        // group's chip, the user is dragging out via the leading
-        // edge. The geometric auto-leave check
-        // (`toIndex < lowerBound`) can't detect this when the group
-        // sits at the strip's leading edge — lowerBound is 0 and no
-        // toIndex can be less. Driven purely by cursor-vs-chip.minX
-        // on the dragged tab's *own* group's chip; not constrained
-        // to `targetIndex == firstMemberIndex` so dragging the very
-        // first member out (where after exclusion `targetIndex`
-        // points to the next visible member) is also handled.
+        // some group AND the cursor sits on that group's chip's left
+        // half (or further left), the user is dragging out via the
+        // leading edge. Required for groups at the strip's leading
+        // edge (lowerBound = 0) where the geometric check
+        // (`toIndex < lowerBound`) can never trigger. Threshold
+        // mirrors `gapBeforeChip` (cursor < chip.midX), so visual
+        // gap-before-chip and "leave the group" agree. Not
+        // constrained to `targetIndex == firstMemberIndex` so
+        // dragging the FIRST member out (where after exclusion
+        // `targetIndex` points to the next visible member) is also
+        // handled.
         let leadingLeaveToken: String? = {
             guard let token = context.draggingTab.groupToken,
                   let chip = metrics.chipFrames.first(where: { $0.token == token }),
-                  cursorInContainer < chip.frame.minX else { return nil }
+                  cursorInContainer < chip.frame.midX else { return nil }
             return token
         }()
 

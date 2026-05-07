@@ -1780,22 +1780,19 @@ extension TabStrip: TabStripDragDelegate {
                 //    inside the group's run.
                 //
                 // 2. Leading edge — drop on (or past) a group chip's
-                //    leading edge. The drag controller already
+                //    right half. The drag controller already
                 //    classified this during updateDragging by
-                //    comparing the cursor against the chip's frame:
+                //    comparing the cursor against `chip.midX`:
                 //    `context.targetGroupForLeadingJoin` is non-nil
-                //    iff the cursor sat on/past chip.minX AND the
-                //    dragged tab isn't already in that group. So
-                //    drops in the strip's left whitespace before
-                //    the first group, and drops in the gap between
-                //    two adjacent groups (if cursor stayed before
-                //    the next chip), are correctly EXcluded.
-                //
-                // Suppress the leading-edge join when the post-move
-                // left neighbor belongs to a *different* group than
-                // the leading-edge target — that's "parking between
-                // two groups", honor the same intent the cursor-
-                // position gate would honor.
+                //    iff the cursor sat on/past chip.midX AND the
+                //    dragged tab isn't already in that group. The
+                //    same threshold drives the visual gap-after-chip
+                //    rendering, so visual and commit agree. Drops in
+                //    the strip's leading whitespace, on a chip's
+                //    left half, or in the gap between two adjacent
+                //    groups (cursor stayed before the next chip's
+                //    midX) are all correctly EXcluded by the cursor
+                //    gate — no further suppression is needed here.
                 let postMoveIdx = (originalIndex < toIndex) ? max(0, toIndex - 1) : toIndex
                 let postMoveTabs = browserState.normalTabs
 
@@ -1809,15 +1806,7 @@ extension TabStrip: TabStripDragDelegate {
                     return leftToken
                 }()
 
-                let leadingEdgeToken: String? = {
-                    guard let token = context.targetGroupForLeadingJoin else { return nil }
-                    if postMoveIdx > 0,
-                       let leftToken = postMoveTabs[postMoveIdx - 1].groupToken,
-                       leftToken != token {
-                        return nil  // parking between two groups
-                    }
-                    return token
-                }()
+                let leadingEdgeToken: String? = context.targetGroupForLeadingJoin
 
                 if let token = sandwichToken ?? leadingEdgeToken {
                     AppLogDebug(
