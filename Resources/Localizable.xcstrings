@@ -194,6 +194,18 @@
     "Back" : {
       "comment" : "Web content header - Accessibility description for back navigation button"
     },
+    "Back Up Phi User Data" : {
+      "comment" : "Debug clear data - NSSavePanel title for saving Phi user data directory as zip"
+    },
+    "Back Up User Data First?" : {
+      "comment" : "Debug clear data - Alert title asking whether to export Phi user data before clearing"
+    },
+    "Backup Failed" : {
+      "comment" : "Debug clear data - Alert title when exporting Phi user data zip fails"
+    },
+    "Backup..." : {
+      "comment" : "Debug clear data - Alert button to open the save panel for a Phi user data zip"
+    },
     "Balanced" : {
       "comment" : "Layout option - Vertical tabs with address bar at the top of webcontent\nOnboarding layout selection - Balanced option"
     },
@@ -234,7 +246,7 @@
       "comment" : "Import data type - Browsing history toggle label"
     },
     "Cancel" : {
-      "comment" : "AI settings - Cancel button in disable-AI confirmation alert\nAI settings - Cancel button in disable-connectors confirmation alert\nAccount settings - Cancel button in logout confirmation dialog\nAccount settings - Cancel button in rename dialog\nCancel\nDownload item row - Tooltip for cancel button during safety scan\nDownload item row - Tooltip for cancel download button\nEditor - Cancel button title\nFeedback form - Cancel button in permission alert\nFeedback form - Cancel button to dismiss feedback form\nNew folder dialog cancel button title\nTooltip for cancel button during safety scan in living downloads toast\nUpdate alert - Button to cancel update installation"
+      "comment" : "AI settings - Cancel button in disable-AI confirmation alert\nAI settings - Cancel button in disable-connectors confirmation alert\nAccount settings - Cancel button in logout confirmation dialog\nAccount settings - Cancel button in rename dialog\nCancel\nDebug clear data - Alert button to cancel clearing user data\nDebug import user data - Alert button to cancel importing user data\nDownload item row - Tooltip for cancel button during safety scan\nDownload item row - Tooltip for cancel download button\nEditor - Cancel button title\nFeedback form - Cancel button in permission alert\nFeedback form - Cancel button to dismiss feedback form\nNew folder dialog cancel button title\nTooltip for cancel button during safety scan in living downloads toast\nUpdate alert - Button to cancel update installation"
     },
     "Cancel First" : {
 
@@ -546,6 +558,18 @@
     "Import completed with errors. Failed to import from: %@" : {
       "comment" : "Browser data importer - Status message when some imports failed, shows list of failed browsers"
     },
+    "Import Failed" : {
+      "comment" : "Debug import user data - Alert title when extracting or applying backup fails"
+    },
+    "Import Phi User Data?" : {
+      "comment" : "Debug import user data - Confirmation alert title before replacing Phi user data from zip"
+    },
+    "Import User Data..." : {
+      "comment" : "Debug menu - Menu item to replace Phi user data from a zip backup and relaunch the app"
+    },
+    "Import..." : {
+      "comment" : "Debug import user data - Alert button to open file picker for zip backup"
+    },
     "Imported From Arc" : {
       "comment" : "Arc bookmarks import folder title"
     },
@@ -723,6 +747,9 @@
     "No Phi or Sentinel log folders were found." : {
       "comment" : "Help menu - Log export alert when both PhiLogs and Sentinel log directory are missing"
     },
+    "No Phi User Data to Back Up" : {
+      "comment" : "Debug clear data - Alert title when the Phi data folder is missing before backup"
+    },
     "No Results" : {
       "comment" : "Shortcuts settings - Empty state text when no shortcuts match search"
     },
@@ -898,7 +925,7 @@
       "comment" : "Notification card run button - Executes the suggested action"
     },
     "Save" : {
-      "comment" : "Account settings - Save button in rename dialog\nEditor - Save button title\nIM Channels - Custom bot save button"
+      "comment" : "Account settings - Save button in rename dialog\nDebug clear data - NSSavePanel confirm button title when saving Phi user data backup zip\nEditor - Save button title\nIM Channels - Custom bot save button"
     },
     "Scan the QR code with your phone camera or click on the button below to add Phi Link bot to your Telegram" : {
       "comment" : "Phi Link - Official bot QR hint"
@@ -911,6 +938,9 @@
     },
     "Search or Enter URL" : {
       "comment" : "Omnibox - Placeholder text prompting user to search or enter URL\nOmnibox suggestion - Placeholder text for search or URL entry\nSidebar address bar - Placeholder text prompting user to enter URL or search query"
+    },
+    "Select Phi User Data Backup" : {
+      "comment" : "Debug import user data - NSOpenPanel title for choosing a Phi user data zip"
     },
     "Send" : {
       "comment" : "Feedback form - Send button to submit feedback"
@@ -960,6 +990,9 @@
     "Skip" : {
       "comment" : "Onboarding base - Skip button to bypass current step"
     },
+    "Skip Backup" : {
+      "comment" : "Debug clear data - Alert button to clear data without creating a backup zip"
+    },
     "Some account and system information may be sent to Phinomenon. We will use the information you give us to help address technical issues and to improve our services, subject to our Privacy Policy and Terms of Service." : {
       "comment" : "Feedback form - Legal disclaimer text explaining data usage, contains links to Privacy Policy and Terms of Service"
     },
@@ -993,11 +1026,20 @@
     "Telegram ID" : {
       "comment" : "Phi Link - Official bot connected label"
     },
+    "The archive does not contain a top-level Phi folder." : {
+      "comment" : "Debug import user data - Error message when zip does not include the expected Phi directory at archive root"
+    },
     "The local IM service is unavailable. Check whether Phi Sentinel started normally and the IM service is running." : {
       "comment" : "IM Channels - Message shown when im-server is not connected"
     },
+    "The Phi user data folder was not found. Continuing will still remove other local application data and quit." : {
+      "comment" : "Debug clear data - Alert body when Phi folder is missing; clearing will still proceed for other locations"
+    },
     "Theme" : {
       "comment" : "General settings - Theme section title"
+    },
+    "This replaces the Phi user data folder with the archive and restarts Phi. Save your work first." : {
+      "comment" : "Debug import user data - Confirmation alert body warning data replacement and relaunch"
     },
     "Today" : {
       "comment" : "Download item row - Relative time when download completed today"
@@ -1099,6 +1141,9 @@
     },
     "You" : {
       "comment" : "Account settings - Default display name when user name is not available"
+    },
+    "You can save a zip of your Phi user data folder before local files are removed and the app quits." : {
+      "comment" : "Debug clear data - Alert body explaining optional zip backup before clearing user data"
     },
     "You will be logged out and returned to the login screen. Are you sure?" : {
       "comment" : "Account settings - Logout confirmation dialog message"

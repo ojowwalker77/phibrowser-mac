@@ -608,7 +608,6 @@ extension AppController {
                 #selector(NSApplication.unhideAllApplications(_:)),
                 #selector(showSentryDebugWindow(_:)),
                 #selector(triggerDeeplink(_:)),
-                #selector(clearUserData(_:)),
                 #selector(clearLoginStatus(_:)),
                 #selector(clearAllUserData(_:)),
                 #selector(showExtensionInfo(_:)),

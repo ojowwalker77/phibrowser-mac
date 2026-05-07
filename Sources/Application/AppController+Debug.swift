@@ -7,6 +7,7 @@ import Foundation
 import SwiftUI
 import AppKit
 import WebKit
+import UniformTypeIdentifiers
 private final class DebugWindowDelegate: NSObject, NSWindowDelegate {
     var onClose: (() -> Void)?
 
@@ -104,17 +105,13 @@ extension AppController {
         let clearDataMenuItem = NSMenuItem(title: "Clear Data", action: nil, keyEquivalent: "")
         let clearDataSubmenu = NSMenu(title: "ClearData")
         
-        let clearUserDataItem = NSMenuItem(title: "User Data", action: #selector(clearUserData(_:)), keyEquivalent: "")
+        let clearUserDataItem = NSMenuItem(title: "User Data", action: #selector(clearAllUserData(_:)), keyEquivalent: "")
         clearUserDataItem.target = self
         clearDataSubmenu.addItem(clearUserDataItem)
         
         let clearLoginStatusItem = NSMenuItem(title: "Login Status", action: #selector(clearLoginStatus(_:)), keyEquivalent: "")
         clearLoginStatusItem.target = self
         clearDataSubmenu.addItem(clearLoginStatusItem)
-        
-        let allItem = NSMenuItem(title: "All User Data", action: #selector(clearAllUserData(_:)), keyEquivalent: "")
-        allItem.target = self
-        clearDataSubmenu.addItem(allItem)
         
         clearDataMenuItem.submenu = clearDataSubmenu
         debugMenu.addItem(clearDataMenuItem)
@@ -192,6 +189,14 @@ extension AppController {
         )
         openUserDirItem.target = self
         debugMenu.addItem(openUserDirItem)
+
+        let importUserDataItem = NSMenuItem(
+            title: NSLocalizedString("Import User Data...", comment: "Debug menu - Menu item to replace Phi user data from a zip backup and relaunch the app"),
+            action: #selector(importUserDataFromBackup(_:)),
+            keyEquivalent: ""
+        )
+        importUserDataItem.target = self
+        debugMenu.addItem(importUserDataItem)
         
         return debugMenuItem
     }
@@ -550,22 +555,252 @@ extension AppController {
     
     @MainActor
     @objc func clearAllUserData(_ sender: Any?) {
+        beginClearUserDataFlow(includeAuthReset: true)
+    }
+
+    private enum PhiUserDataBackupPromptResult {
+        case cancel
+        case skipBackup
+        case performBackup
+    }
+
+    @MainActor
+    private func beginClearUserDataFlow(includeAuthReset: Bool) {
         guard showQuitAlert() else {
             return
         }
+
+        switch promptBackupBeforeClearingPhiUserData() {
+        case .cancel:
+            return
+        case .skipBackup:
+            break
+        case .performBackup:
+            guard performPhiUserDataBackupExport() else {
+                return
+            }
+        }
+
         _clearUserData()
-        AuthManager.shared.clearLocalCredentials()
-        LoginController.shared.phase = .login
+        if includeAuthReset {
+            AuthManager.shared.clearLocalCredentials()
+            LoginController.shared.phase = .login
+        }
         NSApp.terminate(nil)
     }
-    
+
     @MainActor
-    @objc func clearUserData(_ sender: Any?) {
-        guard showQuitAlert() else {
+    private func promptBackupBeforeClearingPhiUserData() -> PhiUserDataBackupPromptResult {
+        let alert = NSAlert()
+        alert.messageText = NSLocalizedString("Back Up User Data First?", comment: "Debug clear data - Alert title asking whether to export Phi user data before clearing")
+        alert.informativeText = NSLocalizedString("You can save a zip of your Phi user data folder before local files are removed and the app quits.", comment: "Debug clear data - Alert body explaining optional zip backup before clearing user data")
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: NSLocalizedString("Backup...", comment: "Debug clear data - Alert button to open the save panel for a Phi user data zip"))
+        alert.addButton(withTitle: NSLocalizedString("Skip Backup", comment: "Debug clear data - Alert button to clear data without creating a backup zip"))
+        alert.addButton(withTitle: NSLocalizedString("Cancel", comment: "Debug clear data - Alert button to cancel clearing user data"))
+        switch alert.runModal() {
+        case .alertFirstButtonReturn:
+            return .performBackup
+        case .alertSecondButtonReturn:
+            return .skipBackup
+        default:
+            return .cancel
+        }
+    }
+
+    @MainActor
+    private func performPhiUserDataBackupExport() -> Bool {
+        let fm = FileManager.default
+        let phiPath = FileSystemUtils.phiBrowserDataDirectory()
+
+        if !fm.fileExists(atPath: phiPath) {
+            let alert = NSAlert()
+            alert.messageText = NSLocalizedString("No Phi User Data to Back Up", comment: "Debug clear data - Alert title when the Phi data folder is missing before backup")
+            alert.informativeText = NSLocalizedString("The Phi user data folder was not found. Continuing will still remove other local application data and quit.", comment: "Debug clear data - Alert body when Phi folder is missing; clearing will still proceed for other locations")
+            alert.alertStyle = .informational
+            alert.addButton(withTitle: NSLocalizedString("OK", comment: "Generic - OK button to dismiss an alert"))
+            alert.runModal()
+            return true
+        }
+
+        let panel = NSSavePanel()
+        panel.canCreateDirectories = true
+        panel.allowedContentTypes = [.zip]
+        panel.nameFieldStringValue = defaultPhiUserDataBackupFileName()
+        panel.title = NSLocalizedString("Back Up Phi User Data", comment: "Debug clear data - NSSavePanel title for saving Phi user data directory as zip")
+        panel.prompt = NSLocalizedString("Save", comment: "Debug clear data - NSSavePanel confirm button title when saving Phi user data backup zip")
+
+        guard panel.runModal() == .OK, let destinationZIP = panel.url else {
+            return false
+        }
+
+        do {
+            try zipPhiBrowserDataDirectory(to: destinationZIP)
+            AppLogInfo("[Debug] Phi user data backup saved to \(destinationZIP.path)")
+            return true
+        } catch {
+            AppLogWarn("[Debug] Phi user data backup failed: \(error.localizedDescription)")
+            let errorAlert = NSAlert()
+            errorAlert.messageText = NSLocalizedString("Backup Failed", comment: "Debug clear data - Alert title when exporting Phi user data zip fails")
+            errorAlert.informativeText = error.localizedDescription
+            errorAlert.alertStyle = .warning
+            errorAlert.addButton(withTitle: NSLocalizedString("OK", comment: "Generic - OK button to dismiss an alert"))
+            errorAlert.runModal()
+            return false
+        }
+    }
+
+    private func defaultPhiUserDataBackupFileName() -> String {
+        let rawBase: String
+        if let account = AccountController.shared.account {
+            if let name = account.userInfo?.name?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty {
+                rawBase = name
+            } else if let email = account.userInfo?.email,
+                      let localPart = email.split(separator: "@").first.map(String.init),
+                      !localPart.isEmpty {
+                rawBase = localPart
+            } else {
+                rawBase = account.userID
+            }
+        } else {
+            rawBase = "Phi"
+        }
+        let sanitized = Self.sanitizedBackupFileNameComponent(rawBase)
+        let base = sanitized.isEmpty ? "Phi" : sanitized
+        return "\(base)-data.zip"
+    }
+
+    private static func sanitizedBackupFileNameComponent(_ raw: String) -> String {
+        let invalid = CharacterSet(charactersIn: "/:\\?%*|\"<>")
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        let replaced = trimmed.components(separatedBy: invalid).joined(separator: "-")
+        return replaced.trimmingCharacters(in: CharacterSet(charactersIn: "."))
+    }
+
+    private func zipPhiBrowserDataDirectory(to destinationZIP: URL) throws {
+        let fm = FileManager.default
+        let parentURL = URL(fileURLWithPath: FileSystemUtils.applicationSupportDirctory(), isDirectory: true)
+        let phiFolderName = (FileSystemUtils.phiBrowserDataDirectory() as NSString).lastPathComponent
+
+        if fm.fileExists(atPath: destinationZIP.path) {
+            try fm.removeItem(at: destinationZIP)
+        }
+
+        let stderrPipe = Pipe()
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/zip")
+        process.arguments = ["-r", "-q", destinationZIP.path, phiFolderName]
+        process.currentDirectoryURL = parentURL
+        process.standardError = stderrPipe
+        try process.run()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else {
+            let errText = String(data: stderrPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let detail = errText.isEmpty ? "zip exited with status \(process.terminationStatus)." : errText
+            throw NSError(domain: "PhiUserDataBackup", code: Int(process.terminationStatus), userInfo: [NSLocalizedDescriptionKey: detail])
+        }
+    }
+
+    @MainActor
+    @objc func importUserDataFromBackup(_ sender: Any?) {
+        let confirm = NSAlert()
+        confirm.messageText = NSLocalizedString("Import Phi User Data?", comment: "Debug import user data - Confirmation alert title before replacing Phi user data from zip")
+        confirm.informativeText = NSLocalizedString("This replaces the Phi user data folder with the archive and restarts Phi. Save your work first.", comment: "Debug import user data - Confirmation alert body warning data replacement and relaunch")
+        confirm.alertStyle = .warning
+        confirm.addButton(withTitle: NSLocalizedString("Import...", comment: "Debug import user data - Alert button to open file picker for zip backup"))
+        confirm.addButton(withTitle: NSLocalizedString("Cancel", comment: "Debug import user data - Alert button to cancel importing user data"))
+        guard confirm.runModal() == .alertFirstButtonReturn else {
             return
         }
-        _clearUserData()
-        NSApp.terminate(nil)
+
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = false
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowedContentTypes = [.zip]
+        panel.title = NSLocalizedString("Select Phi User Data Backup", comment: "Debug import user data - NSOpenPanel title for choosing a Phi user data zip")
+
+        guard panel.runModal() == .OK, let zipURL = panel.url else {
+            return
+        }
+
+        do {
+            try Self.replacePhiUserDataDirectory(withZipAt: zipURL)
+            AppLogInfo("[Debug] Phi user data imported from \(zipURL.path), relaunching")
+            Self.relaunchPhiApplication()
+        } catch {
+            AppLogWarn("[Debug] Phi user data import failed: \(error.localizedDescription)")
+            let errorAlert = NSAlert()
+            errorAlert.messageText = NSLocalizedString("Import Failed", comment: "Debug import user data - Alert title when extracting or applying backup fails")
+            errorAlert.informativeText = error.localizedDescription
+            errorAlert.alertStyle = .warning
+            errorAlert.addButton(withTitle: NSLocalizedString("OK", comment: "Generic - OK button to dismiss an alert"))
+            errorAlert.runModal()
+        }
+    }
+
+    private static func replacePhiUserDataDirectory(withZipAt zipURL: URL) throws {
+        let fm = FileManager.default
+        let parentURL = URL(fileURLWithPath: FileSystemUtils.applicationSupportDirctory(), isDirectory: true)
+        let phiURL = URL(fileURLWithPath: FileSystemUtils.phiBrowserDataDirectory(), isDirectory: true)
+
+        let staging = fm.temporaryDirectory.appendingPathComponent("PhiDataImport-\(UUID().uuidString)", isDirectory: true)
+        try fm.createDirectory(at: staging, withIntermediateDirectories: true)
+        defer {
+            try? fm.removeItem(at: staging)
+        }
+
+        try runUnzip(archive: zipURL, destination: staging)
+
+        let extractedPhi = staging.appendingPathComponent("Phi", isDirectory: true)
+        guard fm.fileExists(atPath: extractedPhi.path) else {
+            throw NSError(
+                domain: "PhiUserDataImport",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: NSLocalizedString("The archive does not contain a top-level Phi folder.", comment: "Debug import user data - Error message when zip does not include the expected Phi directory at archive root")]
+            )
+        }
+
+        try fm.createDirectory(at: parentURL, withIntermediateDirectories: true)
+        if fm.fileExists(atPath: phiURL.path) {
+            try fm.removeItem(at: phiURL)
+        }
+        try fm.copyItem(at: extractedPhi, to: phiURL)
+    }
+
+    private static func runUnzip(archive: URL, destination: URL) throws {
+        let stderrPipe = Pipe()
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/unzip")
+        process.arguments = ["-q", archive.path, "-d", destination.path]
+        process.standardError = stderrPipe
+        try process.run()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else {
+            let errText = String(data: stderrPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let detail = errText.isEmpty ? "unzip exited with status \(process.terminationStatus)." : errText
+            throw NSError(domain: "PhiUserDataImport", code: Int(process.terminationStatus), userInfo: [NSLocalizedDescriptionKey: detail])
+        }
+    }
+
+    private static func relaunchPhiApplication() {
+        let appURL = Bundle.main.bundleURL
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.activates = true
+        configuration.createsNewApplicationInstance = true
+
+        NSWorkspace.shared.openApplication(at: appURL, configuration: configuration) { _, error in
+            if let error {
+                AppLogError("[Debug] Relaunch after user data import failed: \(error.localizedDescription)")
+            } else {
+                AppLogInfo("[Debug] Requested new Phi instance after user data import")
+            }
+            DispatchQueue.main.async {
+                NSApp.terminate(nil)
+            }
+        }
     }
     
     private func _clearUserData() {
