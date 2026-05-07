@@ -1263,14 +1263,64 @@ class BrowserState {
     ///   - index: Destination index relative to `normalTabs`.
     private func insertIntoNormalTabOrder(tabGuid: Int, at index: Int, syncChromiumOrder: Bool = false) {
         normalTabOrder.removeAll { $0 == tabGuid }
-        
+
         let insertIndex = min(max(0, index), normalTabOrder.count)
         normalTabOrder.insert(tabGuid, at: insertIndex)
-        
+        // Preserve group contiguity: if the newly placed tab is a
+        // non-member of the surrounding group (e.g. a bookmark
+        // opened while the active tab sits inside a group), shove
+        // it out past the group's last member so the strip's
+        // currentGroupRuns doesn't split into two runs of the same
+        // token (which trips the empty-chip-slot artifact in
+        // layoutNormalWithGroups).
+        relocateInterloperOutOfGroupRun(tabGuid: tabGuid)
         updateNormalTabs()
         if syncChromiumOrder {
             syncNormalTabRelativeOrderToChromium(tabId: tabGuid)
         }
+    }
+
+    /// Mirror of `relocateJoinerIntoGroupRun`: handles the case where
+    /// a tab that is *not* a member of a group lands between two of
+    /// that group's members in `normalTabOrder`. Moves it to just
+    /// after the group's last member. No-op when the tab is at the
+    /// strip's edge or when its neighbors don't share a group token.
+    private func relocateInterloperOutOfGroupRun(tabGuid: Int) {
+        guard let tab = tabs.first(where: { $0.guid == tabGuid }) else { return }
+        guard let currentIdx = normalTabOrder.firstIndex(of: tabGuid) else { return }
+        let interloperToken = tab.groupToken
+        let leftIdx = currentIdx - 1
+        let rightIdx = currentIdx + 1
+        guard leftIdx >= 0, rightIdx < normalTabOrder.count else { return }
+        let leftToken = tabs.first(where: { $0.guid == normalTabOrder[leftIdx] })?.groupToken
+        let rightToken = tabs.first(where: { $0.guid == normalTabOrder[rightIdx] })?.groupToken
+        guard let splittingToken = leftToken,
+              splittingToken == rightToken,
+              splittingToken != interloperToken else { return }
+
+        var lastMemberIdx: Int?
+        for (idx, guid) in normalTabOrder.enumerated() where idx != currentIdx {
+            if tabs.first(where: { $0.guid == guid })?.groupToken == splittingToken {
+                if lastMemberIdx == nil || idx > lastMemberIdx! {
+                    lastMemberIdx = idx
+                }
+            }
+        }
+        guard let last = lastMemberIdx else { return }
+
+        normalTabOrder.remove(at: currentIdx)
+        // Post-removal indexing: when the interloper was *before*
+        // the last member, removing it shifts the last member down
+        // by one and we re-insert at that shifted index +1 = `last`;
+        // when it was *after*, `last` is unchanged and we insert at
+        // `last + 1`.
+        let targetIdx = (currentIdx < last) ? last : (last + 1)
+        let safeIdx = min(targetIdx, normalTabOrder.count)
+        normalTabOrder.insert(tabGuid, at: safeIdx)
+        AppLogDebug(
+            "[TAB_GROUPS] relocated interloper tabId=\(tabGuid) " +
+            "from=\(currentIdx) to=\(safeIdx) splittingToken=\(splittingToken)"
+        )
     }
     
     /// Reorder pinned  tab
