@@ -955,6 +955,7 @@ class BrowserState {
         }
         if let tab = tabs.first(where: { $0.guid == tabId }) {
             tab.groupToken = token
+            relocateJoinerIntoGroupRun(tabId: tabId, token: token)
             // Tab.groupToken is @Published but the sidebar's
             // TabSectionController doesn't subscribe per-tab; nudge the
             // group's objectWillChange so the wrapper re-resolves children
@@ -962,6 +963,49 @@ class BrowserState {
             info.objectWillChange.send()
         } else {
             pendingGroupClaims[tabId] = token
+        }
+    }
+
+    /// Keeps a group's members contiguous in `normalTabOrder` after a
+    /// tab joins. New tabs created via Chromium's
+    /// `createTabInGroup` (and the join flow generally) are appended
+    /// to `normalTabOrder` by `updateNormalTabs`, so a group whose
+    /// other members already sit elsewhere in the strip ends up
+    /// non-contiguous (e.g. [grey, blue, newGrey]). The horizontal
+    /// strip's `currentGroupRuns` then produces multiple runs for the
+    /// same token, the layout engine reserves a chip slot at every
+    /// run start, but `chipFrames[token]` only carries the last
+    /// run's frame — the earlier slot ends up as empty padding and
+    /// the first member appears "orphaned" without a chip in front.
+    /// Move the joiner so its index sits immediately after the
+    /// existing last member.
+    private func relocateJoinerIntoGroupRun(tabId: Int, token: String) {
+        guard let currentIdx = normalTabOrder.firstIndex(of: tabId) else { return }
+        var lastOtherIdx: Int?
+        for (idx, guid) in normalTabOrder.enumerated() where idx != currentIdx {
+            guard let other = tabs.first(where: { $0.guid == guid }),
+                  other.groupToken == token else { continue }
+            if lastOtherIdx == nil || idx > lastOtherIdx! {
+                lastOtherIdx = idx
+            }
+        }
+        guard let lastOther = lastOtherIdx else { return }
+        // Already directly after the last existing member — no-op.
+        if currentIdx == lastOther + 1 { return }
+        // Post-removal indexing: removing currentIdx shifts everything
+        // after it down by one, so when the joiner was *after* the
+        // last member we re-insert at lastOther+1, otherwise at
+        // lastOther (which used to be lastOther but the removal moves
+        // it to lastOther-1, so +1 lands right after it).
+        let targetIdx = (currentIdx < lastOther) ? lastOther : (lastOther + 1)
+        normalTabOrder.remove(at: currentIdx)
+        normalTabOrder.insert(tabId, at: targetIdx)
+        AppLogDebug(
+            "[TAB_GROUPS] relocated joiner tabId=\(tabId) " +
+            "from=\(currentIdx) to=\(targetIdx) token=\(token)"
+        )
+        normalTabs = normalTabOrder.compactMap { guid in
+            tabs.first { $0.guid == guid }
         }
     }
 
@@ -1009,6 +1053,7 @@ class BrowserState {
             "tabId=\(tab.guid) token=\(token)"
         )
         tab.groupToken = token
+        relocateJoinerIntoGroupRun(tabId: tab.guid, token: token)
         info.objectWillChange.send()
     }
 
