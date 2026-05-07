@@ -273,8 +273,15 @@ final class TabGroupChipView: NSView {
             let countY = (bounds.height - countHeight) / 2
 
             countBackgroundLayer.frame = CGRect(x: countX, y: countY, width: countWidth, height: countHeight)
-            countField.frame = CGRect(x: countX, y: countY + Self.countVerticalPadding,
-                                       width: countWidth, height: countHeight - Self.countVerticalPadding * 2)
+            // Match the field to the capsule's full height. Insetting
+            // by countVerticalPadding shrinks the cell below the
+            // font's ascender + |descender| (~12pt for 10pt SF Bold),
+            // and NSTextField responds by clipping the glyph's top —
+            // leaving the digit visually low in the capsule. Letting
+            // the cell own the full 12pt lets NSTextField place the
+            // baseline correctly.
+            countField.frame = CGRect(x: countX, y: countY,
+                                       width: countWidth, height: countHeight)
 
             let labelMaxX = countX - Self.countToLabelGap
             labelField.frame = CGRect(x: labelX, y: (bounds.height - labelHeight) / 2,
