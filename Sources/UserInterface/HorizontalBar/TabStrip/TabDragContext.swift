@@ -54,15 +54,19 @@ final class TabDragContext {
     var targetGroupForLeadingJoin: String?
 
     /// Token of the dragged tab's *own* group when the cursor sits
-    /// strictly before that group's chip (`cursor.x < chip.minX`).
-    /// Symmetric to `targetGroupForLeadingJoin`: this represents the
-    /// "leave the group via leading edge" intent that the geometric
-    /// auto-leave check (`toIndex < lowerBound`) cannot detect when
-    /// the group is at the strip's leading edge — there `lowerBound`
-    /// is 0 and no toIndex can be less. Drop-handler reads this to
-    /// fire `removeTabsFromGroup`. Also feeds `hasPositionChanged`
-    /// so drag-out drops that would otherwise be no-ops (e.g.
-    /// dragging the FIRST member to the left of its own chip, where
+    /// on that group's chip's left half or further left
+    /// (`cursor.x < chip.midX`). Symmetric to
+    /// `targetGroupForLeadingJoin`: this represents the "leave the
+    /// group via leading edge" intent that the geometric auto-leave
+    /// check (`toIndex < lowerBound`) cannot detect when the group
+    /// is at the strip's leading edge — there `lowerBound` is 0 and
+    /// no toIndex can be less. Threshold mirrors
+    /// `gapBeforeRunStartChip` so visual and commit agree: the same
+    /// cursor position that opens the gap before the chip also
+    /// detaches from the group. Drop-handler reads this to fire
+    /// `removeTabsFromGroup`. Also feeds `hasPositionChanged` so
+    /// drag-out drops that would otherwise be no-ops (e.g. dragging
+    /// the FIRST member to the left of its own chip, where
     /// `targetIndex == sourceIndex + 1`) still take the commit path.
     var targetGroupForLeadingLeave: String?
     /// Current mouse location in tab-strip coordinates.
