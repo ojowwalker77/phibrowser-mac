@@ -42,6 +42,15 @@ struct TabStripLayoutInput {
     /// once per chip when title / color / member count change.
     let chipFullWidths: [String: CGFloat]
 
+    /// When `gapAtIndex` lands at a group's leading edge (= the
+    /// run's lowerBound), this flag picks the visual: `true` → gap
+    /// opens before the chip (chip slides right alongside its first
+    /// member); `false` (default) → gap opens after the chip (chip
+    /// stays put, only the first member slides right). Set by
+    /// `TabStripDragController` based on whether the cursor sits on
+    /// the chip's left or right half.
+    let gapBeforeRunStartChip: Bool
+
     init(containerWidth: CGFloat,
          tabCount: Int,
          activeTabIndex: Int?,
@@ -54,7 +63,8 @@ struct TabStripLayoutInput {
          gapAtIndex: Int? = nil,
          gapWidth: CGFloat? = nil,
          groupRuns: [GroupRun] = [],
-         chipFullWidths: [String: CGFloat] = [:]) {
+         chipFullWidths: [String: CGFloat] = [:],
+         gapBeforeRunStartChip: Bool = false) {
         self.containerWidth = containerWidth
         self.tabCount = tabCount
         self.activeTabIndex = activeTabIndex
@@ -68,6 +78,7 @@ struct TabStripLayoutInput {
         self.gapWidth = gapWidth
         self.groupRuns = groupRuns
         self.chipFullWidths = chipFullWidths
+        self.gapBeforeRunStartChip = gapBeforeRunStartChip
     }
 }
 
@@ -401,7 +412,18 @@ enum TabStripLayoutEngine {
         var currentX = startOffsetX
 
         for i in 0..<input.tabCount {
-            // Insert chip slot at every group start.
+            let isGapHere = (input.gapAtIndex == i)
+            let isRunStart = (runStarts[i] != nil)
+            let gapBeforeChip = isGapHere && isRunStart && input.gapBeforeRunStartChip
+
+            // When the drag's gap target is the group's leading edge
+            // AND the cursor is on the chip's left half, insert the
+            // gap BEFORE the chip so the chip slides right along
+            // with its first member.
+            if gapBeforeChip, let gapW = input.gapWidth {
+                currentX += gapW
+            }
+
             if let run = runStarts[i] {
                 let chipWidth: CGFloat = (chipMode == .full)
                     ? (input.chipFullWidths[run.token] ?? TabGroupChipView.compactWidth)
@@ -417,8 +439,12 @@ enum TabStripLayoutEngine {
                 currentX += chipWidth + input.spacing
             }
 
-            // Drag-gap insertion (unchanged behavior).
-            if let gapIndex = input.gapAtIndex, let gapW = input.gapWidth, i == gapIndex {
+            // Default gap placement: AFTER chip (when gap is at
+            // runStart) so chip stays put and only the first member
+            // slides right, leaving a slot between chip and first
+            // member that the dragged tab can settle into. Also the
+            // ordinary case for gaps not at any runStart.
+            if isGapHere, !gapBeforeChip, let gapW = input.gapWidth {
                 currentX += gapW
             }
 

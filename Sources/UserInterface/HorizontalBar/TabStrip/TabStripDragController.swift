@@ -5,6 +5,18 @@
 
 import AppKit
 
+/// Frame of one tab-group chip on the strip, used by drag hit testing.
+struct TabStripChipFrame {
+    /// Hex token of the chip's group.
+    let token: String
+    /// First member's index in `normalTabs` — used to map cursor-on-chip
+    /// to the leading-edge gap target.
+    let firstMemberIndex: Int
+    /// Chip frame in normalContainer coordinates with scroll offset
+    /// already added back in (matching `normalTabFrames`).
+    let frame: CGRect
+}
+
 /// Geometry snapshot used during tab dragging.
 struct TabStripMetricsSnapshot {
     /// Pinned container frame in tab-strip coordinates.
@@ -19,6 +31,8 @@ struct TabStripMetricsSnapshot {
     let pinnedTabFrames: [CGRect]
     /// Horizontal scroll offset applied to normal tabs.
     let normalScrollOffset: CGFloat
+    /// Visible group chips on the normal strip.
+    let chipFrames: [TabStripChipFrame]
 }
 
 /// Delegate for drag-driven tab-strip updates.
@@ -119,10 +133,56 @@ final class TabStripDragController {
             context: context
         )
 
+        // Resolve the chip (if any) whose run starts at the gap
+        // target. Both the gap-side decision and the leading-edge
+        // join detection key off this.
+        let leadingChip: TabStripChipFrame? = (targetZone == .normal)
+            ? metrics.chipFrames.first(where: { $0.firstMemberIndex == targetIndex })
+            : nil
+
+        // Compute cursor x in normalContainer's layout space (= same
+        // space chipFrame is in). Used by both the chip step-aside
+        // visual decision and the leading-edge auto-join gating.
+        let cursorInContainer: CGFloat = {
+            guard targetZone == .normal else { return 0 }
+            let localPoint = delegate?.dragControllerConvertPointToLocal(mouseLocation) ?? mouseLocation
+            return localPoint.x
+                - metrics.normalContainerFrame.minX
+                + metrics.normalScrollOffset
+        }()
+
+        // Cursor on chip's left half (or further left) → gap before
+        // chip (chip slides right to make room). Right half → gap
+        // after chip (chip stays put, only first member slides).
+        let gapBeforeChip: Bool = {
+            guard let chip = leadingChip else { return false }
+            return cursorInContainer < chip.frame.midX
+        }()
+
+        // Auto-join leading edge fires only when the cursor sits
+        // *on* the chip (≥ chip.minX) or further right. Cursor
+        // strictly before chip.minX is the "outside group on left"
+        // zone — the only way for a drop at the leading edge to NOT
+        // join. Without this gate, drops in the strip's leading
+        // whitespace before the first group would always auto-join
+        // because targetIndex = 0 maps to the first member's index
+        // and there's no left neighbor to suppress it.
+        let leadingJoinToken: String? = {
+            guard let chip = leadingChip,
+                  chip.token != context.draggingTab.groupToken,
+                  cursorInContainer >= chip.frame.minX else { return nil }
+            return chip.token
+        }()
+
         // Update the drag target state.
-        let changed = context.targetContainerType != targetZone || context.targetIndex != targetIndex
+        let changed = context.targetContainerType != targetZone
+            || context.targetIndex != targetIndex
+            || context.gapBeforeRunStartChip != gapBeforeChip
+            || context.targetGroupForLeadingJoin != leadingJoinToken
         context.targetContainerType = targetZone
         context.targetIndex = targetIndex
+        context.gapBeforeRunStartChip = gapBeforeChip
+        context.targetGroupForLeadingJoin = leadingJoinToken
 
         // Only relayout when the destination actually changes.
         if changed {

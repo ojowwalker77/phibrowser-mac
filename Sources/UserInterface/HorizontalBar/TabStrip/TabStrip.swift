@@ -765,6 +765,7 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
         } else {
             let activeIndex = tabs.firstIndex { isTabActive($0, activeTab: activeTab) }
             let runs = currentGroupRuns()
+            let gapBeforeRunStartChip = !isPinned && (dragController.context?.gapBeforeRunStartChip ?? false)
             let input = TabStripLayoutInput(
                 containerWidth: containerWidth,
                 tabCount: tabs.count,
@@ -778,7 +779,8 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
                 gapAtIndex: gapIndex,
                 gapWidth: gapWidth,
                 groupRuns: isPinned ? [] : runs,
-                chipFullWidths: isPinned ? [:] : chipFullWidths
+                chipFullWidths: isPinned ? [:] : chipFullWidths,
+                gapBeforeRunStartChip: gapBeforeRunStartChip
             )
             return TabStripLayoutEngine.layoutNormal(input: input)
         }
@@ -1611,13 +1613,28 @@ extension TabStrip: TabStripDragDelegate {
             return view.frame.offsetBy(dx: currentScrollOffset, dy: 0)
         }
 
+        // Collect chip frames keyed by their group's first-member
+        // index in normalTabs. Drag controller uses these to decide
+        // which side of the chip the gap should open on at the
+        // leading edge.
+        let runs = currentGroupRuns()
+        let chipFrames: [TabStripChipFrame] = runs.compactMap { run in
+            guard let chip = chipViews[run.token], chip.superview != nil else { return nil }
+            return TabStripChipFrame(
+                token: run.token,
+                firstMemberIndex: run.range.lowerBound,
+                frame: chip.frame.offsetBy(dx: currentScrollOffset, dy: 0)
+            )
+        }
+
         return TabStripMetricsSnapshot(
             pinnedContainerFrame: pinnedContainer.frame,
             normalContainerFrame: normalContainer.frame,
             pinnedTabWidth: TabStripMetrics.PinnedTab.width,
             normalTabFrames: normalFrames,
             pinnedTabFrames: pinnedFrames,
-            normalScrollOffset: currentScrollOffset
+            normalScrollOffset: currentScrollOffset,
+            chipFrames: chipFrames
         )
     }
 
@@ -1733,41 +1750,66 @@ extension TabStrip: TabStripDragDelegate {
                     )
                 }
 
-                // Auto-join when the post-move position has a group
-                // member as its right neighbor and the dragged tab
-                // isn't already in that group. Covers:
-                //   • Sandwich   — both neighbors share the same token.
-                //   • Leading edge — drop in the chip's region, where
-                //     calculateGapIndex returns the first member's
-                //     index (chip isn't a tab); without auto-join
-                //     the dragged tab lands just before the chip's
-                //     run start and visually appears outside the
-                //     group on the left.
-                // Skipped:
-                //   • Trailing edge (right neighbor non-grouped) —
-                //     tab naturally lands adjacent to the group end.
-                //   • Between two different groups (left in Y, right
-                //     in X, Y ≠ X) — user is parking the tab between
-                //     groups, not extending either.
+                // Auto-join: TWO disjoint paths.
+                //
+                // 1. Sandwich — drop between two members of the
+                //    same group (left and right post-move neighbors
+                //    share that group's token, dragged tab isn't in
+                //    that group). Cursor position is irrelevant for
+                //    this case: the geometry already pins the tab
+                //    inside the group's run.
+                //
+                // 2. Leading edge — drop on (or past) a group chip's
+                //    leading edge. The drag controller already
+                //    classified this during updateDragging by
+                //    comparing the cursor against the chip's frame:
+                //    `context.targetGroupForLeadingJoin` is non-nil
+                //    iff the cursor sat on/past chip.minX AND the
+                //    dragged tab isn't already in that group. So
+                //    drops in the strip's left whitespace before
+                //    the first group, and drops in the gap between
+                //    two adjacent groups (if cursor stayed before
+                //    the next chip), are correctly EXcluded.
+                //
+                // Suppress the leading-edge join when the post-move
+                // left neighbor belongs to a *different* group than
+                // the leading-edge target — that's "parking between
+                // two groups", honor the same intent the cursor-
+                // position gate would honor.
                 let postMoveIdx = (originalIndex < toIndex) ? max(0, toIndex - 1) : toIndex
                 let postMoveTabs = browserState.normalTabs
-                if postMoveIdx + 1 < postMoveTabs.count,
-                   let rightToken = postMoveTabs[postMoveIdx + 1].groupToken,
-                   rightToken != tab.groupToken {
-                    let leftToken: String? = postMoveIdx > 0
-                        ? postMoveTabs[postMoveIdx - 1].groupToken : nil
-                    let leftAllowsJoin = (leftToken == nil) || (leftToken == rightToken)
-                    if leftAllowsJoin {
-                        AppLogDebug(
-                            "[TAB_GROUPS][STRIP_DRAG] auto-join windowId=\(browserState.windowId) " +
-                            "tabId=\(tab.guid) token=\(rightToken) postMoveIdx=\(postMoveIdx)"
-                        )
-                        ChromiumLauncher.sharedInstance().bridge?.addTabsToGroup(
-                            withWindowId: Int64(browserState.windowId),
-                            tabIds: [NSNumber(value: Int64(tab.guid))],
-                            tokenHex: rightToken
-                        )
+
+                let sandwichToken: String? = {
+                    guard postMoveIdx > 0,
+                          postMoveIdx + 1 < postMoveTabs.count,
+                          let leftToken = postMoveTabs[postMoveIdx - 1].groupToken,
+                          let rightToken = postMoveTabs[postMoveIdx + 1].groupToken,
+                          leftToken == rightToken,
+                          leftToken != tab.groupToken else { return nil }
+                    return leftToken
+                }()
+
+                let leadingEdgeToken: String? = {
+                    guard let token = context.targetGroupForLeadingJoin else { return nil }
+                    if postMoveIdx > 0,
+                       let leftToken = postMoveTabs[postMoveIdx - 1].groupToken,
+                       leftToken != token {
+                        return nil  // parking between two groups
                     }
+                    return token
+                }()
+
+                if let token = sandwichToken ?? leadingEdgeToken {
+                    AppLogDebug(
+                        "[TAB_GROUPS][STRIP_DRAG] auto-join windowId=\(browserState.windowId) " +
+                        "tabId=\(tab.guid) token=\(token) postMoveIdx=\(postMoveIdx) " +
+                        "kind=\(sandwichToken != nil ? "sandwich" : "leadingEdge")"
+                    )
+                    ChromiumLauncher.sharedInstance().bridge?.addTabsToGroup(
+                        withWindowId: Int64(browserState.windowId),
+                        tabIds: [NSNumber(value: Int64(tab.guid))],
+                        tokenHex: token
+                    )
                 }
             }
         }
