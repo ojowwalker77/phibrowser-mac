@@ -1735,19 +1735,39 @@ extension TabStrip: TabStripDragDelegate {
 
                 browserState.moveNormalTabLocally(from: originalIndex, to: toIndex)
 
-                // B1 auto-leave: detach if the drop falls outside the
-                // pre-move range (in the run's pre-move index space).
-                if let sourceToken, let run = preMoveRun,
-                   toIndex < run.range.lowerBound || toIndex > run.range.upperBound + 1 {
-                    AppLogDebug(
-                        "[TAB_GROUPS][STRIP_DRAG] auto-leave windowId=\(browserState.windowId) " +
-                        "tabId=\(tab.guid) token=\(sourceToken) " +
-                        "dropIndex=\(toIndex) outside preMoveRange=\(run.range)"
-                    )
-                    ChromiumLauncher.sharedInstance().bridge?.removeTabsFromGroup(
-                        withWindowId: Int64(browserState.windowId),
-                        tabIds: [NSNumber(value: Int64(tab.guid))]
-                    )
+                // Auto-leave: detach when the drop signals "out of
+                // group" intent. TWO disjoint triggers, mirroring the
+                // auto-join structure:
+                //
+                // 1. Geometric — the drop's toIndex falls outside the
+                //    group's pre-move range. Reliable for groups in
+                //    the strip's middle/right (cursor past the group
+                //    moves toIndex past upperBound + 1).
+                //
+                // 2. Cursor-gated leading edge — the drag controller
+                //    set `targetGroupForLeadingLeave` to the dragged
+                //    tab's own group's token because the cursor sat
+                //    strictly before that group's chip. Required for
+                //    the first group in the strip, where `lowerBound`
+                //    is 0 and the geometric check can never trigger.
+                if let sourceToken {
+                    let outsideRange: Bool = {
+                        guard let run = preMoveRun else { return false }
+                        return toIndex < run.range.lowerBound
+                            || toIndex > run.range.upperBound + 1
+                    }()
+                    let cursorRequestsLeave = (context.targetGroupForLeadingLeave == sourceToken)
+                    if outsideRange || cursorRequestsLeave {
+                        AppLogDebug(
+                            "[TAB_GROUPS][STRIP_DRAG] auto-leave windowId=\(browserState.windowId) " +
+                            "tabId=\(tab.guid) token=\(sourceToken) " +
+                            "trigger=\(outsideRange ? "outsideRange" : "cursorBeforeChip")"
+                        )
+                        ChromiumLauncher.sharedInstance().bridge?.removeTabsFromGroup(
+                            withWindowId: Int64(browserState.windowId),
+                            tabIds: [NSNumber(value: Int64(tab.guid))]
+                        )
+                    }
                 }
 
                 // Auto-join: TWO disjoint paths.

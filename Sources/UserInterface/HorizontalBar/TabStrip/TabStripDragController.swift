@@ -174,15 +174,35 @@ final class TabStripDragController {
             return chip.token
         }()
 
+        // Symmetric leading-edge LEAVE: when the dragged tab is in
+        // some group AND the cursor sits strictly before that
+        // group's chip, the user is dragging out via the leading
+        // edge. The geometric auto-leave check
+        // (`toIndex < lowerBound`) can't detect this when the group
+        // sits at the strip's leading edge — lowerBound is 0 and no
+        // toIndex can be less. Driven purely by cursor-vs-chip.minX
+        // on the dragged tab's *own* group's chip; not constrained
+        // to `targetIndex == firstMemberIndex` so dragging the very
+        // first member out (where after exclusion `targetIndex`
+        // points to the next visible member) is also handled.
+        let leadingLeaveToken: String? = {
+            guard let token = context.draggingTab.groupToken,
+                  let chip = metrics.chipFrames.first(where: { $0.token == token }),
+                  cursorInContainer < chip.frame.minX else { return nil }
+            return token
+        }()
+
         // Update the drag target state.
         let changed = context.targetContainerType != targetZone
             || context.targetIndex != targetIndex
             || context.gapBeforeRunStartChip != gapBeforeChip
             || context.targetGroupForLeadingJoin != leadingJoinToken
+            || context.targetGroupForLeadingLeave != leadingLeaveToken
         context.targetContainerType = targetZone
         context.targetIndex = targetIndex
         context.gapBeforeRunStartChip = gapBeforeChip
         context.targetGroupForLeadingJoin = leadingJoinToken
+        context.targetGroupForLeadingLeave = leadingLeaveToken
 
         // Only relayout when the destination actually changes.
         if changed {
