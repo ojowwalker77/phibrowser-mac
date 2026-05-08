@@ -300,21 +300,200 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
         let activeIdx = normalTabs.firstIndex {
             isTabActive($0, activeTab: activeTab)
         }
+
+        // While a drag is signaling leave-from-this-group (leading or
+        // trailing edge cursor gate), pretend the dragged tab is no
+        // longer in the group for boundary-path purposes:
+        //
+        //  • drop it from `containsActive` so the active-tab outline
+        //    carving doesn't extend the colored path out to the
+        //    floating proxy at the cursor;
+        //  • when it was the run's last member, anchor the path to
+        //    the previous visible member instead of the proxy frame.
+        //
+        // The geometric `outsideRange` leave is not detected here —
+        // the drag controller hasn't yet computed it; we only have
+        // the cursor-gated tokens. That's fine: at cursor positions
+        // far enough to trigger geometric leave the cursor has
+        // already crossed the trailing edge, so trailing leave is
+        // also active, and this branch fires.
+        let dragCtx = dragController.context
+        let leaveTokenForActive: String? = {
+            guard let ctx = dragCtx, let activeIdx else { return nil }
+            guard tabId(for: ctx.draggingTab) == tabId(for: normalTabs[activeIdx]) else { return nil }
+            if let t = ctx.targetGroupForLeadingLeave { return t }
+            if let t = ctx.targetGroupForTrailingLeave { return t }
+            return nil
+        }()
+
+        // Symmetric to leave: detect when the active tab is the
+        // dragged tab AND it's *about to join* a foreign group T,
+        // so the colored boundary path can carve around the floating
+        // proxy. Without this, an ungrouped active tab approaching
+        // T appears with no group-color outline during drag — the
+        // boundary stops at z.maxX and the proxy floats with only
+        // its plain active outline, even though release would put
+        // it in T. The carve gives the user a visible "this tab
+        // will be in T" cue before release.
+        //
+        // Auto-join sources (mirrored from `dragControllerDidEndDrag`):
+        //   • leadingJoin token (drop at lowerBound, gap-after-chip).
+        //   • trailingJoin token (drop at upperBound+1, ≥1/3 cover z).
+        //   • sandwich: drop strictly inside T's run — checked per-
+        //     run below since it depends on run.range.
+        let activeIsDraggedForeign: Bool = {
+            guard let ctx = dragCtx, let activeIdx else { return false }
+            guard tabId(for: ctx.draggingTab) == tabId(for: normalTabs[activeIdx]) else { return false }
+            return true
+        }()
+
         var result: [GroupGeometry] = []
         for run in runs where !run.isCollapsed {
             guard let chip = chipViews[run.token],
                   chip.superview != nil,
                   run.range.upperBound < normalTabs.count else { continue }
-            let lastTab = normalTabs[run.range.upperBound]
+
+            let leavePending: Bool = {
+                guard let ctx = dragCtx else { return false }
+                return ctx.targetGroupForLeadingLeave == run.token
+                    || ctx.targetGroupForTrailingLeave == run.token
+            }()
+
+            // Pick the visible last member: when the dragged tab is
+            // the run's last member AND a leave is pending, fall
+            // back to the member before it (the one z) so the path
+            // ends at z.maxX rather than the proxy's cursor frame.
+            let lastIdx: Int = {
+                if leavePending,
+                   let ctx = dragCtx,
+                   tabId(for: normalTabs[run.range.upperBound]) == tabId(for: ctx.draggingTab) {
+                    return max(run.range.lowerBound, run.range.upperBound - 1)
+                }
+                return run.range.upperBound
+            }()
+            let lastTab = normalTabs[lastIdx]
             guard let lastTabView = normalTabViews[tabId(for: lastTab)],
                   lastTabView.superview != nil else { continue }
             let chipFrame = chip.convert(chip.bounds, to: coordView)
             let lastFrame = lastTabView.convert(lastTabView.bounds, to: coordView)
-            let containsActive = activeIdx.map { run.range.contains($0) } ?? false
+
+            // Active-in-run:
+            //   - Existing membership: run.range.contains(activeIdx).
+            //     Flips false when the active tab IS the dragged tab
+            //     AND it's leaving this run.
+            //   - About to join (active = dragged, foreign T): when
+            //     auto-join would fire on release. Three sources:
+            //       a) ctx.targetGroupForLeadingJoin == run.token
+            //       b) ctx.targetGroupForTrailingJoin == run.token
+            //       c) sandwich: ctx.targetIndex strictly inside
+            //          run.range (lowerBound < idx <= upperBound),
+            //          with D's groupToken != run.token. Auto-joins
+            //          via post-move neighbors at commit; we mirror
+            //          that intent here so the visual carving leads
+            //          the commit by one tick.
+            let activeIsLeavingThisRun = (leaveTokenForActive == run.token)
+            let activeIsJoiningThisRun: Bool = {
+                guard activeIsDraggedForeign, let ctx = dragCtx else { return false }
+                if ctx.targetGroupForLeadingJoin == run.token { return true }
+                if ctx.targetGroupForTrailingJoin == run.token { return true }
+                // Sandwich heuristic: drop slot strictly inside T's
+                // run AND D not already in T's group.
+                if ctx.draggingTab.groupToken != run.token,
+                   ctx.targetIndex > run.range.lowerBound,
+                   ctx.targetIndex <= run.range.upperBound {
+                    return true
+                }
+                return false
+            }()
+            let containsActive: Bool = activeIdx.map {
+                let inRun = run.range.contains($0) && !activeIsLeavingThisRun
+                return inRun || activeIsJoiningThisRun
+            } ?? false
+
+            // Trailing-edge JOIN visual: extend the run's rightX
+            // past z to include the drop slot when this run is the
+            // current trailing-join target. Without this, the
+            // colored boundary stops at z.maxX while the drop slot
+            // (where the foreign tab would land if released) sits
+            // visibly outside the boundary — the commit would then
+            // surprise the user by adding the tab to T despite the
+            // visual saying otherwise. We extend to the next non-T
+            // tab's drag-state minX (= drop slot's right edge);
+            // when the run sits at the strip's tail, fall back to
+            // `lastFrame.maxX + idealTabWidth` as the slot width.
+            let trailingJoinPending = (dragCtx?.targetGroupForTrailingJoin == run.token)
+            let rightX: CGFloat = {
+                guard trailingJoinPending else { return lastFrame.maxX }
+                let nextIdx = run.range.upperBound + 1
+                if nextIdx < normalTabs.count {
+                    let nextTab = normalTabs[nextIdx]
+                    if let nextView = normalTabViews[tabId(for: nextTab)],
+                       nextView.superview != nil {
+                        let nextFrame = nextView.convert(nextView.bounds, to: coordView)
+                        if nextFrame.minX > lastFrame.maxX {
+                            return nextFrame.minX
+                        }
+                    }
+                }
+                return lastFrame.maxX + TabStripMetrics.Tab.idealWidth
+            }()
+
+            // Stretch leftX/rightX to encompass the dragged proxy
+            // when, on release, D would end up as a member of this
+            // run. Two sources:
+            //
+            //   • Own group (D.groupToken == run.token): D is
+            //     already a member; "in run" means NOT leaving via
+            //     leading/trailing edge.
+            //   • Foreign group join: leadingJoin token,
+            //     trailingJoin token, or sandwich heuristic (drop
+            //     slot strictly inside this run AND D not already
+            //     in it).
+            //
+            // For active D the WCC path builder already extends to
+            // proxy via `min`/`max` with `af` (the active frame is
+            // the proxy frame for the dragged tab). The leftX/
+            // rightX widening here is redundant for that path but
+            // harmless. For non-active D, `af` is some OTHER tab
+            // (or unused) and the path builder won't reach the
+            // proxy on its own — the widening is what makes the
+            // underline run beneath the floating proxy.
+            //
+            // The padding by `edgeInset` cancels out WCC's inset
+            // (`leftX + inset` and `rightX - inset`), so the line
+            // truly reaches the proxy's left/right edges instead
+            // of being clipped 5pt short.
+            let dWillBeInThisRun: Bool = {
+                guard let ctx = dragCtx else { return false }
+                if ctx.draggingTab.groupToken == run.token {
+                    let leavingThisRun = (ctx.targetGroupForLeadingLeave == run.token
+                        || ctx.targetGroupForTrailingLeave == run.token)
+                    return !leavingThisRun
+                }
+                if ctx.targetGroupForLeadingJoin == run.token { return true }
+                if ctx.targetGroupForTrailingJoin == run.token { return true }
+                if ctx.targetIndex > run.range.lowerBound,
+                   ctx.targetIndex <= run.range.upperBound {
+                    return true
+                }
+                return false
+            }()
+
+            var finalLeftX = chipFrame.minX
+            var finalRightX = rightX
+            if dWillBeInThisRun,
+               let proxyView = draggingProxyView,
+               proxyView.superview != nil {
+                let proxyFrame = proxyView.convert(proxyView.bounds, to: coordView)
+                let edgeInset = TabStripMetrics.Tab.inverseCornerRadius - 3
+                finalLeftX = min(finalLeftX, proxyFrame.minX - edgeInset)
+                finalRightX = max(finalRightX, proxyFrame.maxX + edgeInset)
+            }
+
             result.append(GroupGeometry(
                 token: run.token,
-                leftX: chipFrame.minX,
-                rightX: lastFrame.maxX,
+                leftX: finalLeftX,
+                rightX: finalRightX,
                 containsActive: containsActive
             ))
         }
@@ -1623,9 +1802,28 @@ extension TabStrip: TabStripDragDelegate {
             return TabStripChipFrame(
                 token: run.token,
                 firstMemberIndex: run.range.lowerBound,
+                lastMemberIndex: run.range.upperBound,
                 frame: chip.frame.offsetBy(dx: currentScrollOffset, dy: 0)
             )
         }
+
+        // Compute the proxy's current frame in normalContainer
+        // coords (same space as `normalTabFrames`), if a drag is
+        // active and the proxy is over the normal zone. Used by
+        // the drag controller's group-trailing hit testing so
+        // thresholds key off the visible tab edges (independent of
+        // where the user grabbed inside the tab).
+        let draggedTabFrameInNormal: CGRect? = {
+            guard let proxy = draggingProxyView,
+                  proxy.superview != nil,
+                  let ctx = dragController.context,
+                  ctx.targetContainerType == .normal else { return nil }
+            let proxyInStrip = proxy.convert(proxy.bounds, to: self)
+            // Translate from tab-strip space → normalContainer
+            // space (matches normalTabFrames offset bookkeeping).
+            return proxyInStrip
+                .offsetBy(dx: -normalContainer.frame.minX + currentScrollOffset, dy: 0)
+        }()
 
         return TabStripMetricsSnapshot(
             pinnedContainerFrame: pinnedContainer.frame,
@@ -1634,7 +1832,8 @@ extension TabStrip: TabStripDragDelegate {
             normalTabFrames: normalFrames,
             pinnedTabFrames: pinnedFrames,
             normalScrollOffset: currentScrollOffset,
-            chipFrames: chipFrames
+            chipFrames: chipFrames,
+            draggedTabFrameInNormal: draggedTabFrameInNormal
         )
     }
 
@@ -1736,13 +1935,12 @@ extension TabStrip: TabStripDragDelegate {
                 browserState.moveNormalTabLocally(from: originalIndex, to: toIndex)
 
                 // Auto-leave: detach when the drop signals "out of
-                // group" intent. TWO disjoint triggers, mirroring the
-                // auto-join structure:
+                // group" intent. THREE disjoint triggers, mirroring
+                // the auto-join structure:
                 //
                 // 1. Geometric — the drop's toIndex falls outside the
-                //    group's pre-move range. Reliable for groups in
-                //    the strip's middle/right (cursor past the group
-                //    moves toIndex past upperBound + 1).
+                //    group's pre-move range. Reliable when the cursor
+                //    moves past a tab adjacent to the group.
                 //
                 // 2. Cursor-gated leading edge — the drag controller
                 //    set `targetGroupForLeadingLeave` to the dragged
@@ -1750,18 +1948,33 @@ extension TabStrip: TabStripDragDelegate {
                 //    strictly before that group's chip. Required for
                 //    the first group in the strip, where `lowerBound`
                 //    is 0 and the geometric check can never trigger.
+                //
+                // 3. Cursor-gated trailing edge — the drag controller
+                //    set `targetGroupForTrailingLeave` because the
+                //    cursor crossed the right edge of the group's
+                //    last visible member. Required for the slot
+                //    immediately after the group's last member, where
+                //    the geometric check (`toIndex > upperBound + 1`)
+                //    cannot trigger until the cursor also clears the
+                //    next tab's midX (or when no next tab exists at
+                //    the strip's tail).
                 if let sourceToken {
                     let outsideRange: Bool = {
                         guard let run = preMoveRun else { return false }
                         return toIndex < run.range.lowerBound
                             || toIndex > run.range.upperBound + 1
                     }()
-                    let cursorRequestsLeave = (context.targetGroupForLeadingLeave == sourceToken)
-                    if outsideRange || cursorRequestsLeave {
+                    let cursorRequestsLeadingLeave = (context.targetGroupForLeadingLeave == sourceToken)
+                    let cursorRequestsTrailingLeave = (context.targetGroupForTrailingLeave == sourceToken)
+                    if outsideRange || cursorRequestsLeadingLeave || cursorRequestsTrailingLeave {
+                        let trigger: String = {
+                            if outsideRange { return "outsideRange" }
+                            if cursorRequestsLeadingLeave { return "cursorBeforeChip" }
+                            return "cursorPastTrailingEdge"
+                        }()
                         AppLogDebug(
                             "[TAB_GROUPS][STRIP_DRAG] auto-leave windowId=\(browserState.windowId) " +
-                            "tabId=\(tab.guid) token=\(sourceToken) " +
-                            "trigger=\(outsideRange ? "outsideRange" : "cursorBeforeChip")"
+                            "tabId=\(tab.guid) token=\(sourceToken) trigger=\(trigger)"
                         )
                         ChromiumLauncher.sharedInstance().bridge?.removeTabsFromGroup(
                             withWindowId: Int64(browserState.windowId),
@@ -1807,12 +2020,18 @@ extension TabStrip: TabStripDragDelegate {
                 }()
 
                 let leadingEdgeToken: String? = context.targetGroupForLeadingJoin
+                let trailingEdgeToken: String? = context.targetGroupForTrailingJoin
 
-                if let token = sandwichToken ?? leadingEdgeToken {
+                if let token = sandwichToken ?? leadingEdgeToken ?? trailingEdgeToken {
+                    let kind: String = {
+                        if sandwichToken != nil { return "sandwich" }
+                        if leadingEdgeToken != nil { return "leadingEdge" }
+                        return "trailingEdge"
+                    }()
                     AppLogDebug(
                         "[TAB_GROUPS][STRIP_DRAG] auto-join windowId=\(browserState.windowId) " +
                         "tabId=\(tab.guid) token=\(token) postMoveIdx=\(postMoveIdx) " +
-                        "kind=\(sandwichToken != nil ? "sandwich" : "leadingEdge")"
+                        "kind=\(kind)"
                     )
                     ChromiumLauncher.sharedInstance().bridge?.addTabsToGroup(
                         withWindowId: Int64(browserState.windowId),

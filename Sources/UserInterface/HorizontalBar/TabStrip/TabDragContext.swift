@@ -69,6 +69,31 @@ final class TabDragContext {
     /// the FIRST member to the left of its own chip, where
     /// `targetIndex == sourceIndex + 1`) still take the commit path.
     var targetGroupForLeadingLeave: String?
+
+    /// Token of the dragged tab's *own* group when the cursor sits
+    /// past the right edge of the group's last visible member
+    /// (`cursor.x >= lastMember.frame.maxX`). Symmetric counterpart
+    /// to `targetGroupForLeadingLeave`: represents "leave the group
+    /// via trailing edge" intent that the geometric auto-leave check
+    /// (`toIndex > upperBound + 1`) cannot detect when the cursor is
+    /// in the slot immediately after the group's last member but
+    /// hasn't yet crossed the next tab's midX (or when no such next
+    /// tab exists). Drop-handler reads this to fire
+    /// `removeTabsFromGroup`. Also feeds `hasPositionChanged` so
+    /// drag-out drops with no positional change still take the
+    /// commit path.
+    var targetGroupForTrailingLeave: String?
+
+    /// Token of a foreign group whose last visible member z is
+    /// covered ≥50% by the dragged tab's frame AND whose drop slot
+    /// (toIndex == upperBound + 1) is the current target. Mirrors
+    /// `targetGroupForLeadingJoin` for the trailing edge: drop here
+    /// auto-joins the dragged tab to that group as its new last
+    /// member. Visual feedback comes from `groupGeometries`
+    /// extending the run's `rightX` past z to include the drop slot
+    /// while this token is set.
+    var targetGroupForTrailingJoin: String?
+
     /// Current mouse location in tab-strip coordinates.
     var currentMouseLocation: CGPoint
 
@@ -102,6 +127,8 @@ final class TabDragContext {
         }
         return targetGroupForLeadingJoin != nil
             || targetGroupForLeadingLeave != nil
+            || targetGroupForTrailingLeave != nil
+            || targetGroupForTrailingJoin != nil
     }
 
     // MARK: - Init
