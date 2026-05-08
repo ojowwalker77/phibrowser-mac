@@ -58,7 +58,15 @@ final class NotificationCardManagerTests: XCTestCase {
         )
         XCTAssertEqual(manager.count, 1)
         XCTAssertEqual(manager.oldestTaskId, "b")
-        XCTAssertEqual(messenger.responses.first?.requestId, "r1")
+        XCTAssertTrue(messenger.responses.isEmpty)
+        XCTAssertEqual(messenger.broadcasts.count, 1)
+        XCTAssertEqual(messenger.broadcasts.first?.type, "notification")
+        let broadcastJSON = messenger.broadcasts[0].payload.data(using: .utf8).flatMap {
+            try? JSONSerialization.jsonObject(with: $0) as? [String: Any]
+        }
+        let inner = broadcastJSON?["payload"] as? [String: Any]
+        XCTAssertEqual(inner?["decision"] as? String, "timeout")
+        XCTAssertEqual(inner?["task_id"] as? String, "a")
     }
 
     func testPreservesCustomButtonTitleFromPayload() {

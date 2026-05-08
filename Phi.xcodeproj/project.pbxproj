@@ -2161,12 +2161,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				897C09F92F6BEDA000E5CA9B /* IMChannelsViewModel.swift in Sources */,
-				897C09FA2F6BEDA000E5CA9B /* IMChannelAPIClient.swift in Sources */,
 				AE00FFFE0000000000000003 /* PhiAgentEndpointResolver.swift in Sources */,
-				897C09FB2F6BEDA000E5CA9B /* IMChannelsSettingView.swift in Sources */,
-				897C09FC2F6BEDA000E5CA9B /* IMChannelsSettingHostingViewController.swift in Sources */,
-				897C09FD2F6BEDA000E5CA9B /* IMChannelsSettingViewController.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -2174,12 +2169,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				897C09FE2F6BEDA000E5CA9B /* IMChannelsViewModel.swift in Sources */,
-				897C09FF2F6BEDA000E5CA9B /* IMChannelAPIClient.swift in Sources */,
 				AE00FFFE0000000000000004 /* PhiAgentEndpointResolver.swift in Sources */,
-				897C0A002F6BEDA000E5CA9B /* IMChannelsSettingView.swift in Sources */,
-				897C0A012F6BEDA000E5CA9B /* IMChannelsSettingHostingViewController.swift in Sources */,
-				897C0A022F6BEDA000E5CA9B /* IMChannelsSettingViewController.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

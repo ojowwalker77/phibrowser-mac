@@ -44,9 +44,13 @@ class LivingDownloadItem: ObservableObject, Identifiable {
             .store(in: &cancellables)
         
         downloadItem.$state
-            .sink { [weak self] state in
-                if state == .complete || state == .cancelled {
-                    self?.startDismissTimer()
+            .sink { [weak self, weak downloadItem] state in
+                guard let self, let downloadItem else { return }
+                guard state == .complete || state == .cancelled else { return }
+                if downloadItem.safetyState == .normal {
+                    self.startDismissTimer()
+                } else {
+                    self.pauseDismissTimer()
                 }
             }
             .store(in: &cancellables)

@@ -1,0 +1,24 @@
+{
+  "configurations" : [
+    {
+      "id" : "21C4D0DD-D708-478D-A6FA-6BFE199A012A",
+      "name" : "Configuration 1",
+      "options" : {
+
+      }
+    }
+  ],
+  "defaultOptions" : {
+
+  },
+  "testTargets" : [
+    {
+      "target" : {
+        "containerPath" : "container:Phi.xcodeproj",
+        "identifier" : "B0C469562E3B10E2007F0C7A",
+        "name" : "PhiBrowserTests"
+      }
+    }
+  ],
+  "version" : 1
+}
