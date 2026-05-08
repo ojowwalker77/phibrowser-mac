@@ -387,6 +387,8 @@ enum NativeTabDecisionEngine {
                     "anchorIndex=\(anchorIndex) result=\(anchorIndex + 1)"
                 )
                 return anchorIndex + 1
+            } else if context.creationKind == .restore {
+                return 0
             }
         }
 

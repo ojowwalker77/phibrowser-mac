@@ -303,18 +303,22 @@ extension PhiChromiumCoordinator: PhiChromiumBridgeDelegate {
     }
     
     func tabIndicesUpdated(_ tabIndices: [NSNumber : NSNumber], windowId: Int64) {
-        AppLogDebug("[Tab] tabIndicesUpdated: \(tabIndices)")
+        AppLogDebug("[Tab] tabIndicesUpdated: \(tabIndices), window:\(windowId)")
         let map: [Int: Int] = tabIndices.reduce(into: [:]) { partialResult, element in
             partialResult[element.key.intValue] = element.value.intValue
         }
-        // FIXME: Chromium `TabsProxy::UpdateTabIndices` does not provide a window id yet, so this
-        // currently falls back to the active window.
-        let windowId = MainBrowserWindowControllersManager.shared.activeWindowController?.windowId
-        if let windowId {
-            EventBus.shared
-                .send(TabEvent(browserId: windowId,
-                             action: .updateTabIndex(map)))
+        let targetWindowId: Int?
+        if windowId != 0 {
+            targetWindowId = windowId.intValue
+        } else {
+            targetWindowId = MainBrowserWindowControllersManager.shared.activeWindowController?.windowId
         }
+        guard let targetWindowId else {
+            return
+        }
+        EventBus.shared
+            .send(TabEvent(browserId: targetWindowId,
+                         action: .updateTabIndex(map)))
     }
 
     // =========================================================================
