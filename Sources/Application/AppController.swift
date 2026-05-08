@@ -62,8 +62,6 @@ import Countly
         
         DefaultExtensionManifestWriter.start()
         
-        BrowserRestoreManager.shared.startObserving()
-        
         NotificationCenter.default.addObserver(self,
                                                selector: #selector(phiWillTryToTerminateApplicationNotification(_:)),
                                                name: Notification.Name("PhiWillTryToTerminateApplicationNotification"),
@@ -166,7 +164,6 @@ import Countly
     
     @MainActor
     @objc func phiWillTryToTerminateApplicationNotification(_ notification: Notification) {
-        BrowserRestoreManager.shared.saveSnapshotIfNeeded()
     }
 }
 
