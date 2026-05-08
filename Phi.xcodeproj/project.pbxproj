@@ -142,16 +142,6 @@
 		897C09F62F6BEDA000E5CA9B /* IMChannelsSettingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 897C09F02F6BEDA000E5CA9B /* IMChannelsSettingView.swift */; };
 		897C09F72F6BEDA000E5CA9B /* IMChannelsSettingHostingViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 897C09EF2F6BEDA000E5CA9B /* IMChannelsSettingHostingViewController.swift */; };
 		897C09F82F6BEDA000E5CA9B /* IMChannelsSettingViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 897C09F12F6BEDA000E5CA9B /* IMChannelsSettingViewController.swift */; };
-		897C09F92F6BEDA000E5CA9B /* IMChannelsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 897C09F22F6BEDA000E5CA9B /* IMChannelsViewModel.swift */; };
-		897C09FA2F6BEDA000E5CA9B /* IMChannelAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 897C09EE2F6BEDA000E5CA9B /* IMChannelAPIClient.swift */; };
-		897C09FB2F6BEDA000E5CA9B /* IMChannelsSettingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 897C09F02F6BEDA000E5CA9B /* IMChannelsSettingView.swift */; };
-		897C09FC2F6BEDA000E5CA9B /* IMChannelsSettingHostingViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 897C09EF2F6BEDA000E5CA9B /* IMChannelsSettingHostingViewController.swift */; };
-		897C09FD2F6BEDA000E5CA9B /* IMChannelsSettingViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 897C09F12F6BEDA000E5CA9B /* IMChannelsSettingViewController.swift */; };
-		897C09FE2F6BEDA000E5CA9B /* IMChannelsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 897C09F22F6BEDA000E5CA9B /* IMChannelsViewModel.swift */; };
-		897C09FF2F6BEDA000E5CA9B /* IMChannelAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 897C09EE2F6BEDA000E5CA9B /* IMChannelAPIClient.swift */; };
-		897C0A002F6BEDA000E5CA9B /* IMChannelsSettingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 897C09F02F6BEDA000E5CA9B /* IMChannelsSettingView.swift */; };
-		897C0A012F6BEDA000E5CA9B /* IMChannelsSettingHostingViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 897C09EF2F6BEDA000E5CA9B /* IMChannelsSettingHostingViewController.swift */; };
-		897C0A022F6BEDA000E5CA9B /* IMChannelsSettingViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 897C09F12F6BEDA000E5CA9B /* IMChannelsSettingViewController.swift */; };
 		8E486A752F3ED68600078DEC /* StatusURLView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E486A742F3ED68600078DEC /* StatusURLView.swift */; };
 		8E486A772F3EEF8A00078DEC /* StatusURLViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E486A762F3EEF8A00078DEC /* StatusURLViewModel.swift */; };
 		8E4C94962F10AEED00B09A80 /* TabBackgroundLayer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E4C94952F10AEED00B09A80 /* TabBackgroundLayer.swift */; };
@@ -182,6 +172,7 @@
 		8EE5BEEC2F14FF9800698D7D /* TabCloseButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8EE5BEEB2F14FF9800698D7D /* TabCloseButton.swift */; };
 		8EEBD7692FAB137E008CBD9A /* TabGroupRun.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8EEBD7682FAB137E008CBD9A /* TabGroupRun.swift */; };
 		8EEBD76C2FAB1731008CBD9A /* TabGroupChipView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8EEBD76A2FAB1731008CBD9A /* TabGroupChipView.swift */; };
+		8EEBD8A72FAC9425008CBD9A /* SidebarGroupDropResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8EEBD8A62FAC9425008CBD9A /* SidebarGroupDropResolver.swift */; };
 		8EEC91C22F8623EB00C5336E /* ExtensionPopupAnchor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8EEC91C12F8623EB00C5336E /* ExtensionPopupAnchor.swift */; };
 		8EF36C032F4E9E7000FCC91E /* TabViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8EF36C012F4E9E7000FCC91E /* TabViewModel.swift */; };
 		8EF36C062F4E9EC100FCC91E /* TabContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8EF36C052F4E9EC100FCC91E /* TabContentView.swift */; };
@@ -554,6 +545,7 @@
 		8EE5BEEB2F14FF9800698D7D /* TabCloseButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TabCloseButton.swift; sourceTree = "<group>"; };
 		8EEBD7682FAB137E008CBD9A /* TabGroupRun.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TabGroupRun.swift; sourceTree = "<group>"; };
 		8EEBD76A2FAB1731008CBD9A /* TabGroupChipView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TabGroupChipView.swift; sourceTree = "<group>"; };
+		8EEBD8A62FAC9425008CBD9A /* SidebarGroupDropResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarGroupDropResolver.swift; sourceTree = "<group>"; };
 		8EEC91C12F8623EB00C5336E /* ExtensionPopupAnchor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExtensionPopupAnchor.swift; sourceTree = "<group>"; };
 		8EF36C012F4E9E7000FCC91E /* TabViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TabViewModel.swift; sourceTree = "<group>"; };
 		8EF36C052F4E9EC100FCC91E /* TabContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TabContentView.swift; sourceTree = "<group>"; };
@@ -1362,6 +1354,7 @@
 		CC2708992E7965E700B65AB8 /* TabList */ = {
 			isa = PBXGroup;
 			children = (
+				8EEBD8A62FAC9425008CBD9A /* SidebarGroupDropResolver.swift */,
 				8E8008F72FA1A73A00EB24C5 /* TabGroupSidebarItem.swift */,
 				CCBF8F452E653F6900B9A99E /* BookmarkModel.swift */,
 				CCBF8F632E65835900B9A99E /* BookmarkModel+Sidebar.swift */,
@@ -1988,6 +1981,7 @@
 				CCBF8F642E65835900B9A99E /* BookmarkModel+Sidebar.swift in Sources */,
 				CC4351C12EC73509009D8FC3 /* GradientMapper.swift in Sources */,
 				CC376CDA2EC5ED4100270B93 /* AISettingsViewController.swift in Sources */,
+				8EEBD8A72FAC9425008CBD9A /* SidebarGroupDropResolver.swift in Sources */,
 				375B2D8C2ED408270053FECC /* AccountUserDefaults.swift in Sources */,
 				37C1B0D82ED6DCBD00DD4496 /* Shortcuts.swift in Sources */,
 				B0F370DA2E433F0E000B51F9 /* OverlayWindowController.swift in Sources */,

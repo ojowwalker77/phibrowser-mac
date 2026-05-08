@@ -114,13 +114,24 @@
         }
       }
     },
-    "%@ tab group, %d tabs" : {
-      "comment" : "Tab Groups - VoiceOver label for horizontal-strip group chip",
+    "%@ tab group, %d tabs, collapsed" : {
+      "comment" : "Tab Groups - VoiceOver label for collapsed horizontal-strip group chip",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "new",
-            "value" : "%1$@ tab group, %2$d tabs"
+            "value" : "%1$@ tab group, %2$d tabs, collapsed"
+          }
+        }
+      }
+    },
+    "%@ tab group, %d tabs, expanded" : {
+      "comment" : "Tab Groups - VoiceOver label for expanded horizontal-strip group chip",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@ tab group, %2$d tabs, expanded"
           }
         }
       }
@@ -277,7 +288,7 @@
       "comment" : "Import data type - Browsing history toggle label"
     },
     "Cancel" : {
-      "comment" : "AI settings - Cancel button in disable-AI confirmation alert\nAI settings - Cancel button in disable-connectors confirmation alert\nAccount settings - Cancel button in logout confirmation dialog\nAccount settings - Cancel button in rename dialog\nCancel\nDebug clear data - Alert button to cancel clearing user data\nDebug import user data - Alert button to cancel importing user data\nDownload item row - Tooltip for cancel button during safety scan\nDownload item row - Tooltip for cancel download button\nEditor - Cancel button title\nFeedback form - Cancel button to dismiss feedback form\nNew folder dialog cancel button title\nTooltip for cancel button during safety scan in living downloads toast\nUpdate alert - Button to cancel update installation"
+      "comment" : "AI settings - Cancel button in disable-AI confirmation alert\nAI settings - Cancel button in disable-connectors confirmation alert\nAccount settings - Cancel button in logout confirmation dialog\nAccount settings - Cancel button in rename dialog\nCancel\nDebug clear data - Alert button to cancel clearing user data\nDebug import user data - Alert button to cancel importing user data\nDownload item row - Tooltip for cancel button during safety scan\nDownload item row - Tooltip for cancel download button\nEditor - Cancel button title\nFeedback form - Cancel button to dismiss feedback form\nNew folder dialog cancel button title\nTab group rename alert - Cancel button\nTooltip for cancel button during safety scan in living downloads toast\nUpdate alert - Button to cancel update installation"
     },
     "Cancel First" : {
 
@@ -906,6 +917,9 @@
     },
     "Pin extension" : {
       "comment" : "Extension list - Tooltip for pinning an extension"
+    },
+    "Pink" : {
+      "comment" : "Tab Groups - color name shown in auto-named group title and color picker"
     },
     "Please reauthenticate to restore account features." : {
       "comment" : "Account settings - Tooltip explaining why reauthentication is needed"
