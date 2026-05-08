@@ -1561,7 +1561,13 @@ extension SidebarTabListViewController: NSOutlineViewDelegate {
 
     func outlineView(_ outlineView: NSOutlineView, shouldExpandItem item: Any) -> Bool {
         if browserState.isDraggingTab && !allowExpandDuringDrag {
-            return false
+            // Phase 3: TabGroupSidebarItem is allowed to spring-load
+            // during drag so users can dive into a folded group's
+            // children for precise placement; other rows still keep
+            // the original "no expand during drag" guard.
+            if !(item is TabGroupSidebarItem) {
+                return false
+            }
         }
         return (item as? SidebarItem)?.isExpandable ?? false
     }
