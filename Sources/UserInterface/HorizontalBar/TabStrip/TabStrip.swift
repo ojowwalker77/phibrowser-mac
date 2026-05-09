@@ -2212,9 +2212,25 @@ extension TabStrip: TabStripDragDelegate {
         }
         // Clamp drag proxy within the combined pinned + normal bounds,
         // and never exceed the left edge of the New Tab button.
+        //
+        // Exception: when the dragged tab is itself the strip's
+        // rightmost tab AND belongs to a group, the natural clamp
+        // pins the proxy near its source position because the
+        // trailing-edge drag gap pushes the New Tab button right by
+        // ~one tab width. With the proxy effectively immovable, the
+        // user has no visual room to express "drag out of group via
+        // the trailing edge". Use the strip's right edge as the
+        // clamp instead — the proxy may briefly overlap the New Tab
+        // button while dragging, which is acceptable for the
+        // duration of an active drag.
         let padding: CGFloat = 6
         let minX = combinedFrame.minX + padding
-        let rightLimit = min(combinedFrame.maxX, newTabButton.frame.minX) - padding
+        let isRightmostGrouped = (context.sourceContainerType == .normal
+            && context.draggingTab.groupToken != nil
+            && context.sourceIndex == browserState.normalTabs.count - 1)
+        let rightLimit = isRightmostGrouped
+            ? combinedFrame.maxX - padding
+            : min(combinedFrame.maxX, newTabButton.frame.minX) - padding
         let maxX = rightLimit - frame.width
         if minX <= maxX {
             // Soft clamp for a slight elastic feel at the edges.
