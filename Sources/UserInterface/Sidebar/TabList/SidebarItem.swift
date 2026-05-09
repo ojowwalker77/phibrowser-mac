@@ -109,4 +109,8 @@ extension NSPasteboard.PasteboardType {
     static let phiBookmark = NSPasteboard.PasteboardType("com.phibrowser.bookmark")
     /// Source window identifier used for cross-window drags.
     static let sourceWindowId = NSPasteboard.PasteboardType("com.phibrowser.sourceWindowId")
+    /// Tab-group pasteboard type storing the group's hex token. Used
+    /// when the user drags a `TabGroupSidebarItem`'s header — the
+    /// payload identifies the entire contiguous group block.
+    static let tabGroup = NSPasteboard.PasteboardType("com.phibrowser.tabGroup")
 }

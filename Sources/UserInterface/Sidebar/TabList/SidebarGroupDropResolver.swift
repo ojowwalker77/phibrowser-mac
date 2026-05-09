@@ -92,6 +92,18 @@ struct SidebarGroupDropContext {
 
 enum SidebarGroupDropResolver {
 
+    static func shouldResolve(
+        proposedItem: Any?,
+        isRootBookmarkSectionDrop: Bool = false
+    ) -> Bool {
+        if isRootBookmarkSectionDrop {
+            return false
+        }
+        return proposedItem == nil
+            || proposedItem is SidebarGroupHeaderItem
+            || proposedItem is Tab
+    }
+
     /// `true` when the cursor sits on the upper half of `frame`,
     /// where "upper" means visually above midline regardless of
     /// the outline view's flipped coordinate system. Mirrors

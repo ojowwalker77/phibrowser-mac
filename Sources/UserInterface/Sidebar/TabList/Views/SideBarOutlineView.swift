@@ -97,39 +97,9 @@ class SideBarOutlineView: NSOutlineView {
         phiOutlineDelegate?.outlineView(self, didMiddleClickRow: clickedRow)
     }
     
-    /// Width / trailing inset of the relocated tab-group disclosure chevron.
-    /// Kept as constants so `TabGroupHeaderView` can mirror them when
-    /// reserving trailing space for the chevron.
-    static let tabGroupChevronWidth: CGFloat = 16
-    static let tabGroupChevronTrailingInset: CGFloat = 8
-
-    override func frameOfOutlineCell(atRow row: Int) -> NSRect {
-        // Tab-group rows expose the native disclosure triangle as the only
-        // collapse/expand affordance (Phi has no chevron in the SwiftUI
-        // header cell). The chevron lives at the trailing edge of the row
-        // — not the leading one — so the SwiftUI cell can render its
-        // color bar flush with the leading edge, vertically aligned with
-        // the group-affiliation bar on member tab rows. Bookmark folders
-        // and tabs continue to hide the native chevron (bookmark folders
-        // draw their own; tabs are not expandable).
-        if let item = item(atRow: row) as? SidebarItem,
-           item.itemType == .tabGroup {
-            let rowRect = rect(ofRow: row)
-            let width = Self.tabGroupChevronWidth
-            let height = Self.tabGroupChevronWidth
-            return NSRect(
-                x: rowRect.maxX - width - Self.tabGroupChevronTrailingInset,
-                y: rowRect.midY - height / 2,
-                width: width,
-                height: height
-            )
-        }
-        return .zero
-    }
     override func frameOfCell(atColumn column: Int, row: Int) -> NSRect {
-        // Tab-group rows: chevron is at the trailing edge so the cell can
-        // span the full row width starting at x=0. The SwiftUI header
-        // reserves trailing room for the chevron via internal padding.
+        // Tab-group rows render as self-contained `TabGroupCellView`
+        // leaves; let them span the full row width starting at x=0.
         if let item = item(atRow: row) as? SidebarItem,
            item.itemType == .tabGroup {
             let rowRect = rect(ofRow: row)
@@ -155,6 +125,11 @@ class SideBarOutlineView: NSOutlineView {
         rect.origin.x = indent
         rect.size.width -= indent /*+ NSScroller.scrollerWidth(for: .regular, scrollerStyle: .overlay)*/
         return rect
+    }
+
+    override func frameOfOutlineCell(atRow row: Int) -> NSRect {
+        // hide disclosure triangle
+        return .zero
     }
     
     override func draggingSession(_ session: NSDraggingSession, movedTo screenPoint: NSPoint) {

@@ -336,7 +336,6 @@ class SidebarTabListViewController: NSViewController {
         rebuildFloatingBookmarkPresentationIfNeeded()
         invalidateExistingTabCells()
         outlineView.reloadData()
-        applyTabGroupCollapseStates()
         selectActiveTab()
         applyFocusingSelection(for: browserState.focusingTab)
 
@@ -346,34 +345,6 @@ class SidebarTabListViewController: NSViewController {
         }
     }
 
-    /// Aligns each visible tab-group row's expansion state with the data
-    /// layer (`group.isCollapsed`). Called after every full reload so the
-    /// kVisualsChanged feedback loop (user click → bridge → Chromium →
-    /// Mac → here) lands as a UI change.
-    ///
-    /// `expandItem` / `collapseItem` DO trigger `shouldExpandItem` /
-    /// `shouldCollapseItem` (Apple's docs are silent on this and empirical
-    /// evidence shows they fire). Without the guard the data-driven call
-    /// would re-enter the bridge, get a round-trip back here, and loop.
-    /// `isApplyingTabGroupCollapseStates` short-circuits the user-gesture
-    /// branch in those delegate methods.
-    private var isApplyingTabGroupCollapseStates = false
-
-    private func applyTabGroupCollapseStates() {
-        isApplyingTabGroupCollapseStates = true
-        defer { isApplyingTabGroupCollapseStates = false }
-        // Direct (non-animated) expand/collapse: the call site is always
-        // post-reloadData() where animation would race the row rebuild.
-        // NSOutlineView no-ops when the requested state already holds.
-        for case let groupItem as TabGroupSidebarItem in allItems {
-            if groupItem.group.isCollapsed {
-                outlineView.collapseItem(groupItem)
-            } else {
-                outlineView.expandItem(groupItem)
-            }
-        }
-    }
-    
     /// Cancel Combine subscriptions on all visible tab cells before reloadData.
     /// NSOutlineView.reloadData() does NOT call prepareForReuse on replaced cells,
     /// leaving orphaned ViewModels with active subscriptions that cause title flicker.
@@ -387,21 +358,14 @@ class SidebarTabListViewController: NSViewController {
     }
 
     private func selectActiveTab() {
-        // Search root rows first for the common ungrouped case, then descend
-        // into group wrappers to find an active grouped child tab. Without
-        // this descent grouped active tabs lose their sidebar highlight on
-        // every reload (allItems carries only root rows; grouped tabs live
-        // inside TabGroupSidebarItem.childrenItems).
+        // Grouped tabs are no longer outline children — they render
+        // inside `TabGroupCellView`'s inner table and surface their
+        // active state via SwiftUI's per-cell `isActive` driver. The
+        // outline selection therefore only needs to handle root-level
+        // (ungrouped) rows.
         for item in allItems {
             if let tab = item as? Tab, tab.isActive {
                 selectItem(tab, clearSelectionFirst: true)
-                return
-            }
-        }
-        for case let groupItem as TabGroupSidebarItem in allItems {
-            if let activeChild = groupItem.childrenItems
-                .first(where: { ($0 as? Tab)?.isActive == true }) {
-                selectItem(activeChild, clearSelectionFirst: true)
                 return
             }
         }
@@ -571,6 +535,16 @@ extension SidebarTabListViewController: NSOutlineViewDataSource {
             pasteboardItem.setString(String(browserState.windowId), forType: .sourceWindowId)
             return pasteboardItem
         }
+
+        if let groupItem = sidebarItem as? TabGroupSidebarItem {
+            // Whole-group drag: payload identifies the contiguous block
+            // of tabs sharing this token. Drop targets call either
+            // `moveGroupBlock` (root reorder) or `convertGroupToBookmarks`
+            // (bookmark folder).
+            pasteboardItem.setString(groupItem.group.token, forType: .tabGroup)
+            pasteboardItem.setString(String(browserState.windowId), forType: .sourceWindowId)
+            return pasteboardItem
+        }
         
         if let bookmark = sidebarItem as? Bookmark {
             pasteboardItem.setString(bookmark.guid, forType: .phiBookmark)
@@ -628,7 +602,11 @@ extension SidebarTabListViewController: NSOutlineViewDataSource {
             guard let item = proposedItem else { return nil }
             let row = outlineView.row(forItem: item)
             guard row >= 0 else { return nil }
-            return outlineView.rect(ofRow: row)
+            var frame = outlineView.rect(ofRow: row)
+            if item is TabGroupSidebarItem {
+                frame.size.height = min(frame.height, TabGroupCellView.headerHeight)
+            }
+            return frame
         }()
 
         // Member metadata for proposed Tab.
@@ -672,13 +650,22 @@ extension SidebarTabListViewController: NSOutlineViewDataSource {
     }
 
     func outlineView(_ outlineView: NSOutlineView, validateDrop info: NSDraggingInfo, proposedItem item: Any?, proposedChildIndex index: Int) -> NSDragOperation {
+        let result = _validateDropImpl(outlineView, info: info, proposedItem: item, proposedChildIndex: index)
+        AppLogDebug(
+            "[TAB_GROUPS][INNER_DRAG] outline.validateDrop item=\(String(describing: item)) " +
+            "index=\(index) result=\(result.rawValue) types=\(info.draggingPasteboard.types?.map(\.rawValue) ?? [])"
+        )
+        return result
+    }
+
+    private func _validateDropImpl(_ outlineView: NSOutlineView, info: NSDraggingInfo, proposedItem item: Any?, proposedChildIndex index: Int) -> NSDragOperation {
         let originalResolvedItem: Any? = {
             if let provider = item as? UnderlyingBookmarkProviding { return provider.underlyingBookmark }
             return item
         }()
         var resolvedItem = originalResolvedItem
         var resolvedIndex = index
-        
+
         let pasteboard = info.draggingPasteboard
         guard let pasteboardItem = pasteboard.pasteboardItems?.first else {
             clearDropFeedback()
@@ -692,34 +679,69 @@ extension SidebarTabListViewController: NSOutlineViewDataSource {
             return []
         }
 
-        // Phase 3: resolver-driven group drop classification.
-        let dropCtx = buildDropContext(
-            outlineView: outlineView,
-            info: info,
-            proposedItem: originalResolvedItem,
-            proposedChildIndex: index)
-        let intent = SidebarGroupDropResolver.resolve(dropCtx)
-
-        AppLogDebug("[TAB_GROUPS][SIDEBAR_DRAG] validate intent=\(intent) " +
-                    "windowId=\(browserState.windowId)")
-
-        switch intent {
-        case .joinAtFront(let token, _), .reorderInGroup(let token, _):
-            setDropFeedback(.tabGroup(token: token))
-            // Let AppKit's native line indicator coexist with our highlight.
+        // Whole-group drag: validate before falling into the per-tab
+        // resolver. Allowed drop targets are root reordering and
+        // bookmark folders (convert-to-bookmarks). Cross-window group
+        // drags are unsupported (Chromium owns the group lifetime per
+        // window) — reject early.
+        if pasteboard.string(forType: .tabGroup) != nil {
+            if isCrossWindowDrag(pasteboard) {
+                clearDropFeedback()
+                return []
+            }
+            if let targetBookmark = originalResolvedItem as? Bookmark,
+               targetBookmark.isFolder {
+                setDropFeedback(.bookmarkFolder(guid: targetBookmark.guid))
+                return .copy
+            }
+            if originalResolvedItem is TabGroupSidebarItem {
+                setDropFeedback(.none)
+                return []
+            }
+            if let tab = originalResolvedItem as? Tab, tab.groupToken != nil {
+                setDropFeedback(.none)
+                return []
+            }
+            setDropFeedback(.none)
             return .move
+        }
 
-        case .rootInsert:
-            setDropFeedback(.none)
-            // Fall through to existing root-insert handling below: that path
-            // is correct for ungrouped placement, including the bookmark/
-            // pinned section nuances handled further down.
-            break
+        let proposedRootRow = index == NSOutlineViewDropOnItemIndex ? outlineView.numberOfRows : index
+        let isRootBookmarkSectionDrop = originalResolvedItem == nil
+            && isRowInBookmarkSection(proposedRootRow)
 
-        case .rejected(let reason):
-            AppLogDebug("[TAB_GROUPS][SIDEBAR_DRAG] reject reason=\(reason)")
-            setDropFeedback(.none)
-            return []
+        if SidebarGroupDropResolver.shouldResolve(
+            proposedItem: originalResolvedItem,
+            isRootBookmarkSectionDrop: isRootBookmarkSectionDrop) {
+            // Phase 3: resolver-driven group drop classification.
+            let dropCtx = buildDropContext(
+                outlineView: outlineView,
+                info: info,
+                proposedItem: originalResolvedItem,
+                proposedChildIndex: index)
+            let intent = SidebarGroupDropResolver.resolve(dropCtx)
+
+            AppLogDebug("[TAB_GROUPS][SIDEBAR_DRAG] validate intent=\(intent) " +
+                        "windowId=\(browserState.windowId)")
+
+            switch intent {
+            case .joinAtFront(let token, _), .reorderInGroup(let token, _):
+                setDropFeedback(.tabGroup(token: token))
+                // Let AppKit's native line indicator coexist with our highlight.
+                return .move
+
+            case .rootInsert:
+                setDropFeedback(.none)
+                // Fall through to existing root-insert handling below: that path
+                // is correct for ungrouped placement, including the bookmark/
+                // pinned section nuances handled further down.
+                break
+
+            case .rejected(let reason):
+                AppLogDebug("[TAB_GROUPS][SIDEBAR_DRAG] reject reason=\(reason)")
+                setDropFeedback(.none)
+                return []
+            }
         }
 
 
@@ -780,6 +802,12 @@ extension SidebarTabListViewController: NSOutlineViewDataSource {
             }
             
             if let targetBookmark = resolvedItem as? Bookmark, targetBookmark.isFolder {
+                return .copy
+            }
+
+            if let targetBookmark = resolvedItem as? Bookmark,
+               let insertion = bookmarkInsertionTarget(before: targetBookmark) {
+                outlineView.setDropItem(insertion.parent, dropChildIndex: insertion.index)
                 return .copy
             }
             
@@ -864,6 +892,10 @@ extension SidebarTabListViewController: NSOutlineViewDataSource {
     }
     
     func outlineView(_ outlineView: NSOutlineView, acceptDrop info: NSDraggingInfo, item: Any?, childIndex index: Int) -> Bool {
+        AppLogDebug(
+            "[TAB_GROUPS][INNER_DRAG] outline.acceptDrop item=\(String(describing: item)) " +
+            "index=\(index) types=\(info.draggingPasteboard.types?.map(\.rawValue) ?? [])"
+        )
         let resolvedItem: Any? = {
             if let provider = item as? UnderlyingBookmarkProviding { return provider.underlyingBookmark }
             return item
@@ -878,6 +910,41 @@ extension SidebarTabListViewController: NSOutlineViewDataSource {
         }
         
         browserState.tabDraggingSession.end()
+
+        // Whole-group drag: drop on a bookmark folder converts the
+        // group's members to bookmarks; drop at root reorders the
+        // group block as a whole.
+        if let token = pasteboard.string(forType: .tabGroup) {
+            if isCrossWindowDrag(pasteboard) {
+                return false
+            }
+            if let targetFolder = resolvedItem as? Bookmark, targetFolder.isFolder {
+                let insertion = resolvedIndex == NSOutlineViewDropOnItemIndex
+                    ? nil
+                    : resolvedIndex
+                browserState.convertGroupToBookmarks(
+                    token: token,
+                    parentFolder: targetFolder,
+                    at: insertion)
+                return true
+            }
+            if resolvedItem == nil {
+                let proposedRow = resolvedIndex == NSOutlineViewDropOnItemIndex
+                    ? outlineView.numberOfRows
+                    : resolvedIndex
+                if isRowInBookmarkSection(proposedRow) {
+                    browserState.convertGroupToBookmarks(
+                        token: token,
+                        parentFolder: nil,
+                        at: resolvedIndex)
+                    return true
+                }
+                let destination = calculateTabDestinationIndex(from: resolvedIndex)
+                browserState.moveGroupBlock(token: token, to: destination)
+                return true
+            }
+            return false
+        }
 
         if let pinnedTabId = pasteboard.string(forType: .pinnedTab) {
             if isCrossWindowDrag(pasteboard), let sourceState = sourceBrowserState(for: pasteboard) {
@@ -930,6 +997,16 @@ extension SidebarTabListViewController: NSOutlineViewDataSource {
                     )
                     return true
                 }
+
+                if let targetBookmark = resolvedItem as? Bookmark,
+                   let insertion = bookmarkInsertionTarget(before: targetBookmark) {
+                    sourceState.moveNormalTab(
+                        tabId: draggedTab.guid,
+                        toBookmark: insertion.parent?.guid,
+                        index: insertion.index
+                    )
+                    return true
+                }
                 
                 let proposedRow = resolvedIndex == NSOutlineViewDropOnItemIndex ? outlineView.numberOfRows : resolvedIndex
                 if isRowInBookmarkSection(proposedRow) {
@@ -947,6 +1024,12 @@ extension SidebarTabListViewController: NSOutlineViewDataSource {
             
             if let targetBookmark = resolvedItem as? Bookmark, targetBookmark.isFolder {
                 return bookmarkSectionController.handleDrop(of: draggedTab, to: targetBookmark, at: resolvedIndex == NSOutlineViewDropOnItemIndex ? nil : resolvedIndex)
+            } else if let targetBookmark = resolvedItem as? Bookmark,
+                      let insertion = bookmarkInsertionTarget(before: targetBookmark) {
+                return bookmarkSectionController.handleDrop(
+                    of: draggedTab,
+                    to: insertion.parent,
+                    at: insertion.index)
             } else {
                 // Bookmark-section drop only applies to true root-level drops
                 // (resolvedItem == nil). When `resolvedItem` is a group wrapper,
@@ -1200,9 +1283,37 @@ extension SidebarTabListViewController: NSOutlineViewDataSource {
         // append rather than dropping at a wrong index.
         return browserState.normalTabs.count
     }
+
+    private func clearVisibleGroupInnerDropRows() {
+        for row in 0..<outlineView.numberOfRows {
+            guard let cell = outlineView.view(
+                atColumn: 0,
+                row: row,
+                makeIfNecessary: false) as? TabGroupCellView else {
+                continue
+            }
+            cell.innerTable.setDropRow(-1, dropOperation: .on)
+        }
+    }
     
     private func findBookmark(withId id: String) -> Bookmark? {
         return browserState.bookmarkManager.bookmark(withGuid: id)
+    }
+
+    private func bookmarkInsertionTarget(before bookmark: Bookmark) -> (parent: Bookmark?, index: Int)? {
+        if let parent = bookmark.parent {
+            guard let index = parent.children.firstIndex(where: { $0.guid == bookmark.guid }) else {
+                return nil
+            }
+            return (parent, index)
+        }
+
+        guard let index = bookmarkSectionController.bookmarkItems.firstIndex(where: { item in
+            (item as? Bookmark)?.guid == bookmark.guid
+        }) else {
+            return nil
+        }
+        return (nil, index)
     }
     
     private func updateDropFeedbackFolder(in outlineView: NSOutlineView, with resolvedItem: Any?, childIndex: Int, pasteboard: NSPasteboardItem) {
@@ -1261,7 +1372,7 @@ extension SidebarTabListViewController: NSOutlineViewDataSource {
         let row = outlineView.row(forItem: groupWrapper)
         guard row >= 0,
               let cell = outlineView.view(atColumn: 0, row: row, makeIfNecessary: false)
-                          as? TabGroupHeaderCellView
+                          as? TabGroupCellView
         else { return }
         cell.setDropTargetHighlighted(highlighted)
     }
@@ -1433,14 +1544,17 @@ extension SidebarTabListViewController: NSOutlineViewDelegate {
             cellView = separatorCell!
 
         case .tabGroup:
-            let identifier = NSUserInterfaceItemIdentifier("TabGroupHeaderCell")
-            var groupCell = outlineView.makeView(
-                withIdentifier: identifier, owner: self) as? TabGroupHeaderCellView
-            if groupCell == nil {
-                groupCell = TabGroupHeaderCellView()
-                groupCell?.identifier = identifier
+            let identifier = NSUserInterfaceItemIdentifier("TabGroupCell")
+            let groupCell: TabGroupCellView
+            if let existing = outlineView.makeView(
+                withIdentifier: identifier, owner: self) as? TabGroupCellView {
+                groupCell = existing
+            } else {
+                groupCell = TabGroupCellView()
+                groupCell.identifier = identifier
             }
-            cellView = groupCell!
+            groupCell.groupCellDelegate = self
+            cellView = groupCell
 
         }
         
@@ -1453,7 +1567,7 @@ extension SidebarTabListViewController: NSOutlineViewDelegate {
            let bookmark = sidebarItem as? Bookmark {
             bookmarkCell.setDropTargetHighlighted(bookmark.isFolder && dropFeedbackTarget == .bookmarkFolder(guid: bookmark.guid))
         }
-        if let groupCell = cellView as? TabGroupHeaderCellView,
+        if let groupCell = cellView as? TabGroupCellView,
            let groupItem = sidebarItem as? TabGroupSidebarItem {
             groupCell.setDropTargetHighlighted(
                 dropFeedbackTarget == .tabGroup(token: groupItem.group.token))
@@ -1467,52 +1581,25 @@ extension SidebarTabListViewController: NSOutlineViewDelegate {
         switch sidebarItem.itemType {
         case .separator:
             return 16.0 // Smaller height for separator
+        case .tabGroup:
+            guard let groupItem = sidebarItem as? TabGroupSidebarItem else { return 36.0 }
+            return TabGroupCellView.desiredHeight(
+                for: groupItem, browserState: browserState)
         default:
             return 36.0
         }
     }
     
     func outlineView(_ outlineView: NSOutlineView, shouldCollapseItem item: Any) -> Bool {
-        // Tab-group rows are data-driven: dispatch the user gesture to the
-        // bridge and let kVisualsChanged reflect back via the data layer.
-        // Returning false suppresses the immediate native collapse so the
-        // on-screen state never diverges from `group.isCollapsed`.
-        // Programmatic calls from `applyTabGroupCollapseStates` short-
-        // circuit (return true) so the data-driven re-application doesn't
-        // loop back through the bridge. Idempotent gestures (chevron click
-        // when the row is already in the requested state) also short-
-        // circuit to avoid an unnecessary IPC round-trip + refresh.
-        if let groupItem = item as? TabGroupSidebarItem {
-            if isApplyingTabGroupCollapseStates {
-                return true
-            }
-            if groupItem.group.isCollapsed {
-                return true
-            }
-            requestTabGroupCollapseChange(group: groupItem.group, collapsed: true)
-            return false
-        }
+        // Tab-group collapse is now driven by the SwiftUI chevron inside
+        // `TabGroupCellView`; the outer outline no longer expands or
+        // collapses tab-group rows (they are leaves with dynamic height).
+        // Bookmark folders, etc. retain their default behavior.
         return true
     }
 
     func outlineView(_ outlineView: NSOutlineView, shouldExpandItem item: Any) -> Bool {
         if browserState.isDraggingTab && !allowExpandDuringDrag {
-            // Phase 3: TabGroupSidebarItem is allowed to spring-load
-            // during drag so users can dive into a folded group's
-            // children for precise placement; other rows still keep
-            // the original "no expand during drag" guard.
-            if !(item is TabGroupSidebarItem) {
-                return false
-            }
-        }
-        if let groupItem = item as? TabGroupSidebarItem {
-            if isApplyingTabGroupCollapseStates {
-                return true
-            }
-            if !groupItem.group.isCollapsed {
-                return true
-            }
-            requestTabGroupCollapseChange(group: groupItem.group, collapsed: false)
             return false
         }
         return (item as? SidebarItem)?.isExpandable ?? false
@@ -1803,11 +1890,10 @@ extension SidebarTabListViewController: TabSectionDelegate {
             // Visual-only paths reach here: rename / recolor / collapse
             // (cells refresh via VM subscriptions, no reload needed) AND
             // tab-removed-from-still-existing-group / intra-group reorder
-            // (need a children reload on the affected wrapper). The
+            // (need a member-table refresh on the affected cell). The
             // affected-token filter keeps unrelated groups quiet during
             // pure metadata edits.
-            applyTabGroupCollapseStates()
-            reloadAffectedGroupChildren(change.affectedGroupTokens)
+            pushMemberUpdatesToGroupCells(change.affectedGroupTokens)
             return
         }
 
@@ -1839,12 +1925,11 @@ extension SidebarTabListViewController: TabSectionDelegate {
 
         // Tabs that joined or left a still-existing group surface as a
         // root-level insert/remove of the moved tab's guid; the group's
-        // token stays at the same root position, so NSOutlineView won't
-        // requery its children without an explicit reload. Filter by
-        // affected tokens so creating an ungrouped tab (no group's
-        // membership changed) leaves every group wrapper alone.
-        applyTabGroupCollapseStates()
-        reloadAffectedGroupChildren(change.affectedGroupTokens)
+        // token stays at the same root position. Push the new member
+        // arrays into each affected `TabGroupCellView` so its inner
+        // diffable table animates the row delta and re-notes its
+        // height in the same animation tick.
+        pushMemberUpdatesToGroupCells(change.affectedGroupTokens)
 
         // Defer selection to the next run loop so NSOutlineView finishes its
         // insert/remove animation layout pass first. Calling row(forItem:) or
@@ -1859,11 +1944,26 @@ extension SidebarTabListViewController: TabSectionDelegate {
         }
     }
 
-    private func reloadAffectedGroupChildren(_ tokens: Set<String>) {
+    /// Push fresh member arrays into the affected `TabGroupCellView`
+    /// instances so each cell's diffable inner table animates its row
+    /// changes and notifies the outline of any height delta. Cells
+    /// that aren't realized (off-screen, just-inserted root row) are
+    /// skipped — they pull their initial members from `configure(with:)`.
+    private func pushMemberUpdatesToGroupCells(_ tokens: Set<String>) {
         guard !tokens.isEmpty else { return }
         for case let groupItem as TabGroupSidebarItem in allItems
             where tokens.contains(groupItem.group.token) {
-            outlineView.reloadItem(groupItem, reloadChildren: true)
+            let row = outlineView.row(forItem: groupItem)
+            guard row >= 0,
+                  let cell = outlineView.view(atColumn: 0,
+                                              row: row,
+                                              makeIfNecessary: false)
+                            as? TabGroupCellView
+            else { continue }
+            let newMembers = browserState.normalTabs.filter {
+                $0.groupToken == groupItem.group.token
+            }
+            cell.applyMembers(newMembers, animated: true)
         }
     }
 
@@ -2454,20 +2554,22 @@ extension SidebarTabListViewController {
             return
         }
 
-        // Grouped child rows live inside TabGroupSidebarItem.childrenItems,
-        // not allItems. Walk the group wrappers to find a focusing tab
-        // that's been collapsed/grouped — keeps the sidebar highlight
-        // following the focusing tab even when it's a group member.
-        for case let groupItem as TabGroupSidebarItem in allItems {
-            if let child = groupItem.childrenItems
-                .first(where: { $0.id == tab.id }) {
-                selectItem(child, clearSelectionFirst: true)
-                if shouldScroll {
-                    lastScrolledFocusingTabId = tab.id
-                    scheduleScrollToVisible(forItem: child)
-                }
-                return
+        // Grouped tabs render inside `TabGroupCellView`'s inner table —
+        // no outline child to select. If the focusing tab belongs to a
+        // visible group, scroll the group's row into view so the user
+        // sees the active tab inside the cell, but skip outline
+        // selection (the inner table drives its own active highlight
+        // via SwiftUI).
+        for case let groupItem as TabGroupSidebarItem in allItems
+        where browserState.normalTabs.contains(where: {
+            $0.guid == tab.guid && $0.groupToken == groupItem.group.token
+        }) {
+            if shouldScroll {
+                lastScrolledFocusingTabId = tab.id
+                scheduleScrollToVisible(forItem: groupItem)
             }
+            selectItem(nil)
+            return
         }
         
         if let presentation = focusedBookmarkPresentation,
@@ -2546,6 +2648,154 @@ extension SidebarTabListViewController: TabCellDelegate {
     }
 }
 
+// MARK: - TabGroupCellViewDelegate
+
+extension SidebarTabListViewController: TabGroupCellViewDelegate {
+    func tabGroupCellNeedsHeightUpdate(_ cell: TabGroupCellView, for token: String) {
+        guard let item = cell.item else { return }
+        let row = outlineView.row(forItem: item)
+        guard row >= 0 else { return }
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.2
+            context.allowsImplicitAnimation = true
+            outlineView.noteHeightOfRows(withIndexesChanged: IndexSet(integer: row))
+        }
+    }
+
+    func tabGroupCellDidToggleCollapse(_ cell: TabGroupCellView,
+                                       group: WebContentGroupInfo) {
+        // Idempotent gestures (already in the requested state) are
+        // unreachable here because the chevron always toggles. Just
+        // dispatch the inverse to the bridge; Chromium's
+        // kVisualsChanged echo updates `group.isCollapsed`, which the
+        // cell already subscribes to.
+        requestTabGroupCollapseChange(group: group, collapsed: !group.isCollapsed)
+    }
+
+    func tabGroupCell(_ cell: TabGroupCellView,
+                      tabDidRequestClose tab: Tab) {
+        tabSectionController.closeTab(tab)
+    }
+
+    func tabGroupCell(_ cell: TabGroupCellView,
+                      beginDragging tab: Tab,
+                      from rowView: SidebarTabCellView,
+                      mouseDownEvent: NSEvent) {
+        AppLogDebug(
+            "[TAB_GROUPS][INNER_DRAG] controller.beginDragging tab=\(tab.guid) " +
+            "token=\(tab.groupToken ?? "nil") eventWindowPoint=\(mouseDownEvent.locationInWindow)"
+        )
+        guard let image = rowView.createDraggingImage() else { return }
+        AppLogDebug(
+            "[TAB_GROUPS][INNER_DRAG] controller.dragImage size=\(image.size) " +
+            "rowBounds=\(rowView.bounds)"
+        )
+
+        let pasteboardItem = NSPasteboardItem()
+        pasteboardItem.setString(String(tab.guid), forType: .normalTab)
+        pasteboardItem.setString(String(browserState.windowId), forType: .sourceWindowId)
+        AppLogDebug(
+            "[TAB_GROUPS][INNER_DRAG] controller.pasteboard types=[normalTab, sourceWindowId] " +
+            "windowId=\(browserState.windowId)"
+        )
+
+        let draggingItem = NSDraggingItem(pasteboardWriter: pasteboardItem)
+        let frame = outlineView.convert(rowView.bounds, from: rowView)
+        AppLogDebug("[TAB_GROUPS][INNER_DRAG] controller.dragFrameInOutline=\(frame)")
+        draggingItem.setDraggingFrame(frame, contents: image)
+
+        let session = outlineView.beginDraggingSession(
+            with: [draggingItem],
+            event: mouseDownEvent,
+            source: self)
+        AppLogDebug("[TAB_GROUPS][INNER_DRAG] controller.beginDraggingSession session=\(session)")
+
+        let screenPoint = mouseDownEvent.window?
+            .convertPoint(toScreen: mouseDownEvent.locationInWindow) ?? NSEvent.mouseLocation
+        tabGroupCell(cell,
+                     draggingSessionWillBegin: session,
+                     at: screenPoint,
+                     for: tab)
+    }
+
+    func tabGroupCell(_ cell: TabGroupCellView,
+                      draggingSessionWillBegin session: NSDraggingSession,
+                      at screenPoint: NSPoint,
+                      for tab: Tab) {
+        AppLogDebug(
+            "[TAB_GROUPS][INNER_DRAG] controller.willBegin session=\(session) " +
+            "screen=\(screenPoint) tab=\(tab.guid)"
+        )
+        DispatchQueue.main.async { [weak self] in
+            self?.expandFloatingBookmarkParentsIfNeeded()
+            self?.browserState.isDraggingTab = true
+        }
+        browserState.tabDraggingSession.attachNativeSession(session)
+        browserState.tabDraggingSession.begin(
+            draggingItem: tab,
+            screenLocation: CGPoint(x: screenPoint.x, y: screenPoint.y),
+            containerView: hostVC?.view
+        )
+    }
+
+    func tabGroupCell(_ cell: TabGroupCellView,
+                      draggingSessionEnded session: NSDraggingSession,
+                      at screenPoint: NSPoint,
+                      operation: NSDragOperation) {
+        AppLogDebug(
+            "[TAB_GROUPS][INNER_DRAG] controller.innerEnded session=\(session) " +
+            "screen=\(screenPoint) op=\(operation.rawValue)"
+        )
+        clearDropFeedback()
+        clearVisibleGroupInnerDropRows()
+        DispatchQueue.main.async { [weak self] in
+            self?.browserState.isDraggingTab = false
+        }
+        browserState.tabDraggingSession.end(
+            screenLocation: CGPoint(x: screenPoint.x, y: screenPoint.y),
+            dragOperation: operation
+        )
+    }
+
+    func tabGroupCell(_ cell: TabGroupCellView,
+                      didAcceptTab tab: Tab,
+                      intoGroupToken token: String,
+                      atNormalTabsIdx targetIdx: Int) -> Bool {
+        let oldToken = tab.groupToken
+        let oldIdx = browserState.normalTabs.firstIndex(of: tab)
+
+        if let oldIdx, oldIdx != targetIdx {
+            browserState.moveNormalTabLocally(from: oldIdx, to: targetIdx)
+        }
+        guard let bridge = ChromiumLauncher.sharedInstance().bridge else {
+            return true
+        }
+        if let old = oldToken, old != token {
+            AppLogDebug(
+                "[TAB_GROUPS][SIDEBAR_DRAG] removeTabsFromGroup " +
+                "windowId=\(browserState.windowId) tabId=\(tab.guid) " +
+                "token=\(old)"
+            )
+            bridge.removeTabsFromGroup(
+                withWindowId: Int64(browserState.windowId),
+                tabIds: [NSNumber(value: Int64(tab.guid))])
+        }
+        if oldToken != token {
+            AppLogDebug(
+                "[TAB_GROUPS][SIDEBAR_DRAG] addTabsToGroup " +
+                "windowId=\(browserState.windowId) tabId=\(tab.guid) " +
+                "token=\(token)"
+            )
+            bridge.addTabsToGroup(
+                withWindowId: Int64(browserState.windowId),
+                tabIds: [NSNumber(value: Int64(tab.guid))],
+                tokenHex: token)
+        }
+        setDropFeedback(.none)
+        return true
+    }
+}
+
 // MARK: - Middle Click to Close Tab
 extension SidebarTabListViewController: SideBarOutlineViewDelegate {
     func outlineView(_ outlineView: NSOutlineView, draggingEntered sender: any NSDraggingInfo) {
@@ -2567,7 +2817,48 @@ extension SidebarTabListViewController: SideBarOutlineViewDelegate {
     }
 }
 
+// MARK: - Inner Group Tab Drag Source
+extension SidebarTabListViewController: NSDraggingSource {
+    func draggingSession(_ session: NSDraggingSession,
+                         sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation {
+        AppLogDebug(
+            "[TAB_GROUPS][INNER_DRAG] controller.sourceMask context=\(context.rawValue)"
+        )
+        return [.move, .copy]
+    }
 
+    func ignoreModifierKeys(for session: NSDraggingSession) -> Bool {
+        AppLogDebug("[TAB_GROUPS][INNER_DRAG] controller.ignoreModifierKeys")
+        return false
+    }
+
+    func draggingSession(_ session: NSDraggingSession,
+                         movedTo screenPoint: NSPoint) {
+        AppLogDebug(
+            "[TAB_GROUPS][INNER_DRAG] controller.sourceMoved screen=\(screenPoint)"
+        )
+        browserState.tabDraggingSession.attachNativeSession(session)
+        browserState.tabDraggingSession.update(
+            screenLocation: CGPoint(x: screenPoint.x, y: screenPoint.y))
+    }
+
+    func draggingSession(_ session: NSDraggingSession,
+                         endedAt screenPoint: NSPoint,
+                         operation: NSDragOperation) {
+        AppLogDebug(
+            "[TAB_GROUPS][INNER_DRAG] controller.sourceEnded screen=\(screenPoint) " +
+            "op=\(operation.rawValue)"
+        )
+        clearDropFeedback()
+        clearVisibleGroupInnerDropRows()
+        DispatchQueue.main.async { [weak self] in
+            self?.browserState.isDraggingTab = false
+        }
+        browserState.tabDraggingSession.end(
+            screenLocation: CGPoint(x: screenPoint.x, y: screenPoint.y),
+            dragOperation: operation)
+    }
+}
 
 /// About Floating Tabs (Floating Bookmark Proxy)
 ///

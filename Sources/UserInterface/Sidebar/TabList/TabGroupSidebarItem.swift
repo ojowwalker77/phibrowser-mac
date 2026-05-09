@@ -32,16 +32,16 @@ final class TabGroupSidebarItem: SidebarItem {
     var url: String? { nil }
     var iconName: String? { nil }
     var faviconUrl: String? { nil }
-    var isExpandable: Bool { true }
-    var hasChildren: Bool {
-        guard let state = browserState else { return false }
-        return state.normalTabs.contains { $0.groupToken == group.token }
-    }
+    /// `false` because the group renders as a self-contained
+    /// `TabGroupCellView` leaf in the outer outline view: the cell
+    /// hosts its own inner table for member rows. The outer outline
+    /// no longer descends into a separate child branch per member.
+    var isExpandable: Bool { false }
+    var hasChildren: Bool { false }
 
     /// Live member resolution: filters `normalTabs` by `groupToken`.
-    /// `normalTabs` is already in tab-strip order, so the result naturally
-    /// follows Chromium's intra-group ordering, including after
-    /// `reorderTabs(_:)`. No parallel index to keep in sync.
+    /// Used by `TabGroupCellView.applyMembers` callers and other
+    /// non-outline consumers (context menu, etc.).
     var childrenItems: [SidebarItem] { members }
 
     private var members: [Tab] {

@@ -23,6 +23,16 @@ final class TabGroupHeaderViewModel {
     /// ("Blue · 3 tabs") so a separate badge would be redundant — same as
     /// upstream Chrome's tab-strip group chip.
     var hasUserSetTitle: Bool = false
+    /// Mirrors `WebContentGroupInfo.isCollapsed` so the inline chevron
+    /// in `TabGroupHeaderView` can rotate without driving the state
+    /// itself. The cell owns the bridge round-trip via `onToggleCollapsed`.
+    var isCollapsed: Bool = false
+
+    /// Fires when the inline chevron is tapped. Cell wires this to its
+    /// `TabGroupCellViewDelegate.tabGroupCellDidToggleCollapse(_:group:)`
+    /// dispatch.
+    @ObservationIgnored
+    var onToggleCollapsed: (() -> Void)?
 
     private var configuredToken: String?
     private var cancellables = Set<AnyCancellable>()
@@ -35,9 +45,19 @@ final class TabGroupHeaderViewModel {
         tabCount = initialCount
         displayTitle = group.displayTitle(memberCount: initialCount)
         hasUserSetTitle = group.hasUserSetTitle
+        isCollapsed = group.isCollapsed
 
         cancellables.removeAll()
         let expectedToken = group.token
+
+        group.$isCollapsed
+            .removeDuplicates()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] newValue in
+                guard let self, self.configuredToken == expectedToken else { return }
+                self.isCollapsed = newValue
+            }
+            .store(in: &cancellables)
 
         // Title change rewrites both the display string and the badge
         // visibility (badge hides on auto-name).
@@ -84,17 +104,14 @@ final class TabGroupHeaderViewModel {
     }
 }
 
-/// Compact header row for a tab group: 4px color bar + display title +
-/// optional count badge. Disclosure triangle is the NSOutlineView native
-/// one; nothing is drawn for it here.
+/// Compact header row for a tab group: color bar + display title +
+/// optional count badge + trailing inline chevron driving the
+/// expand/collapse toggle.
 struct TabGroupHeaderView: View {
     var viewModel: TabGroupHeaderViewModel
 
     var body: some View {
         HStack(spacing: 8) {
-            // 3pt color stripe pinned to leading edge — matches the
-            // group-affiliation bar on member tab rows in SideTabView so
-            // the header and its members visually share one vertical line.
             RoundedRectangle(cornerRadius: 1.5, style: .continuous)
                 .fill(Color(nsColor: viewModel.color.nsColor))
                 .frame(width: 3, height: 16)
@@ -117,15 +134,20 @@ struct TabGroupHeaderView: View {
             }
 
             Spacer(minLength: 0)
+
+            Image(systemName: "chevron.right")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundColor(Color(nsColor: .secondaryLabelColor))
+                .frame(width: 16, height: 16)
+                .rotationEffect(.degrees(viewModel.isCollapsed ? 0 : 90))
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    viewModel.onToggleCollapsed?()
+                }
+                .animation(.easeInOut(duration: 0.15), value: viewModel.isCollapsed)
         }
-        // Leading 2pt aligns the 3pt color stripe with the member tab's
-        // group-affiliation bar (also at x≈2..5 in cell coordinates).
-        // Trailing inset reserves room for the relocated native disclosure
-        // chevron, which SideBarOutlineView places at the trailing edge
-        // (chevron width 16pt + 8pt trailing gap + 4pt visual breathing
-        // room — see SideBarOutlineView.tabGroupChevron* constants).
         .padding(.leading, 2)
-        .padding(.trailing, 28)
+        .padding(.trailing, 8)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }

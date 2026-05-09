@@ -42,6 +42,27 @@ final class SidebarGroupDropResolverTests: XCTestCase {
         )
     }
 
+    func test_shouldResolve_returnsFalseForNonTabSectionTargets() {
+        XCTAssertFalse(SidebarGroupDropResolver.shouldResolve(proposedItem: NSObject()))
+    }
+
+    func test_shouldResolve_returnsFalseForRootBookmarkSectionDrops() {
+        XCTAssertFalse(SidebarGroupDropResolver.shouldResolve(
+            proposedItem: nil,
+            isRootBookmarkSectionDrop: true
+        ))
+    }
+
+    func test_shouldResolve_returnsTrueForRootTabAndGroupTargets() {
+        XCTAssertTrue(SidebarGroupDropResolver.shouldResolve(proposedItem: nil))
+        XCTAssertTrue(SidebarGroupDropResolver.shouldResolve(
+            proposedItem: stubTab(guid: 1001, token: nil)
+        ))
+        XCTAssertTrue(SidebarGroupDropResolver.shouldResolve(
+            proposedItem: stubGroupWrapper(token: "A")
+        ))
+    }
+
     // MARK: - Helpers (continued)
     //
     // Stub strategy: the resolver depends on `TabGroupSidebarItem` only

@@ -1214,6 +1214,82 @@ class BrowserState {
         wrapper.moveSelf(to: newIndex, selectAfterMove: selectAfterMove)
     }
     
+    /// Reorders all members of a tab group as a contiguous block inside
+    /// `normalTabs`. Mirrors `moveNormalTabLocally`'s splice + opener-graph
+    /// hygiene, then notifies Chromium so its TabGroupModel stays aligned.
+    ///
+    /// - Parameters:
+    ///   - token: Hex token of the group to move.
+    ///   - toIndex: Destination insertion index inside `normalTabs`,
+    ///     interpreted in the *pre-move* coordinate system (NSOutlineView
+    ///     convention; same semantics as `moveNormalTabLocally`'s `toIndex`).
+    @MainActor
+    func moveGroupBlock(token: String, to toIndex: Int) {
+        // Members carry their order through their position in normalTabOrder;
+        // the resolver guarantees membership is contiguous, but we don't rely
+        // on that here — gather positions and splice the block as-is.
+        let memberPositions: [Int] = normalTabOrder.enumerated().compactMap { idx, guid in
+            guard let tab = tabs.first(where: { $0.guid == guid }),
+                  tab.groupToken == token else { return nil }
+            return idx
+        }
+        guard let blockStart = memberPositions.first else {
+            AppLogDebug(
+                "[TAB_GROUPS] moveGroupBlock no members for token=\(token); skipping"
+            )
+            return
+        }
+        let blockSize = memberPositions.count
+        let memberGuids = memberPositions.map { normalTabOrder[$0] }
+
+        // Mirror moveNormalTabLocally's `from < to` adjustment: when the
+        // block moves forward, removing it shifts later indices down by
+        // blockSize. When it moves backward (or stays), no adjustment.
+        var insertIndex = toIndex
+        if blockStart < toIndex {
+            insertIndex = max(0, toIndex - blockSize)
+        }
+        let postRemovalCount = normalTabOrder.count - blockSize
+        insertIndex = min(max(0, insertIndex), postRemovalCount)
+        guard insertIndex != blockStart else { return }
+
+        AppLogDebug(
+            "[TAB_GROUPS] moveGroupBlock token=\(token) blockStart=\(blockStart) " +
+            "blockSize=\(blockSize) toIndex=\(toIndex) insertIndex=\(insertIndex) " +
+            "members=\(memberGuids)"
+        )
+
+        // Remove members in descending order so earlier positions remain valid.
+        for pos in memberPositions.reversed() {
+            normalTabOrder.remove(at: pos)
+        }
+        for (offset, guid) in memberGuids.enumerated() {
+            normalTabOrder.insert(guid, at: insertIndex + offset)
+        }
+
+        // Opener-graph hygiene: the block as a whole crossed positions, so
+        // each member's opener relationship may need re-resolution. Mirrors
+        // the per-member call in moveNormalTabLocally.
+        for guid in memberGuids {
+            nativeRelationGraph.fixOpenersAfterMovingTab(guid)
+        }
+
+        normalTabs = normalTabOrder.compactMap { guid in
+            tabs.first { $0.guid == guid }
+        }
+
+        // TODO(P5): verify the strip vs. normal-tabs index conversion. The
+        // bridge expects a tab-strip index (pinned tabs occupy the front of
+        // the strip), but there is no precedent in this file for the
+        // translation; passing `toIndex` straight through and revisiting
+        // when the drop wiring lands.
+        ChromiumLauncher.sharedInstance().bridge?.moveGroup(
+            withWindowId: Int64(windowId),
+            tokenHex: token,
+            to: NSInteger(toIndex)
+        )
+    }
+
     /// Reorders normal tabs locally and mirrors their relative order to Chromium.
     /// - Parameters:
     ///   - fromIndex: Source index inside `normalTabs`.
@@ -1492,6 +1568,58 @@ class BrowserState {
         updateNormalTabs()
     }
     
+    /// Converts every member of a tab group into bookmarks, dissolving the
+    /// group on Chromium's side. Members are NOT closed: each one is
+    /// detached from the group and rewired to a fresh bookmark record under
+    /// `parentFolder`, preserving the in-group order. Group dissolution is
+    /// mirrored back from Chromium via `handleTabLeftGroup` /
+    /// `handleTabGroupClosed`; we only fire `closeGroup` defensively so the
+    /// header disappears even when the kClosed echo lags.
+    /// - Parameters:
+    ///   - token: Hex token of the group to dissolve.
+    ///   - parentFolder: Destination bookmark folder, or nil for the root.
+    ///   - index: Destination starting index inside the parent folder; nil
+    ///     appends at the front (i.e. starting at 0).
+    @MainActor
+    func convertGroupToBookmarks(token: String,
+                                  parentFolder: Bookmark?,
+                                  at index: Int?) {
+        // Snapshot members in normalTabs order BEFORE mutating, so the
+        // bookmark order matches the strip order even though
+        // `moveNormalTab(toBookmark:)` rebuilds `normalTabs` after each
+        // call.
+        let members = normalTabs.filter { $0.groupToken == token }
+        guard !members.isEmpty else {
+            AppLogDebug(
+                "[TAB_GROUPS] convertGroupToBookmarks no members for token=\(token); skipping"
+            )
+            return
+        }
+        let memberGuids = members.map { $0.guid }
+        let startIndex = index ?? 0
+        AppLogDebug(
+            "[TAB_GROUPS] convertGroupToBookmarks token=\(token) " +
+            "members=\(memberGuids) parent=\(parentFolder?.guid ?? "<root>") " +
+            "startIndex=\(startIndex)"
+        )
+
+        for (offset, guid) in memberGuids.enumerated() {
+            moveNormalTab(tabId: guid,
+                          toBookmark: parentFolder?.guid,
+                          index: startIndex + offset,
+                          selectAfterMove: false)
+        }
+
+        // Chromium fires kClosed when the last member leaves the group, but
+        // wire-order is async; ask Chromium to close the group explicitly so
+        // the sidebar header drops without waiting on the echo. Idempotent
+        // in the steady state.
+        ChromiumLauncher.sharedInstance().bridge?.closeGroup(
+            withWindowId: Int64(windowId),
+            tokenHex: token
+        )
+    }
+
     /// Moves a pinned tab into bookmarks.
     /// - Parameters:
     ///   - pinnedGuid: Local database guid of the pinned tab.
