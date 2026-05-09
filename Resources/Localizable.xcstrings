@@ -981,6 +981,9 @@
     "Show in Finder" : {
       "comment" : "Download item row - Menu option to reveal file in Finder\nDownload item row - Tooltip for show in finder button\nTooltip for button to reveal downloaded file in Finder in living downloads toast"
     },
+    "Show proactive suggestions on the new tab page" : {
+      "comment" : "AI settings - Toggle to show proactive suggestions on the new tab page"
+    },
     "Sign in again to continue" : {
       "comment" : "Auth reauthentication - Alert title when the access token can no longer be renewed"
     },

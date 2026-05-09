@@ -108,8 +108,8 @@ extension PhiPreferences {
     }
     
     enum AISettings: String, CaseIterable {
-        case phiAIEnabled, enableConnectors, enableConnectorContext , enableChatWithTabs, enableBrowserMemories, launchSentinelOnLogin
-        
+        case phiAIEnabled, enableConnectors, enableConnectorContext , enableChatWithTabs, enableBrowserMemories, launchSentinelOnLogin, enableProactiveSuggestionsOnNTP
+
         var defaultValue: Bool {
             switch self {
             case .phiAIEnabled:
@@ -123,6 +123,8 @@ extension PhiPreferences {
             case .enableBrowserMemories:
                 return true
             case .launchSentinelOnLogin:
+                return true
+            case .enableProactiveSuggestionsOnNTP:
                 return true
             }
         }

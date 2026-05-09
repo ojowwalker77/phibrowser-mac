@@ -35,6 +35,7 @@ struct AISettingView: View {
                 AIEnableToggleRow(isOn: aiEnabledBinding)
                 BrowserMemorySectionView(enabled: phiAIEnabled)
                 PhiSentinelSectionView(enabled: phiAIEnabled)
+                NewTabPageSectionView(enabled: phiAIEnabled)
                 AISidebarSectionView(enabled: phiAIEnabled)
                 ExternalConnectorsSectionView(connectorViewModel: connectorViewModel,
                                               enabled: phiAIEnabled)
@@ -139,6 +140,32 @@ private struct PhiSentinelSectionView: View {
             }
         }
         .onChange(of: launchSentinelOnLogin) {
+            notifyNativeSettingsChanged()
+        }
+    }
+}
+
+// MARK: - New Tab Page Section
+
+private struct NewTabPageSectionView: View {
+    @AppStorage(PhiPreferences.AISettings.enableProactiveSuggestionsOnNTP.rawValue)
+    private var enableProactiveSuggestionsOnNTP: Bool = PhiPreferences.AISettings.enableProactiveSuggestionsOnNTP.defaultValue
+
+    let enabled: Bool
+
+    var body: some View {
+        AISectionView(
+            title: NSLocalizedString("New Tab Page", comment: "AI settings - Section title for new tab page options")
+        ) {
+            AIContainerView {
+                AIToggleRow(
+                    title: NSLocalizedString("Show proactive suggestions on the new tab page", comment: "AI settings - Toggle to show proactive suggestions on the new tab page"),
+                    isOn: $enableProactiveSuggestionsOnNTP,
+                    enabled: enabled
+                )
+            }
+        }
+        .onChange(of: enableProactiveSuggestionsOnNTP) {
             notifyNativeSettingsChanged()
         }
     }
