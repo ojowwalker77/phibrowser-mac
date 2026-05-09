@@ -41,6 +41,19 @@ final class TabDragContext {
     /// the chip (chip stays, first member slides right).
     var gapBeforeRunStartChip: Bool = false
 
+    /// Token of the chip that `gapBeforeRunStartChip` is "about" —
+    /// i.e. the leadingChip from the previous frame's gapBeforeChip
+    /// computation. Used by foreign-chip prev-state branching to
+    /// detect a chip change: when the new leadingChip differs from
+    /// the stored token, the stale TRUE flag from a previous chip
+    /// would otherwise carry into the new chip's TRUE branch and
+    /// evaluate against the new chip's natural midX with proxy
+    /// edges far past it, wrongly returning FALSE and preventing
+    /// the new chip from letting way (multi-collapsed-chip bug).
+    /// On chip change we reset to the FALSE branch (fresh prev-
+    /// state for this chip).
+    var gapBeforeRunStartChipToken: String?
+
     /// Token of the group whose leading edge the drop would attach
     /// the dragged tab to (= chip whose `firstMemberIndex` equals
     /// `targetIndex`, when the dragged tab isn't already in that

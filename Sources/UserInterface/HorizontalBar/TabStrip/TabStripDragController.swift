@@ -239,7 +239,26 @@ final class TabStripDragController {
         //     The minX-on-left-going branch fires at the natural
         //     "D's left edge meets chip center" moment.
         let gapBeforeChip: Bool = {
-            // Path 1: leadingChip set.
+            // Path 1: leadingChip set. Per-state branching for
+            // foreign-chip preserves the leadingJoin window: the
+            // TRUE branch uses `proxy.maxX < chip.midX` (strict)
+            // which lets state flip TRUE → FALSE earlier than the
+            // FALSE branch would flip back, creating a stable FALSE
+            // zone where leadingJoin can fire even though M_1 is
+            // still "before" in hit-test.
+            //
+            // Per-chip reset: prev-state is only reused when the
+            // new leadingChip is the SAME chip as the previous
+            // frame's. Across chip changes (e.g. multi-collapsed
+            // strip where the leadingChip switches from chip_B to
+            // chip_A as the user drags left), a stale TRUE flag
+            // from chip_B would otherwise route chip_A through the
+            // TRUE branch and evaluate proxy.maxX < chip_A.midX
+            // against chip_A's natural midX, which fails (proxy
+            // edges are far past chip_A's natural midX after a
+            // long drag) — chip_A never lets way. Resetting to the
+            // FALSE branch on chip change uses chip_A's correct
+            // first-time threshold.
             if let chip = leadingChip {
                 guard let xFrame = metrics.draggedTabFrameInNormal else {
                     return cursorInContainer < chip.frame.midX
@@ -247,15 +266,18 @@ final class TabStripDragController {
                 if chip.token == context.draggingTab.groupToken {
                     return xFrame.minX <= chip.frame.midX
                 }
-                if context.gapBeforeRunStartChip {
-                    // Was "before chip" — chip currently slid right.
-                    // Forward flip when D's right edge crosses
-                    // (slid) chip.midX going right.
+                let prevForThisChip = (context.gapBeforeRunStartChipToken == chip.token)
+                    && context.gapBeforeRunStartChip
+                if prevForThisChip {
+                    // Was "before chip" (same chip) — chip currently
+                    // slid right. Forward flip when D's right edge
+                    // crosses (slid) chip.midX going right.
                     return xFrame.maxX < chip.frame.midX
                 } else {
-                    // Was "after chip" — chip currently natural.
-                    // Backward flip when D's left edge crosses
-                    // (natural) chip.midX going left.
+                    // Either was "after chip" or first frame for
+                    // this chip after a chip change. chip currently
+                    // natural. Backward flip when D's left edge
+                    // crosses (natural) chip.midX going left.
                     return xFrame.minX <= chip.frame.midX
                 }
             }
@@ -473,6 +495,10 @@ final class TabStripDragController {
         context.targetContainerType = targetZone
         context.targetIndex = targetIndex
         context.gapBeforeRunStartChip = gapBeforeChip
+        // Track which chip the gapBeforeChip flag is "about" so the
+        // foreign-chip prev-state branching can detect chip changes
+        // and reset to the FALSE branch (avoiding stale-TRUE bugs).
+        context.gapBeforeRunStartChipToken = leadingChip?.token
         context.targetGroupForLeadingJoin = leadingJoinToken
         context.targetGroupForLeadingLeave = leadingLeaveToken
         context.targetGroupForTrailingLeave = trailingLeaveToken
@@ -600,7 +626,6 @@ final class TabStripDragController {
                     xFrame: xFrame,
                     tabFrames: metrics.normalTabFrames,
                     chipFrames: metrics.chipFrames,
-                    cursorX: normalCursorX,
                     excludedIndex: excluded,
                     previousIndex: context.targetIndex
                 )
@@ -650,7 +675,6 @@ final class TabStripDragController {
         xFrame: CGRect,
         tabFrames: [CGRect],
         chipFrames: [TabStripChipFrame],
-        cursorX: CGFloat,
         excludedIndex: Int?,
         previousIndex: Int
     ) -> Int {
@@ -659,15 +683,15 @@ final class TabStripDragController {
         // entry `afterIndex == beforeIndex + 1`; for a chip stand-in
         // `afterIndex = run.upperBound + 1` so flipping past the
         // chip jumps the gap clean across the whole hidden run in a
-        // single step. `isChipStandIn` switches the threshold rule
-        // because the chip is far narrower than the proxy and the
-        // proxy is clamped inside the layout content area, so proxy
-        // edges can't give meaningful "before/after chip" feedback.
+        // single step. Both kinds share the proxy-edge hysteresis
+        // rule with prev-state branching — keeping the threshold
+        // logic uniform means chip-stand-in behavior matches tab-
+        // tab and expanded-chip behavior, so the user's mental
+        // model is one rule across the strip.
         struct Entry {
             let beforeIndex: Int
             let afterIndex: Int
             let frame: CGRect
-            let isChipStandIn: Bool
         }
 
         // Look up collapsed-run chips by their first-member index so
@@ -686,8 +710,7 @@ final class TabStripDragController {
                 entries.append(Entry(
                     beforeIndex: chip.firstMemberIndex,
                     afterIndex: chip.lastMemberIndex + 1,
-                    frame: chip.frame,
-                    isChipStandIn: true
+                    frame: chip.frame
                 ))
                 i = chip.lastMemberIndex + 1
                 continue
@@ -703,8 +726,7 @@ final class TabStripDragController {
             entries.append(Entry(
                 beforeIndex: i,
                 afterIndex: i + 1,
-                frame: tabFrames[i],
-                isChipStandIn: false
+                frame: tabFrames[i]
             ))
             i += 1
         }
@@ -719,26 +741,13 @@ final class TabStripDragController {
         for (j, entry) in entries.enumerated() {
             let midX = entry.frame.midX
             let stateIsBefore: Bool
-            if entry.isChipStandIn {
-                // Chip stand-ins use cursor-based judgment. The
-                // asymmetric proxy-edge rule below assumes proxy
-                // and target are similar widths — true for a tab,
-                // false for a chip ~½ of a tab wide. Anchoring on
-                // cursor.x sidesteps that mismatch and the proxy
-                // clamp issue (proxy can't always reach chip.midX
-                // after the gap pushes chips rightward). Implicit
-                // hysteresis comes from the chip's frame shifting
-                // with the gap target — once the flip lands, the
-                // chip moves ~gapW away and the threshold for the
-                // reverse flip lands well outside cursor jiggle.
-                stateIsBefore = (cursorX < midX)
-            } else if j >= prevJ {
-                // Was "before T_j"; only flip to "after" if x's
-                // right edge has caught up to T_j's center.
+            if j >= prevJ {
+                // Was "before"; only flip to "after" if x's right
+                // edge has caught up to the entry's center.
                 stateIsBefore = (xFrame.maxX < midX)
             } else {
-                // Was "after T_j"; only flip to "before" if x's
-                // left edge has retreated past T_j's center.
+                // Was "after"; only flip to "before" if x's left
+                // edge has retreated past the entry's center.
                 stateIsBefore = (xFrame.minX <= midX)
             }
             if stateIsBefore {
