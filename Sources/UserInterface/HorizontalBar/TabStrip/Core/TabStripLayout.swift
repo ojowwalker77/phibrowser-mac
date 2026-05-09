@@ -311,20 +311,18 @@ enum TabStripLayoutEngine {
     }
 
     /// Group-aware variant. Decides chip mode (all-or-nothing — every
-    /// chip in the strip switches together) by trying `.full` first; if
-    /// the resulting `baseWidth` would force tabs below the
-    /// compact-mode threshold (64pt, mirroring
-    /// `TabStripMetrics.Content.compactModeThreshold`), all chips switch
-    /// to `.compact` and the allocation re-runs. The three-tier width
-    /// allocation (Spacious / Medium / Tight) and active-tab protection
-    /// are byte-identical to `layoutNormalUngrouped` — they just receive
-    /// a smaller `availableForTabs`.
+    /// chip in the strip switches together) by trying `.full` first;
+    /// chips only switch to `.compact` when the full-chip overhead
+    /// would force tabs below `minTabWidth` (i.e. chip width is
+    /// literally what's pushing tabs off the floor). The three-tier
+    /// width allocation (Spacious / Medium / Tight) and active-tab
+    /// protection are byte-identical to `layoutNormalUngrouped` —
+    /// they just receive a smaller `availableForTabs`.
     private static func layoutNormalWithGroups(input: TabStripLayoutInput) -> TabStripLayoutOutput {
         let startOffsetX = calculateStartXOffset()
         let perTabOverhead: CGFloat = input.spacing * 2 + 1.0
         let btnSize = TabStripMetrics.NewTabButton.size
         let buttonOverhead = btnSize.width + TabStripMetrics.NewTabButton.insets.right
-        let chipModeThreshold: CGFloat = TabStripMetrics.Content.compactModeThreshold
 
         // ── Effective tab count: exclude collapsed-group members and
         // (optionally) the dragged tab.
@@ -365,14 +363,15 @@ enum TabStripLayoutEngine {
         var baseWidth: CGFloat = effectiveTabCount > 0
             ? max(0, availableForTabs / CGFloat(effectiveTabCount))
             : 0
-        // Compact mode is purely a width-pressure response — when
-        // visible tabs would shrink below the threshold, chips fall
-        // back to a 24pt compact form to claw width back. With no
-        // visible tabs to allocate width to (effectiveTabCount == 0,
-        // e.g. user drags the only non-grouped tab while every group
-        // is collapsed) there is no pressure and chips should stay
-        // in full mode so the title and count remain visible.
-        if effectiveTabCount > 0 && baseWidth < chipModeThreshold {
+        // Chip names take priority over tab readability. Switch to
+        // compact only when full-chip overhead would push tabs below
+        // their minimum width — i.e. chip width is literally what's
+        // pinning tabs against the floor; compact's 24pt chips claw
+        // back enough room to lift them off it. Otherwise tabs shrink
+        // (down to `minTabWidth`) but chips keep their title + count.
+        // (`effectiveTabCount == 0` means there's no tab to allocate
+        // to — no pressure, stay full.)
+        if effectiveTabCount > 0 && baseWidth < input.minTabWidth {
             chipMode = .compact
             availableForTabs = input.containerWidth - fixedOverheadBase - chipsCompactOverhead
             baseWidth = max(0, availableForTabs / CGFloat(effectiveTabCount))
