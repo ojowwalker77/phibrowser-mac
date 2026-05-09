@@ -793,10 +793,18 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
         guard !isLayoutLocked else { return }
         guard normalTabViews.count > 1 else { return }
 
-        // Infer the inactive width from any tab narrower than the active minimum.
+        // Infer the inactive width from any tab narrower than the active
+        // minimum. `frame != .zero` filters out collapsed-group members:
+        // they're sized to zero by `layoutNormalWithGroups`, not because
+        // the strip is compressed, but because the group is collapsed —
+        // they shouldn't be treated as "narrow inactive tab" evidence.
+        // Without the filter, the heuristic captures `lockedTabWidth = 0`
+        // and freezes a degenerate layout where every non-active cell
+        // collapses to width 0 (visually a clump of overlapping favicons,
+        // sticky until mouse exits the strip).
         let activeMinWidth = TabStripMetrics.Tab.activeMinWidth
         let inactiveTabWidth = normalTabViews.values
-            .first { $0.frame.width < activeMinWidth }?
+            .first { $0.frame != .zero && $0.frame.width < activeMinWidth }?
             .frame.width
 
         // If no inactive tab is compressed, there is no need to lock the layout.
