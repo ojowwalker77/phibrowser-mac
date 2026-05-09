@@ -335,11 +335,29 @@ final class TabStripDragController {
         // after-z transition typically fires first and shrinks the
         // threshold.
         //
-        // Fallbacks:
-        //  • Dragged tab is itself the run's last member — anchor
-        //    on the member before it (post-exclusion visible last).
-        //  • Single-member group with the only member being the
-        //    dragged one — leadingLeave handles it.
+        // Anchors and thresholds depend on which member is dragged:
+        //
+        //  • Own-last member (multi-member group): anchor on the
+        //    member before, z = M_(n-1). z.maxX == source.minX −
+        //    spacing, so a raw `xFrame.minX > z.maxX` would fire
+        //    on the very first drag tick. Add a `draggedTabWidth/3`
+        //    buffer so leave needs a meaningful rightward shift.
+        //
+        //  • Single-member group (dragged is the lone member):
+        //    no `z` post-exclusion. Anchor on chip.maxX with the
+        //    same `draggedTabWidth/3` buffer for parity with the
+        //    multi-member own-last case.
+        //
+        //  • Non-last member dragged: anchor on the run's actual
+        //    last member z. Threshold is unbuffered — leaving via
+        //    the right means clearing past every later member,
+        //    which already requires substantial drag.
+        //
+        // Buffer choice: `draggedTabWidth/3` keeps the leave
+        // threshold strictly below the next tab's let-way, which
+        // fires at `mouse_dx >= tabW/2 + spacing`. The margin is
+        // `tabW/6 + 2·spacing > 0` for any tab width, so leave
+        // always precedes let-way — even in compact mode.
         //
         // The geometric counterpart (`toIndex > upperBound + 1`)
         // still kicks in further right and remains a safety net.
@@ -350,12 +368,33 @@ final class TabStripDragController {
                   else { return nil }
             let isOwnGroupLastMember = (context.sourceContainerType == .normal
                 && context.sourceIndex == chip.lastMemberIndex)
-            let visibleLastIndex = isOwnGroupLastMember
-                ? chip.lastMemberIndex - 1
-                : chip.lastMemberIndex
-            guard visibleLastIndex >= chip.firstMemberIndex,
-                  visibleLastIndex < metrics.normalTabFrames.count else { return nil }
-            let zFrame = metrics.normalTabFrames[visibleLastIndex]
+            if isOwnGroupLastMember {
+                let buffer = context.draggedTabWidth / 3
+                if chip.firstMemberIndex == chip.lastMemberIndex {
+                    // Single-member group: anchor on chip's right edge.
+                    guard xFrame.minX > chip.frame.maxX + buffer else {
+                        return nil
+                    }
+                    return token
+                }
+                // Multi-member: anchor on z = previous member.
+                let zIdx = chip.lastMemberIndex - 1
+                guard zIdx >= chip.firstMemberIndex,
+                      zIdx < metrics.normalTabFrames.count else {
+                    return nil
+                }
+                let zFrame = metrics.normalTabFrames[zIdx]
+                guard zFrame != .zero else { return nil }
+                guard xFrame.minX > zFrame.maxX + buffer else {
+                    return nil
+                }
+                return token
+            }
+            // Dragged is not the run's last member.
+            guard chip.lastMemberIndex < metrics.normalTabFrames.count else {
+                return nil
+            }
+            let zFrame = metrics.normalTabFrames[chip.lastMemberIndex]
             guard zFrame != .zero else { return nil }
             guard xFrame.minX > zFrame.maxX else { return nil }
             return token

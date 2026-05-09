@@ -359,6 +359,23 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
                     || ctx.targetGroupForTrailingLeave == run.token
             }()
 
+            // Single-member group whose lone member is leaving:
+            // skip emitting a GroupGeometry entirely. The
+            // underline can't anchor on a real `z` (the only
+            // member is the dragged tab itself, whose frame stays
+            // pinned at the source slot because applyLayout skips
+            // the dragged tab) — falling through to the normal
+            // path would leave the line spanning the empty source
+            // slot. With no geometry the layer gets cleaned up
+            // and the chip stands alone, matching the post-leave
+            // group state.
+            if leavePending,
+               run.range.lowerBound == run.range.upperBound,
+               let ctx = dragCtx,
+               tabId(for: normalTabs[run.range.upperBound]) == tabId(for: ctx.draggingTab) {
+                continue
+            }
+
             // Pick the visible last member: when the dragged tab is
             // the run's last member AND a leave is pending, fall
             // back to the member before it (the one z) so the path
