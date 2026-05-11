@@ -25,6 +25,11 @@ protocol TabGroupCellViewDelegate: AnyObject {
     func tabGroupCellDidToggleCollapse(_ cell: TabGroupCellView,
                                        group: WebContentGroupInfo)
 
+    func tabGroupCell(_ cell: TabGroupCellView,
+                      beginDraggingGroup group: WebContentGroupInfo,
+                      from headerView: NSView,
+                      mouseDownEvent: NSEvent)
+
     /// Inner-table tab cell requested a close. Mirrors the route used
     /// by ungrouped tab cells via `TabCellDelegate`.
     func tabGroupCell(_ cell: TabGroupCellView,
@@ -144,6 +149,62 @@ protocol GroupTabsDragSource: AnyObject {
                              dropOperation: NSTableView.DropOperation) -> Bool
 }
 
+private protocol TabGroupHeaderHostingViewDelegate: AnyObject {
+    func tabGroupHeaderHostingViewDidToggleCollapse(_ view: TabGroupHeaderHostingView)
+    func tabGroupHeaderHostingView(_ view: TabGroupHeaderHostingView,
+                                   beginDraggingWith mouseDownEvent: NSEvent)
+}
+
+private final class TabGroupHeaderHostingView: NSHostingView<TabGroupHeaderView> {
+    weak var dragDelegate: TabGroupHeaderHostingViewDelegate?
+
+    private var pendingMouseDownEvent: NSEvent?
+    private var pendingMouseDownPoint: NSPoint?
+    private var manualDragInProgress = false
+
+    override func mouseDown(with event: NSEvent) {
+        pendingMouseDownEvent = event
+        pendingMouseDownPoint = convert(event.locationInWindow, from: nil)
+        manualDragInProgress = false
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard !manualDragInProgress,
+              let mouseDownEvent = pendingMouseDownEvent else {
+            return
+        }
+        manualDragInProgress = true
+        dragDelegate?.tabGroupHeaderHostingView(
+            self,
+            beginDraggingWith: mouseDownEvent)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        defer {
+            pendingMouseDownEvent = nil
+            pendingMouseDownPoint = nil
+            manualDragInProgress = false
+        }
+        guard !manualDragInProgress,
+              let downPoint = pendingMouseDownPoint else {
+            return
+        }
+        let upPoint = convert(event.locationInWindow, from: nil)
+        guard chevronHitRect.contains(downPoint),
+              chevronHitRect.contains(upPoint) else {
+            return
+        }
+        dragDelegate?.tabGroupHeaderHostingViewDidToggleCollapse(self)
+    }
+
+    private var chevronHitRect: NSRect {
+        NSRect(x: max(0, bounds.maxX - 32),
+               y: bounds.minY,
+               width: min(32, bounds.width),
+               height: bounds.height)
+    }
+}
+
 /// `NSTableCellView` host for a Chromium tab group: a SwiftUI header
 /// strip on top + an embedded `GroupTabsTableView` rendering the
 /// members. Replaces `TabGroupHeaderCellView`. The outer
@@ -160,7 +221,7 @@ final class TabGroupCellView: SidebarCellView {
 
     private(set) var token: String = ""
 
-    private var hostingView: NSHostingView<TabGroupHeaderView>!
+    private var hostingView: TabGroupHeaderHostingView!
     private(set) var innerTable: GroupTabsTableView!
     private let viewModel = TabGroupHeaderViewModel()
 
@@ -213,8 +274,9 @@ final class TabGroupCellView: SidebarCellView {
     // MARK: - Setup
 
     private func setupViews() {
-        hostingView = NSHostingView(
+        hostingView = TabGroupHeaderHostingView(
             rootView: TabGroupHeaderView(viewModel: viewModel))
+        hostingView.dragDelegate = self
         addSubview(hostingView)
         hostingView.snp.makeConstraints { make in
             make.top.equalToSuperview()
@@ -410,6 +472,27 @@ extension TabGroupCellView {
               let tab = tabsByGuid[currentMemberOrder[row]]
         else { return }
         tab.performAction(with: nil)
+    }
+}
+
+// MARK: - Header drag
+
+extension TabGroupCellView: TabGroupHeaderHostingViewDelegate {
+    fileprivate func tabGroupHeaderHostingViewDidToggleCollapse(_ view: TabGroupHeaderHostingView) {
+        viewModel.onToggleCollapsed?()
+    }
+
+    fileprivate func tabGroupHeaderHostingView(_ view: TabGroupHeaderHostingView,
+                                               beginDraggingWith mouseDownEvent: NSEvent) {
+        guard let group = configuredGroup else { return }
+        AppLogDebug(
+            "[TAB_GROUPS][GROUP_DRAG] cell.beginDraggingGroup token=\(group.token)"
+        )
+        groupCellDelegate?.tabGroupCell(
+            self,
+            beginDraggingGroup: group,
+            from: view,
+            mouseDownEvent: mouseDownEvent)
     }
 }
 

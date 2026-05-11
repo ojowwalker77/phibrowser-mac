@@ -67,6 +67,55 @@ final class BrowserStateTabGroupBlockTests: XCTestCase {
         RunLoop.main.run(until: Date().addingTimeInterval(0.2))
     }
 
+    // MARK: - moveNormalTabSlice
+
+    func testMoveNormalTabSlice_movesContiguousMembersToTail_preservingMemberOrder() throws {
+        let state = try makeBrowserState()
+        seed(state: state, tabs: [
+            (guid: 100, url: "https://n1.example", token: nil),
+            (guid: 200, url: "https://a1.example", token: "A"),
+            (guid: 201, url: "https://a2.example", token: "A"),
+            (guid: 101, url: "https://n2.example", token: nil),
+            (guid: 102, url: "https://n3.example", token: nil),
+        ])
+
+        state.moveNormalTabSlice(memberIds: [200, 201], to: 5)
+
+        XCTAssertEqual(state.normalTabs.map { $0.guid },
+                       [100, 101, 102, 200, 201])
+    }
+
+    func testMoveNormalTabSlice_movesContiguousMembersToStart_preservingMemberOrder() throws {
+        let state = try makeBrowserState()
+        seed(state: state, tabs: [
+            (guid: 100, url: "https://n1.example", token: nil),
+            (guid: 101, url: "https://n2.example", token: nil),
+            (guid: 200, url: "https://a1.example", token: "A"),
+            (guid: 201, url: "https://a2.example", token: "A"),
+            (guid: 102, url: "https://n3.example", token: nil),
+        ])
+
+        state.moveNormalTabSlice(memberIds: [200, 201], to: 0)
+
+        XCTAssertEqual(state.normalTabs.map { $0.guid },
+                       [200, 201, 100, 101, 102])
+    }
+
+    func testMoveNormalTabSlice_dropInsideSourceRange_isNoOp() throws {
+        let state = try makeBrowserState()
+        seed(state: state, tabs: [
+            (guid: 100, url: "https://n1.example", token: nil),
+            (guid: 200, url: "https://a1.example", token: "A"),
+            (guid: 201, url: "https://a2.example", token: "A"),
+            (guid: 101, url: "https://n2.example", token: nil),
+        ])
+
+        let before = state.normalTabs.map { $0.guid }
+        state.moveNormalTabSlice(memberIds: [200, 201], to: 2)
+
+        XCTAssertEqual(state.normalTabs.map { $0.guid }, before)
+    }
+
     // MARK: - moveGroupBlock
 
     /// `[N1, A1, A2, N2, N3]` with group A at indices 1..2.

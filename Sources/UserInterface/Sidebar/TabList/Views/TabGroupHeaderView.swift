@@ -140,10 +140,6 @@ struct TabGroupHeaderView: View {
                 .foregroundColor(Color(nsColor: .secondaryLabelColor))
                 .frame(width: 16, height: 16)
                 .rotationEffect(.degrees(viewModel.isCollapsed ? 0 : 90))
-                .contentShape(Rectangle())
-                .onTapGesture {
-                    viewModel.onToggleCollapsed?()
-                }
                 .animation(.easeInOut(duration: 0.15), value: viewModel.isCollapsed)
         }
         .padding(.leading, 2)

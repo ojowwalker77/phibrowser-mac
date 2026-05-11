@@ -196,7 +196,7 @@ class SidebarTabListViewController: NSViewController {
         
         outlineView.setDraggingSourceOperationMask([.move, .copy], forLocal: true)
         outlineView.setDraggingSourceOperationMask([.move, .copy], forLocal: false)
-        outlineView.registerForDraggedTypes([.pinnedTab, .normalTab, .phiBookmark])
+        outlineView.registerForDraggedTypes([.pinnedTab, .normalTab, .phiBookmark, .tabGroup])
         outlineView.phiOutlineDelegate = self
         
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("SidebarColumn"))
@@ -539,8 +539,8 @@ extension SidebarTabListViewController: NSOutlineViewDataSource {
         if let groupItem = sidebarItem as? TabGroupSidebarItem {
             // Whole-group drag: payload identifies the contiguous block
             // of tabs sharing this token. Drop targets call either
-            // `moveGroupBlock` (root reorder) or `convertGroupToBookmarks`
-            // (bookmark folder).
+            // `moveNormalTabSlice` (root reorder) or
+            // `convertGroupToBookmarks` (bookmark folder).
             pasteboardItem.setString(groupItem.group.token, forType: .tabGroup)
             pasteboardItem.setString(String(browserState.windowId), forType: .sourceWindowId)
             return pasteboardItem
@@ -940,7 +940,10 @@ extension SidebarTabListViewController: NSOutlineViewDataSource {
                     return true
                 }
                 let destination = calculateTabDestinationIndex(from: resolvedIndex)
-                browserState.moveGroupBlock(token: token, to: destination)
+                let memberIds = browserState.normalTabs
+                    .filter { $0.groupToken == token }
+                    .map(\.guid)
+                browserState.moveNormalTabSlice(memberIds: memberIds, to: destination)
                 return true
             }
             return false
@@ -2670,6 +2673,47 @@ extension SidebarTabListViewController: TabGroupCellViewDelegate {
         // kVisualsChanged echo updates `group.isCollapsed`, which the
         // cell already subscribes to.
         requestTabGroupCollapseChange(group: group, collapsed: !group.isCollapsed)
+    }
+
+    func tabGroupCell(_ cell: TabGroupCellView,
+                      beginDraggingGroup group: WebContentGroupInfo,
+                      from headerView: NSView,
+                      mouseDownEvent: NSEvent) {
+        AppLogDebug(
+            "[TAB_GROUPS][GROUP_DRAG] controller.beginDraggingGroup " +
+            "token=\(group.token) eventWindowPoint=\(mouseDownEvent.locationInWindow)"
+        )
+        let draggingView: NSView = group.isCollapsed ? headerView : cell
+        guard let groupItem = cell.item as? TabGroupSidebarItem,
+              let image = draggingView.createDraggingSnapshot() else {
+            return
+        }
+
+        let pasteboardItem = NSPasteboardItem()
+        pasteboardItem.setString(group.token, forType: .tabGroup)
+        pasteboardItem.setString(String(browserState.windowId), forType: .sourceWindowId)
+
+        let draggingItem = NSDraggingItem(pasteboardWriter: pasteboardItem)
+        let frame = outlineView.convert(draggingView.bounds, from: draggingView)
+        draggingItem.setDraggingFrame(frame, contents: image)
+
+        let session = outlineView.beginDraggingSession(
+            with: [draggingItem],
+            event: mouseDownEvent,
+            source: self)
+
+        let screenPoint = mouseDownEvent.window?
+            .convertPoint(toScreen: mouseDownEvent.locationInWindow) ?? NSEvent.mouseLocation
+        DispatchQueue.main.async { [weak self] in
+            self?.expandFloatingBookmarkParentsIfNeeded()
+            self?.browserState.isDraggingTab = true
+        }
+        browserState.tabDraggingSession.attachNativeSession(session)
+        browserState.tabDraggingSession.begin(
+            draggingItem: groupItem,
+            screenLocation: CGPoint(x: screenPoint.x, y: screenPoint.y),
+            containerView: hostVC?.view
+        )
     }
 
     func tabGroupCell(_ cell: TabGroupCellView,

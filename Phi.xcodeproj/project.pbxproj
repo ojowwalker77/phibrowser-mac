@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		04FE4637EFE3A1396687DD63 /* AISettingsConnectorViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8FCAEAE328C802016D87943 /* AISettingsConnectorViewModel.swift */; };
 		15B618E574463D94C98AEA5F /* AISettingHostingViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1B584F695BF7833FAA99558 /* AISettingHostingViewController.swift */; };
+		2ABF91DB68C2445BAA58C9BA /* GroupTabsTableView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 457F461C0F164136A46FF641 /* GroupTabsTableView.swift */; };
 		3703C88C2F68F78500E7CF6D /* AISettingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3703C88B2F68F78500E7CF6D /* AISettingView.swift */; };
 		3703C9822F69558C00E7CF6D /* BrowserState+ToggleAI.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3703C9812F69558C00E7CF6D /* BrowserState+ToggleAI.swift */; };
 		3703C9842F6956E600E7CF6D /* SentinelHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3703C9832F6956E600E7CF6D /* SentinelHelper.swift */; };
@@ -133,6 +134,7 @@
 		37F574482F7A7C5D00879867 /* PhiIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = 37F574472F7A7C5D00879867 /* PhiIcon.icon */; };
 		37FC8C922F335942004675B8 /* WebContentProgressBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37FC8C912F335942004675B8 /* WebContentProgressBarView.swift */; };
 		37FC8DAA2F39B2DE004675B8 /* LayoutModeSettingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37FC8DA92F39B2DE004675B8 /* LayoutModeSettingView.swift */; };
+		3BCDDE6FBABE4BD8A51F0127 /* TabGroupCellView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE7E61A49E8A472DB330779E /* TabGroupCellView.swift */; };
 		4508A9362EEFF2EB007C94E2 /* AccountWebWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4508A9352EEFF2EB007C94E2 /* AccountWebWindowController.swift */; };
 		4D454D4F5259000000000001 /* MemoryUsageModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D454D4F5259000000000002 /* MemoryUsageModels.swift */; };
 		4D454D4F5259000000000004 /* MemoryUsageMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D454D4F5259000000000005 /* MemoryUsageMonitor.swift */; };
@@ -160,8 +162,6 @@
 		8E8008D82FA1A59800EB24C5 /* WebContentGroupInfo.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E8008D52FA1A59800EB24C5 /* WebContentGroupInfo.swift */; };
 		8E8008DA2FA1A69600EB24C5 /* GroupColor+NSColor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E8008D92FA1A69600EB24C5 /* GroupColor+NSColor.swift */; };
 		8E8008F52FA1A72E00EB24C5 /* TabGroupHeaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E8008F42FA1A72E00EB24C5 /* TabGroupHeaderView.swift */; };
-		3BCDDE6FBABE4BD8A51F0127 /* TabGroupCellView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE7E61A49E8A472DB330779E /* TabGroupCellView.swift */; };
-		2ABF91DB68C2445BAA58C9BA /* GroupTabsTableView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 457F461C0F164136A46FF641 /* GroupTabsTableView.swift */; };
 		8E8008F82FA1A73A00EB24C5 /* TabGroupSidebarItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E8008F72FA1A73A00EB24C5 /* TabGroupSidebarItem.swift */; };
 		8E9DAF422F765E83004EA160 /* PasswordManagerViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E9DAF402F765E83004EA160 /* PasswordManagerViewController.swift */; };
 		8E9E96AC2F0F6E64002D0D21 /* TabItemView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E9E96A82F0F6E64002D0D21 /* TabItemView.swift */; };
@@ -512,6 +512,7 @@
 		37FC8C912F335942004675B8 /* WebContentProgressBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebContentProgressBarView.swift; sourceTree = "<group>"; };
 		37FC8DA92F39B2DE004675B8 /* LayoutModeSettingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LayoutModeSettingView.swift; sourceTree = "<group>"; };
 		4508A9352EEFF2EB007C94E2 /* AccountWebWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountWebWindowController.swift; sourceTree = "<group>"; };
+		457F461C0F164136A46FF641 /* GroupTabsTableView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GroupTabsTableView.swift; sourceTree = "<group>"; };
 		4D454D4F5259000000000002 /* MemoryUsageModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemoryUsageModels.swift; sourceTree = "<group>"; };
 		4D454D4F5259000000000005 /* MemoryUsageMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemoryUsageMonitor.swift; sourceTree = "<group>"; };
 		4D454D4F5259000000000007 /* ProcessMemorySampler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessMemorySampler.swift; sourceTree = "<group>"; };
@@ -538,8 +539,6 @@
 		8E8008D42FA1A59800EB24C5 /* GroupColor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GroupColor.swift; sourceTree = "<group>"; };
 		8E8008D52FA1A59800EB24C5 /* WebContentGroupInfo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebContentGroupInfo.swift; sourceTree = "<group>"; };
 		8E8008D92FA1A69600EB24C5 /* GroupColor+NSColor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "GroupColor+NSColor.swift"; sourceTree = "<group>"; };
-		CE7E61A49E8A472DB330779E /* TabGroupCellView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TabGroupCellView.swift; sourceTree = "<group>"; };
-		457F461C0F164136A46FF641 /* GroupTabsTableView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GroupTabsTableView.swift; sourceTree = "<group>"; };
 		8E8008F42FA1A72E00EB24C5 /* TabGroupHeaderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TabGroupHeaderView.swift; sourceTree = "<group>"; };
 		8E8008F72FA1A73A00EB24C5 /* TabGroupSidebarItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TabGroupSidebarItem.swift; sourceTree = "<group>"; };
 		8E9DAF402F765E83004EA160 /* PasswordManagerViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PasswordManagerViewController.swift; sourceTree = "<group>"; };
@@ -694,6 +693,7 @@
 		CCEF2D212E584F1700FDDEB2 /* URLProcessor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = URLProcessor.swift; sourceTree = "<group>"; };
 		CCEF2D9B2E5F1A9900FDDEB2 /* AIChatViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIChatViewController.swift; sourceTree = "<group>"; };
 		CCF5D0A22F00000100ABCDEF /* TabDraggingSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TabDraggingSession.swift; sourceTree = "<group>"; };
+		CE7E61A49E8A472DB330779E /* TabGroupCellView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TabGroupCellView.swift; sourceTree = "<group>"; };
 		D10000000000000000000011 /* BrowserImagePreviewState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserImagePreviewState.swift; sourceTree = "<group>"; };
 		D10000000000000000000012 /* ImagePreviewModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImagePreviewModels.swift; sourceTree = "<group>"; };
 		D10000000000000000000013 /* ImagePreviewGeometry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImagePreviewGeometry.swift; sourceTree = "<group>"; };
@@ -2483,7 +2483,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
-				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
+				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "-";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 87DQ3HMK5G;
