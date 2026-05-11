@@ -12,11 +12,11 @@ struct ConnectorTemplate: Identifiable {
     let provider: String
     let icon: NSImage?
 
-    static let googleDrive = ConnectorTemplate(
-        id: "google-drive",
-        name: "Google Drive",
+    static let google = ConnectorTemplate(
+        id: "google",
+        name: "Google (Gmail, Calendar)",
         provider: "google",
-        icon: NSImage(named: "google-drive")
+        icon: NSImage(named: "google")
     )
 
     static let notion = ConnectorTemplate(
@@ -26,7 +26,14 @@ struct ConnectorTemplate: Identifiable {
         icon: NSImage(named: "notion")
     )
 
-    static let all: [ConnectorTemplate] = [.googleDrive, .notion]
+    static let slack = ConnectorTemplate(
+        id: "slack",
+        name: "Slack",
+        provider: "slack",
+        icon: NSImage(named: "slack")
+    )
+
+    static let all: [ConnectorTemplate] = [.google, .notion, .slack]
 }
 
 // MARK: - ConnectorItemState
