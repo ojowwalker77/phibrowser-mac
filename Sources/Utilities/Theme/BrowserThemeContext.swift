@@ -60,12 +60,12 @@ enum BrowserThemeConfigurationResolver {
     
     @MainActor
     private static func resolveTheme(id: String, manager: ThemeManager) -> Theme {
-        if let theme = manager.registeredThemes[id] {
-            return theme
-        }
-        if manager.currentTheme.id == id {
-            return manager.currentTheme
-        }
+//        if let theme = manager.registeredThemes[id] {
+//            return theme
+//        }
+//        if manager.currentTheme.id == id {
+//            return manager.currentTheme
+//        }
         return .default
     }
 }

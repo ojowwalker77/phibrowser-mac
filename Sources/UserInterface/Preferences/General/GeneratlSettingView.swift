@@ -25,7 +25,7 @@ struct GeneralSettingView: View {
     var body: some View {
         ScrollView(.vertical) {
             VStack(alignment: .leading, spacing: 24) {
-                ThemeSectionView()
+//                ThemeSectionView()
                 AppearanceSectionView()
                 BrowsingSectionView()
             }
