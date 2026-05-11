@@ -1596,54 +1596,53 @@ class BrowserState {
               let url = tab.url, !url.isEmpty else {
             return
         }
-        // Symmetric to the detach in `moveNormalTab(toPinnd:)`. Phi's
-        // bookmark-backed tab is a Mac-only concept layered on top of
-        // Chromium's normal tab, so Chromium's GroupModel doesn't learn
-        // that a grouped tab has been "converted" until we explicitly
-        // tell it. Without this, Chromium keeps the tab as a group
-        // member, breaking last-tab-closes-group detection and leaving
-        // a stale `groupToken` on the tab if it is later re-opened
-        // through the bookmark.
-        if tab.groupToken != nil,
-           let bridge = ChromiumLauncher.sharedInstance().bridge {
-            bridge.removeTabsFromGroup(withWindowId: windowId.int64Value,
-                                        tabIds: [NSNumber(value: Int64(tabId))])
-            tab.groupToken = nil
-        }
-        let affectedChildren = nativeRelationGraph.directChildren(of: tabId)
-        nativeRelationGraph.fixOpenersAfterMovingTab(tabId)
-        for childId in affectedChildren {
-            nativeRelationGraph.locallyFixedOpenerTabIds.insert(childId)
-        }
-        
         let newBookmarkGuid = UUID().uuidString
-        
-        // Migrate AI Chat tab association before changing identifier
-        migrateAIChatTab(for: tab, toNewIdentifier: newBookmarkGuid)
-        
+        prepareNormalTabForBookmark(tab, bookmarkGuid: newBookmarkGuid)
+
         localStore.createBookmark(url: url,
                                   title: tab.title,
                                   profileId: profileId,
                                   parentId: parentGuid,
                                   index: index,
                                   guid: newBookmarkGuid)
-        
-        tab.guidInLocalDB = newBookmarkGuid
-        
-        if let wrapper = tab.webContentWrapper {
-            wrapper.updateTabCustomValue(newBookmarkGuid)
-        }
-        
+
         updateNormalTabs()
     }
+
+    private func prepareNormalTabForBookmark(_ tab: Tab, bookmarkGuid: String) {
+        // Symmetric to the detach in `moveNormalTab(toPinnd:)`. Phi's
+        // bookmark-backed tab is a Mac-only concept layered on top of
+        // Chromium's normal tab, so Chromium's GroupModel doesn't learn
+        // that a grouped tab has been "converted" until we explicitly
+        // tell it.
+        if let token = tab.groupToken {
+            ChromiumLauncher.sharedInstance().bridge?.removeTabsFromGroup(
+                withWindowId: windowId.int64Value,
+                tabIds: [NSNumber(value: Int64(tab.guid))]
+            )
+            tab.groupToken = nil
+            if tabs.contains(where: { $0.groupToken == token }) {
+                groups[token]?.objectWillChange.send()
+            } else {
+                groups.removeValue(forKey: token)
+            }
+        }
+
+        let affectedChildren = nativeRelationGraph.directChildren(of: tab.guid)
+        nativeRelationGraph.fixOpenersAfterMovingTab(tab.guid)
+        for childId in affectedChildren {
+            nativeRelationGraph.locallyFixedOpenerTabIds.insert(childId)
+        }
+
+        migrateAIChatTab(for: tab, toNewIdentifier: bookmarkGuid)
+        tab.guidInLocalDB = bookmarkGuid
+        tab.webContentWrapper?.updateTabCustomValue(bookmarkGuid)
+    }
     
-    /// Converts every member of a tab group into bookmarks, dissolving the
-    /// group on Chromium's side. Members are NOT closed: each one is
-    /// detached from the group and rewired to a fresh bookmark record under
-    /// `parentFolder`, preserving the in-group order. Group dissolution is
-    /// mirrored back from Chromium via `handleTabLeftGroup` /
-    /// `handleTabGroupClosed`; we only fire `closeGroup` defensively so the
-    /// header disappears even when the kClosed echo lags.
+    /// Converts every member of a tab group into a bookmark folder,
+    /// dissolving the group on Chromium's side. Members are NOT closed:
+    /// each one is detached from the group and rewired to a fresh bookmark
+    /// record inside the new folder, preserving the in-group order.
     /// - Parameters:
     ///   - token: Hex token of the group to dissolve.
     ///   - parentFolder: Destination bookmark folder, or nil for the root.
@@ -1653,10 +1652,6 @@ class BrowserState {
     func convertGroupToBookmarks(token: String,
                                   parentFolder: Bookmark?,
                                   at index: Int?) {
-        // Snapshot members in normalTabs order BEFORE mutating, so the
-        // bookmark order matches the strip order even though
-        // `moveNormalTab(toBookmark:)` rebuilds `normalTabs` after each
-        // call.
         let members = normalTabs.filter { $0.groupToken == token }
         guard !members.isEmpty else {
             AppLogDebug(
@@ -1664,20 +1659,47 @@ class BrowserState {
             )
             return
         }
+        let folderTitle = groups[token]?.displayTitle(memberCount: members.count)
+            ?? NSLocalizedString(
+                "Tab Group",
+                comment: "Tab Groups - Fallback bookmark folder title when converting a tab group")
         let memberGuids = members.map { $0.guid }
         let startIndex = index ?? 0
+        let folderGuid = UUID().uuidString
         AppLogDebug(
             "[TAB_GROUPS] convertGroupToBookmarks token=\(token) " +
             "members=\(memberGuids) parent=\(parentFolder?.guid ?? "<root>") " +
-            "startIndex=\(startIndex)"
+            "startIndex=\(startIndex) folderGuid=\(folderGuid)"
         )
 
-        for (offset, guid) in memberGuids.enumerated() {
-            moveNormalTab(tabId: guid,
-                          toBookmark: parentFolder?.guid,
-                          index: startIndex + offset,
-                          selectAfterMove: false)
+        var bookmarkDrafts: [(tab: Tab, title: String?, url: String, guid: String)] = []
+        for tab in members {
+            guard let url = tab.url, !url.isEmpty else {
+                AppLogWarn(
+                    "[TAB_GROUPS] convertGroupToBookmarks member has empty url " +
+                    "token=\(token) tabId=\(tab.guid); skipping conversion"
+                )
+                return
+            }
+            let bookmarkGuid = UUID().uuidString
+            bookmarkDrafts.append((tab: tab, title: tab.title, url: url, guid: bookmarkGuid))
         }
+
+        for draft in bookmarkDrafts {
+            prepareNormalTabForBookmark(draft.tab, bookmarkGuid: draft.guid)
+        }
+
+        localStore.createDirectoryWithBookmarks(
+            folderTitle: folderTitle,
+            folderGuid: folderGuid,
+            profileId: profileId,
+            parentId: parentFolder?.guid,
+            index: startIndex,
+            bookmarks: bookmarkDrafts.map { (title: $0.title, url: $0.url, guid: $0.guid) }
+        )
+        updateNormalTabs()
+        groups.removeValue(forKey: token)
+        pendingGroupClaims = pendingGroupClaims.filter { $0.value != token }
 
         // Chromium fires kClosed when the last member leaves the group, but
         // wire-order is async; ask Chromium to close the group explicitly so

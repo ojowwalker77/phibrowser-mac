@@ -1107,6 +1107,9 @@
     "Tab ⇥" : {
       "comment" : "Tab"
     },
+    "Tab Group" : {
+      "comment" : "Tab Groups - Fallback bookmark folder title when converting a tab group"
+    },
     "Tab Name" : {
       "comment" : "Pinned tab editor - Placeholder for pinned tab name input"
     },

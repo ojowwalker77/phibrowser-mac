@@ -864,9 +864,9 @@ extension SidebarTabListViewController: NSOutlineViewDataSource {
         
         browserState.tabDraggingSession.end()
 
-        // Whole-group drag: drop on a bookmark folder converts the
-        // group's members to bookmarks; drop at root reorders the
-        // group block as a whole.
+        // Whole-group drag: drop on a bookmark folder converts the group
+        // into a bookmark folder; drop at root reorders the group block
+        // as a whole.
         if let token = pasteboard.string(forType: .tabGroup) {
             if isCrossWindowDrag(pasteboard) {
                 return false

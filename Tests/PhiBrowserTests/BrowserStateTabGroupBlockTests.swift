@@ -183,15 +183,7 @@ final class BrowserStateTabGroupBlockTests: XCTestCase {
 
     // MARK: - convertGroupToBookmarks
 
-    /// Verifies that `convertGroupToBookmarks` rewires each member to a
-    /// fresh bookmark record without closing any tabs. NOTE: in tests
-    /// `ChromiumLauncher.sharedInstance().bridge` is nil, so the
-    /// `removeTabsFromGroup` branch in `moveNormalTab(toBookmark:)` is
-    /// skipped — `tab.groupToken` is therefore NOT cleared by the local
-    /// path. We assert what the local-only path actually does (each member's
-    /// `guidInLocalDB` flips to a fresh bookmark guid) and document the gap
-    /// for the controller.
-    func testConvertGroupToBookmarks_dissolvesGroupMembership_andCreatesBookmarks() throws {
+    func testConvertGroupToBookmarks_createsFolderAndRewiresOpenTabsToChildBookmarks() throws {
         let state = try makeBrowserState()
         let tabs = seed(state: state, tabs: [
             (guid: 100, url: "https://n1.example", token: nil),
@@ -201,31 +193,40 @@ final class BrowserStateTabGroupBlockTests: XCTestCase {
         ])
         let a1 = tabs[1]
         let a2 = tabs[2]
-        let originalA1Guid = a1.guidInLocalDB
-        let originalA2Guid = a2.guidInLocalDB
+        state.localStore.createBookmark(url: "https://existing.example",
+                                        title: "Existing",
+                                        profileId: state.profileId,
+                                        parentId: nil)
+        waitForBackgroundWrite()
 
         state.convertGroupToBookmarks(token: "A", parentFolder: nil, at: 0)
 
-        // Local rewire: each member now points at a brand-new local guid.
-        XCTAssertNotEqual(a1.guidInLocalDB, originalA1Guid)
-        XCTAssertNotEqual(a2.guidInLocalDB, originalA2Guid)
-        XCTAssertNotNil(a1.guidInLocalDB)
-        XCTAssertNotNil(a2.guidInLocalDB)
-
-        // Members are NOT closed.
+        XCTAssertNil(a1.groupToken)
+        XCTAssertNil(a2.groupToken)
+        XCTAssertNil(state.groups["A"])
         XCTAssertTrue(state.tabs.contains { $0.guid == 200 })
         XCTAssertTrue(state.tabs.contains { $0.guid == 201 })
+        guard let a1BookmarkGuid = a1.guidInLocalDB,
+              let a2BookmarkGuid = a2.guidInLocalDB else {
+            XCTFail("Expected open tabs to be associated with new bookmark records")
+            return
+        }
 
-        // Persisted bookmarks land under the profile root after the
-        // background write settles.
         waitForBackgroundWrite()
-        let stored = state.localStore.fetchBookmarks(parentId: nil as String?,
-                                                     profileId: state.profileId)
-        let storedURLs = stored.map { $0.url.absoluteString }
-        XCTAssertTrue(storedURLs.contains(where: { $0.contains("a1.example") }),
-                      "expected bookmark for a1; stored=\(storedURLs)")
-        XCTAssertTrue(storedURLs.contains(where: { $0.contains("a2.example") }),
-                      "expected bookmark for a2; stored=\(storedURLs)")
+        let rootItems = state.localStore.fetchBookmarks(parentId: nil as String?,
+                                                        profileId: state.profileId)
+        XCTAssertEqual(rootItems.first?.title, "Blue · 2 tabs")
+        XCTAssertEqual(rootItems.last?.title, "Existing")
+
+        guard let folder = rootItems.first else {
+            XCTFail("Expected converted group folder at root index 0")
+            return
+        }
+        let children = state.localStore.fetchBookmarks(parentId: folder.guid,
+                                                       profileId: state.profileId)
+        XCTAssertEqual(children.map(\.guid), [a1BookmarkGuid, a2BookmarkGuid])
+        XCTAssertEqual(children.map { $0.url.absoluteString },
+                       ["https://a1.example/", "https://a2.example/"])
     }
 
     /// Members hit `moveNormalTab(toBookmark:index:)` in normalTabs order

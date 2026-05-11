@@ -131,6 +131,54 @@ extension LocalStore {
             }
         }
     }
+
+    func createDirectoryWithBookmarks(folderTitle: String,
+                                      folderGuid: String,
+                                      profileId: String,
+                                      parentId: String?,
+                                      index: Int?,
+                                      bookmarks: [(title: String?, url: String, guid: String)]) {
+        let normalizedBookmarks: [(title: String?, url: URL, guid: String)] = bookmarks.compactMap { bookmark in
+            guard let normalizedURL = normalizedURL(from: bookmark.url) else {
+                AppLogError("Invalid bookmark url: \(bookmark.url)")
+                return nil
+            }
+            return (title: bookmark.title, url: normalizedURL, guid: bookmark.guid)
+        }
+        guard normalizedBookmarks.count == bookmarks.count else { return }
+
+        performBackgroundWrite { [weak self] context in
+            guard let self else { return }
+            do {
+                guard let parent = try self.resolveParent(for: parentId, profileId: profileId, in: context) else {
+                    AppLogError("Parent folder not found when creating directory with bookmarks")
+                    return
+                }
+                let now = Date()
+                let folder = try self.insertDirectoryNode(title: folderTitle,
+                                                          profileId: profileId,
+                                                          parent: parent,
+                                                          index: index,
+                                                          guid: folderGuid,
+                                                          spaceId: parent.spaceId,
+                                                          now: now,
+                                                          in: context)
+                for (childIndex, bookmark) in normalizedBookmarks.enumerated() {
+                    _ = try self.insertBookmarkNode(title: bookmark.title,
+                                                    profileId: profileId,
+                                                    url: bookmark.url,
+                                                    parent: folder,
+                                                    index: childIndex,
+                                                    guid: bookmark.guid,
+                                                    spaceId: folder.spaceId,
+                                                    now: now,
+                                                    in: context)
+                }
+            } catch {
+                AppLogError("Failed to create directory with bookmarks: \(error)")
+            }
+        }
+    }
     
     /// Ensures the hidden root folder exists for bookmarks without an explicit parent.
     func createDefaultRootDir(profileId: String) {
