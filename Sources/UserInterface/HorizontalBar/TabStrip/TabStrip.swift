@@ -3333,44 +3333,56 @@ extension TabStrip: TabGroupDragDelegate {
         let virtualDMaxX = normalX + tabW / 2
 
         let runs = currentGroupRuns()
+        let collapsedTokens = Set(runs.filter { $0.isCollapsed }.map { $0.token })
 
-        // Pass 1: chip overlap + per-chip prev-state hysteresis.
-        // Mirrors TabStripDragController:241-293 (foreign-chip path).
-        // Cross-window only ever sees foreign chips — the dragged tab
-        // lives in another strip, so no own-chip branch needed.
+        // Compute rawIndex up front; chip anchor selection keys on it
+        // so the chip stays anchored through let-way. Earlier overlap-
+        // based selection (gating Pass 1 on `virtualD overlaps chip`)
+        // oscillated: after let-way fires, the chip slides right by
+        // gap_width and no longer overlaps the cursor — the overlap
+        // gate would then clear the prev-state token, and the next
+        // frame's "first-frame" branch flips ON again with the natural
+        // chip frame. Each cursor sample = one chip flip = visible
+        // flicker. See same-window's `TabStripDragController:197-199`
+        // for the precedent (`leadingChip = firstMemberIndex ==
+        // targetIndex`); same-window's `targetIndex` is stable through
+        // let-way because the gap is reserved at `firstMemberIndex`
+        // and `calculateGapIndex` keeps the cursor pinned to it.
+        let rawIndex = calculateGapIndex(
+            localX: normalX,
+            tabFrames: metrics.normalTabFrames,
+            excludedIndex: nil
+        )
+
+        // Pass 1: leadingChip-driven prev-state hysteresis (foreign-
+        // chip path; cross-window has no own-chip case since the
+        // dragged tab lives in another strip).
         //
-        // Collapsed chips are SKIPPED here — dropping into a collapsed
+        // Collapsed chips are skipped — dropping into a collapsed
         // group's interior makes no UX sense (no visible run). The
         // hover-expand timer in `updateExternalDragPreview` detects
         // collapsed-chip hover separately and expands after 300ms;
         // the next resolver call (post-expand) treats the chip as
         // expanded and resolves normally. See spec §6.
-        let collapsedTokens = Set(runs.filter { $0.isCollapsed }.map { $0.token })
-        var hitChip: TabStripChipFrame? = nil
-        var hitGapBeforeChip = false
-        for cf in metrics.chipFrames {
-            if collapsedTokens.contains(cf.token) { continue }
-            let overlapsChip = virtualDMaxX > cf.frame.minX && virtualDMinX < cf.frame.maxX
-            guard overlapsChip else { continue }
+        let leadingChip: TabStripChipFrame? = metrics.chipFrames.first(where: {
+            $0.firstMemberIndex == rawIndex && !collapsedTokens.contains($0.token)
+        })
+
+        if let cf = leadingChip {
             let prevForThisChip = (externalHoverGapBeforeChipToken == cf.token)
             let gapBeforeChipNow: Bool
             if prevForThisChip {
-                // Was "before chip" — chip slid right. Flip OFF when
-                // D's right edge moves past the (slid) chip.midX.
+                // Was "before chip" — chip currently slid right. Flip
+                // OFF when D's right edge moves past the (slid)
+                // chip.midX.
                 gapBeforeChipNow = virtualDMaxX < cf.frame.midX
             } else {
-                // Was "after chip" / first frame on this chip. Flip
+                // First frame on this chip / was "after chip". Flip
                 // ON when D's left edge meets the (natural) chip.midX.
                 gapBeforeChipNow = virtualDMinX <= cf.frame.midX
             }
-            hitChip = cf
-            hitGapBeforeChip = gapBeforeChipNow
-            break
-        }
-
-        if let cf = hitChip {
-            externalHoverGapBeforeChipToken = hitGapBeforeChip ? cf.token : nil
-            if hitGapBeforeChip {
+            externalHoverGapBeforeChipToken = gapBeforeChipNow ? cf.token : nil
+            if gapBeforeChipNow {
                 // OUTSIDE: snap to run.lowerBound; no JOIN.
                 return SingleTabDropIntent(zone: .normal,
                                            index: cf.firstMemberIndex,
@@ -3387,11 +3399,6 @@ extension TabStrip: TabGroupDragDelegate {
         externalHoverGapBeforeChipToken = nil
 
         // Pass 2: raw-index resolution for sandwich + trailingJoin.
-        let rawIndex = calculateGapIndex(
-            localX: normalX,
-            tabFrames: metrics.normalTabFrames,
-            excludedIndex: nil
-        )
 
         // 2a. Sandwich: rawIndex strictly inside some run's interior
         // (lowerBound < idx <= upperBound). Anchor = tab at rawIndex
