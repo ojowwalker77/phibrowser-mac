@@ -47,8 +47,6 @@ class APIClient {
     private let accountBaseURL = "https://account.phibrowser.com"
     private let connectorBaseURL = "https://ai.phibrowser.com/data"
     #endif
-    private let agentBaseURL = "http://127.0.0.1:8788"
-
     private var token: String {
         let accessToken = AuthManager.shared.getAccessTokenSyncly()
 
@@ -103,12 +101,13 @@ class APIClient {
     // MARK: - Agent Persona
 
     func getAgentAvatar() async throws -> AgentAvatarResponse {
-        let url = URL(string: "\(agentBaseURL)/api/v1/agent-persona/avatar")!
-        var request = URLRequest(url: url)
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await executePhiAgentRequest { baseURL in
+            let url = URL(string: "\(baseURL)/api/v1/agent-persona/avatar")!
+            var request = URLRequest(url: url)
+            request.setValue("Bearer \(self.token)", forHTTPHeaderField: "Authorization")
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            return request
+        }
 
         guard let httpResponse = response as? HTTPURLResponse else {
             throw APIError.invalidResponse
@@ -119,6 +118,40 @@ class APIClient {
         }
 
         return try JSONDecoder().decode(AgentAvatarResponse.self, from: data)
+    }
+
+    /// Sends a request to the local phi-agent, resolving its base URL through
+    /// `PhiAgentEndpointResolver` so dynamic port assignment by Sentinel is
+    /// honored. On a transport-level error (no listener, refused connection,
+    /// timeout) the resolver cache is dropped and the request is rebuilt and
+    /// retried exactly once with a freshly resolved endpoint.
+    private func executePhiAgentRequest(
+        build: (_ baseURL: String) -> URLRequest
+    ) async throws -> (Data, URLResponse) {
+        let firstBase = await PhiAgentEndpointResolver.shared.currentBaseURL()
+        do {
+            return try await URLSession.shared.data(for: build(firstBase))
+        } catch let error as URLError where Self.isPhiAgentTransportError(error) {
+            await PhiAgentEndpointResolver.shared.invalidate()
+            let retryBase = await PhiAgentEndpointResolver.shared.currentBaseURL()
+            if retryBase == firstBase {
+                throw error
+            }
+            return try await URLSession.shared.data(for: build(retryBase))
+        }
+    }
+
+    private static func isPhiAgentTransportError(_ error: URLError) -> Bool {
+        switch error.code {
+        case .cannotConnectToHost,
+             .cannotFindHost,
+             .networkConnectionLost,
+             .notConnectedToInternet,
+             .timedOut:
+            return true
+        default:
+            return false
+        }
     }
 
     func getAgentAvatarImageData() async throws -> AgentAvatarImagePayload {
