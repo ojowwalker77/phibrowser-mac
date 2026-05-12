@@ -475,11 +475,38 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
         // already crossed the trailing edge, so trailing leave is
         // also active, and this branch fires.
         let dragCtx = dragController.context
+        // The single-tab drag has visually left the source strip when
+        // the cursor is outside this strip's bounds. In that state
+        // `updateSingleTabFloatingDragPreview` has already set the
+        // in-strip proxy view's alpha to 0 and shown the floating
+        // drag image; but the proxy's frame keeps tracking the cursor
+        // in source-strip coords. Any geometry path keying off the
+        // proxy frame — bottom line rightX extension, active-tab
+        // outline carve — would then chase the cursor out of the
+        // strip and render lines floating in empty space. Treat the
+        // dragged tab as fully "gone" from its source group in that
+        // state, mirroring how whole-group cross-window drag short-
+        // circuits the run entirely (line 521-527).
+        //
+        // Note: `pendingDropAction` is NOT a reliable signal here —
+        // it's only computed at drag-end (`handleTabDragEnd` line
+        // 2454). During the drag it stays nil. The drag boundary
+        // check is the same gate `updateSingleTabFloatingDragPreview`
+        // uses to swap proxy/panel visuals, so visual and geometry
+        // stay in sync by construction.
+        let singleTabDragLeavingSource: Bool = {
+            guard dragCtx != nil, let screenPoint = lastDragScreenPoint else { return false }
+            return !isInsideDragBoundary(screenPoint)
+        }()
         let leaveTokenForActive: String? = {
             guard let ctx = dragCtx, let activeIdx else { return nil }
             guard tabId(for: ctx.draggingTab) == tabId(for: normalTabs[activeIdx]) else { return nil }
             if let t = ctx.targetGroupForLeadingLeave { return t }
             if let t = ctx.targetGroupForTrailingLeave { return t }
+            // Cross-window/tear-off: force-leave the dragged tab's
+            // own group so the active outline doesn't try to carve
+            // around the proxy frame at the cursor.
+            if singleTabDragLeavingSource, let t = ctx.draggingTab.groupToken { return t }
             return nil
         }()
 
@@ -666,8 +693,13 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
             let dWillBeInThisRun: Bool = {
                 guard let ctx = dragCtx else { return false }
                 if ctx.draggingTab.groupToken == run.token {
+                    // Cross-window/tear-off counts as leaving for
+                    // proxy-extension purposes — the proxy is
+                    // outside the strip and dragging the underline
+                    // out with it would be wrong.
                     let leavingThisRun = (ctx.targetGroupForLeadingLeave == run.token
-                        || ctx.targetGroupForTrailingLeave == run.token)
+                        || ctx.targetGroupForTrailingLeave == run.token
+                        || singleTabDragLeavingSource)
                     return !leavingThisRun
                 }
                 if ctx.targetGroupForLeadingJoin == run.token { return true }
@@ -730,6 +762,23 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
         // logical tab (different objects, same guidInLocalDB / guid).
         let id = tabId(for: tab)
         if let context = dragController.context, tabId(for: context.draggingTab) == id {
+            // Cross-window / tear-off: when the cursor leaves the
+            // source strip, `updateSingleTabFloatingDragPreview` has
+            // hidden the in-strip proxy (alpha=0) and shown a floating
+            // NSPanel image at the cursor. The proxy's `.frame` keeps
+            // tracking the cursor in source-strip coords, so returning
+            // it here would let WCC paint the active-tab outline at
+            // cursor coordinates — drifting outside the strip with
+            // the floating image. Suppress with the same gate the
+            // float-preview helper uses; symmetric with the whole-
+            // group branch below.
+            //
+            // `pendingDropAction` is unreliable mid-drag (only set at
+            // drag-end); use `isInsideDragBoundary` directly.
+            if let screenPoint = lastDragScreenPoint,
+               !isInsideDragBoundary(screenPoint) {
+                return nil
+            }
             guard context.targetContainerType != .pinned,
                   let proxy = draggingProxyView,
                   proxy.superview != nil else {
