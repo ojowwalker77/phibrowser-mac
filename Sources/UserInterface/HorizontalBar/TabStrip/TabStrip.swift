@@ -2635,6 +2635,21 @@ extension TabStrip: TabStripDragDelegate {
                             withWindowId: Int64(browserState.windowId),
                             tabIds: [NSNumber(value: Int64(tab.guid))]
                         )
+                        // Optimistic local update — symmetric with the
+                        // auto-join site below. The bridge returns
+                        // synchronously but `tabLeftGroup` rides the
+                        // EventBus -> Task { @MainActor } async hop,
+                        // so without clearing the token here, T would
+                        // sit at its new position outside the source
+                        // group's range while still carrying
+                        // groupToken=sourceToken. `currentGroupRuns()`
+                        // in the upcoming performLayout would then see
+                        // GA's other members at their contiguous range
+                        // + T alone elsewhere = 2 runs of sourceToken
+                        // and trip the contiguity assertion. Triggers
+                        // only when T's new position is not adjacent
+                        // to GA's remaining members.
+                        tab.groupToken = nil
                     }
                 }
 
@@ -2693,6 +2708,22 @@ extension TabStrip: TabStripDragDelegate {
                         tabIds: [NSNumber(value: Int64(tab.guid))],
                         tokenHex: token
                     )
+                    // Optimistic local update: the bridge returns
+                    // synchronously but `tabJoinedGroup` rides the
+                    // EventBus -> Task { @MainActor } async hop, so
+                    // T.groupToken would still be stale (nil or old
+                    // group) when the `performLayout(.dataChanged)`
+                    // below runs. For sandwich auto-join that
+                    // transient state has T sitting between GB's
+                    // members with a non-GB token, splitting GB into
+                    // two runs and tripping `currentGroupRuns()`'s
+                    // contiguity assertion. Setting the token here
+                    // mirrors how `PhiChromiumCoordinator.newTabCreated`
+                    // pre-applies `groupIdHex` for newly-arrived tabs
+                    // (PhiChromiumCoordinator.swift:220-222); the
+                    // authoritative `handleTabJoinedGroup` arriving
+                    // later is a no-op when the token already matches.
+                    tab.groupToken = token
                 }
             }
         }
