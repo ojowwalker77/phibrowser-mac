@@ -109,7 +109,7 @@ struct SidebarBottomBarSwiftUI: View {
                     .layoutPriority(1)
             }
         }
-        .padding(.leading, 8)
+        .padding(.leading, WebContentConstant.edgesSpacing)
     }
 
     @ViewBuilder
@@ -154,7 +154,7 @@ struct SidebarBottomBarSwiftUI: View {
                     ChatButton(action: onChatTap)
                 }
             }
-            .padding(.leading, 8)
+            .padding(.leading, WebContentConstant.edgesSpacing)
             .frame(height: SidebarBottomBarState.singleRowHeight)
             .animation(showCardEntry ? .spring(response: 0.28, dampingFraction: 0.78) : nil, value: showCardEntry)
             

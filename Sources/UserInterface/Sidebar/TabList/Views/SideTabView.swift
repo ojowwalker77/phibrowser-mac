@@ -57,8 +57,7 @@ struct SideTabView: View {
                 .stroke(borderColor, lineWidth: model.isActive ? 1 : 0)
         )
         .shadow(color: model.isActive ? .black.opacity(0.15) : .clear, radius: 1, x: 0, y: 1)
-        .padding(.leading, 10)
-        .padding(.trailing, 2)
+        .padding(.leading, WebContentConstant.edgesSpacing)
         .padding(.vertical, 2)
         // Group affiliation bar: 4pt color stripe pinned to the cell's
         // leading edge, sitting in the 10pt outer padding. Drawn after the

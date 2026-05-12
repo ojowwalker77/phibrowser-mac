@@ -230,7 +230,7 @@ class NewTabButtonCellView: SidebarCellView {
         addSubview(backgoundView)
         backgoundView.shadow = nil
         backgoundView.snp.makeConstraints { make in
-            make.left.equalToSuperview().inset(10)
+            make.left.equalToSuperview().inset(WebContentConstant.edgesSpacing)
             make.top.bottom.trailing.equalToSuperview().inset(2)
         }
         backgoundView.enableClickAnimation = false
