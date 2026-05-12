@@ -312,7 +312,7 @@ class SideAddressBar: NSView {
     
     private func setupLayout() {
         containerView.snp.makeConstraints { make in
-            make.leading.equalToSuperview().offset(10)
+            make.leading.equalToSuperview().offset(WebContentConstant.edgesSpacing)
             make.right.equalToSuperview()
             make.top.bottom.equalToSuperview()
         }
