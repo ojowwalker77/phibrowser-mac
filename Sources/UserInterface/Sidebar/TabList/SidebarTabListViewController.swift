@@ -1100,12 +1100,21 @@ extension SidebarTabListViewController: NSOutlineViewDataSource {
                         tabIds: [NSNumber(value: Int64(draggedTab.guid))],
                         tokenHex: new)
                 }
+                // Mirror the membership change on the Mac side immediately
+                // so a subsequent layout pass (e.g. switching to
+                // Comfortable while `tabJoinedGroup`/`tabLeftGroup` is
+                // still queued on EventBus) doesn't see the
+                // [member, non-member, member] split this drop just made.
+                if oldToken != newToken {
+                    browserState.applyOptimisticGroupMembership(
+                        tabId: draggedTab.guid, newToken: newToken)
+                }
 
                 setDropFeedback(.none)
                 return true
             }
         }
-        
+
         if let draggedBookmarkId = pasteboard.string(forType: .phiBookmark),
            let draggedBookmark = findBookmark(withId: draggedBookmarkId) {
             
@@ -2834,6 +2843,13 @@ extension SidebarTabListViewController: TabGroupCellViewDelegate {
                 withWindowId: Int64(browserState.windowId),
                 tabIds: [NSNumber(value: Int64(tab.guid))],
                 tokenHex: token)
+        }
+        // See sibling site (~Line 1057) for rationale: mirror group
+        // membership locally so a layout-switch race can't observe the
+        // transient split.
+        if oldToken != token {
+            browserState.applyOptimisticGroupMembership(
+                tabId: tab.guid, newToken: token)
         }
         setDropFeedback(.none)
         return true

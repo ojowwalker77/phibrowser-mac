@@ -1903,7 +1903,47 @@ class BrowserState {
             "from=\(currentIdx) to=\(safeIdx) splittingToken=\(splittingToken)"
         )
     }
-    
+
+    /// Synchronous companion to `handleTabJoinedGroup` /
+    /// `handleTabLeftGroup`: applies a group-membership change on the Mac
+    /// side immediately, instead of waiting for Chromium's `kJoined` /
+    /// `kLeft` to round-trip back through the async `EventBus` hop.
+    ///
+    /// Why this exists: `bridge.addTabsToGroup` /
+    /// `bridge.removeTabsFromGroup` / `bridge.createGroupFromTabs` all
+    /// return synchronously, but the corresponding
+    /// `TabGroupEvent.tabJoinedGroup` / `tabLeftGroup` ride the
+    /// `EventBus.send → Task { @MainActor }` queue and don't land until
+    /// at least the next runloop tick. If the caller also synchronously
+    /// repositioned the tab (e.g. sidebar drag dropped it inside a
+    /// group's child range via `moveNormalTabLocally`), the strip ends
+    /// up in a `[member, non-member(stale), member]` state for that
+    /// window — `TabStrip.currentGroupRuns()`'s contiguity assertion
+    /// fires if a layout pass lands during the gap (most reliably when
+    /// the user switches to Comfortable and the horizontal strip mounts
+    /// for the first time).
+    ///
+    /// The authoritative async event handler is a no-op when the state
+    /// it would set already matches: `handleTabJoinedGroup` early-
+    /// returns inside `relocateJoinerIntoGroupRun` once the joiner is
+    /// adjacent, and `handleTabLeftGroup`'s `tab.groupToken == token`
+    /// guard skips the body entirely.
+    @MainActor
+    func applyOptimisticGroupMembership(tabId: Int, newToken: String?) {
+        guard let tab = tabs.first(where: { $0.guid == tabId }),
+              tab.groupToken != newToken else { return }
+        tab.groupToken = newToken
+        if let newToken {
+            relocateJoinerIntoGroupRun(tabId: tabId, token: newToken)
+        }
+        // Always run the interloper relocate: when leaving a group (or
+        // moving between groups), the tab's old position may still sit
+        // mid-run of the old group's members, which would split that
+        // group as soon as `tab.groupToken` no longer matches them.
+        relocateInterloperOutOfGroupRun(tabGuid: tabId)
+        updateNormalTabs()
+    }
+
     /// Reorder pinned  tab
     func movePinnedTab(tab: Tab, to newIndex: Int, selectAfterMove: Bool) {
         var after: String?
