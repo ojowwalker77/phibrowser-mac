@@ -73,6 +73,9 @@ import Countly
         if PhiPreferences.AISettings.phiAIEnabled.loadValue() {
             SentinelHelper.launch()
         }
+        Task.detached(priority: .utility) {
+            await SentinelVersionGuard.shared.runStartupCheck()
+        }
     }
 
     func applicationWillFinishLaunching(_ notification: Notification) {
