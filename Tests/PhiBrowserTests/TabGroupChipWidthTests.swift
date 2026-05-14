@@ -60,7 +60,7 @@ final class TabGroupChipWidthTests: XCTestCase {
 
     func test_unnamed_collapsed_widensVersusExpanded() {
         // Unnamed group: expanded has no badge, collapsed has mosaic
-        // → collapse widens the chip by mosaic + countToLabelGap (~24pt).
+        // → collapse widens the chip by mosaic + countToLabelGap.
         let expanded = TabGroupChipView.chipWidth(
             forTitle: "Blue · 5 tabs",
             hasUserSetTitle: false,
@@ -74,8 +74,8 @@ final class TabGroupChipWidthTests: XCTestCase {
             isCollapsed: true
         )
         let delta = collapsed - expanded
-        // Mosaic 18 + gap 6 = 24. Allow ±3.
-        XCTAssertEqual(delta, 24, accuracy: 3,
+        // Mosaic 28 + gap 6 = 34. Allow ±3.
+        XCTAssertEqual(delta, 34, accuracy: 3,
             "Collapsing an unnamed group should widen the chip by mosaic + gap.")
     }
 

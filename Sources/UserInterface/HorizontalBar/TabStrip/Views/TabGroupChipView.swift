@@ -20,7 +20,13 @@ final class TabGroupChipView: NSView {
     // MARK: - Metrics
 
     static let height: CGFloat = 32
-    static let cornerRadius: CGFloat = 5
+    // Aligned with `TabStripMetrics.Tab.cornerRadius` so the chip's
+    // hover background reads at the same roundness as adjacent tabs.
+    // Diverges from Figma's `rounded-[5px]` for that consistency
+    // — Figma also draws tabs at 5pt, but the project's tabs are
+    // historically 8pt; flipping tabs to 5pt would ripple into the
+    // active-tab inverse-curve geometry, so we follow tabs here.
+    static let cornerRadius: CGFloat = 8
     static let leadingPadding: CGFloat = 6
     static let dotSize: CGFloat = 16
     static let dotToLabelGap: CGFloat = 6

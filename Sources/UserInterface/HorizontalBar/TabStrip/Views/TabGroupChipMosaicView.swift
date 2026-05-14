@@ -34,12 +34,15 @@ final class TabGroupChipMosaicView: NSView {
 
     // MARK: - Metrics
 
-    /// Outer mosaic frame: 18×18, fits in a 22pt chip with 2pt
-    /// vertical margin and aligns with the chip's count-badge
-    /// position.
-    static let mosaicSize: CGFloat = 18
-    static let cellSize: CGFloat = 8
+    /// Outer mosaic frame: 28×28, replacing the count-badge slot in
+    /// the 32pt collapsed chip. Cells are inset by `cellMargin` so the
+    /// 2×2 grid of 10×10 cells sits cleanly inside.
+    static let mosaicSize: CGFloat = 28
+    static let cellSize: CGFloat = 10
     static let cellGap: CGFloat = 2
+    static let cellMargin: CGFloat = 3
+    /// Soft-corner cell clipping so favicons read as unified mosaic
+    /// tiles rather than a grid of disparate logos.
     static let cellCornerRadius: CGFloat = 2
 
     // MARK: - Pure fill model
@@ -98,17 +101,17 @@ final class TabGroupChipMosaicView: NSView {
     /// `memberCount >= 5`. Hidden otherwise.
     ///
     /// Implemented as `CATextLayer` rather than `NSTextField` because
-    /// at the mosaic's small dimensions (7pt font in an 8pt cell),
+    /// at the mosaic's small dimensions (8pt font in a 10pt cell),
     /// `NSTextField`'s cell-baseline rendering clips the glyphs to
     /// zero height. `CATextLayer` draws text directly without
     /// `NSTextField`'s cell baseline / padding constraints.
     private let overflowLayer: CATextLayer = {
         let layer = CATextLayer()
-        let font = NSFont.systemFont(ofSize: 7, weight: .semibold)
+        let font = NSFont.systemFont(ofSize: 8, weight: .semibold)
         // Both `font` (used for metric calculations) and `fontSize`
         // (used for rendering) must be set.
         layer.font = font
-        layer.fontSize = 7
+        layer.fontSize = 8
         layer.alignmentMode = .center
         layer.truncationMode = .none
         layer.isWrapped = false
@@ -192,8 +195,8 @@ final class TabGroupChipMosaicView: NSView {
     /// Colors resolved per-call (re-runs on `viewDidChangeEffectiveAppearance`).
     private static let emptySlotLight = NSColor(calibratedWhite: 0, alpha: 0.04)
     private static let emptySlotDark = NSColor(calibratedWhite: 1, alpha: 0.04)
-    private static let overflowTextLight = NSColor(calibratedWhite: 0, alpha: 0.5)
-    private static let overflowTextDark = NSColor(calibratedWhite: 1, alpha: 0.55)
+    private static let overflowTextLight = NSColor(calibratedWhite: 0, alpha: 0.3)
+    private static let overflowTextDark = NSColor(calibratedWhite: 1, alpha: 0.3)
 
     private func currentEmptySlotColor() -> NSColor {
         isDarkAppearance() ? Self.emptySlotDark : Self.emptySlotLight
@@ -242,8 +245,12 @@ final class TabGroupChipMosaicView: NSView {
         }
 
         // Overflow text layer: only visible when slot 3 is `.overflow`.
+        // ≤9 renders the exact "+N" (e.g., "+5"); ≥10 caps to the
+        // "9+" idiom — both stay within the 10pt slot at 8pt font,
+        // and the prefix↔suffix flip is the standard "exact vs cap"
+        // signal (iOS badge, Slack, etc.).
         if case .overflow(let count) = cells[3] {
-            overflowLayer.string = "+\(count)"
+            overflowLayer.string = count <= 9 ? "+\(count)" : "9+"
             overflowLayer.foregroundColor = currentOverflowTextColor().cgColor
             overflowLayer.isHidden = false
         } else {
@@ -280,13 +287,14 @@ final class TabGroupChipMosaicView: NSView {
     // MARK: - Layout
 
     /// Frame for slot `i` (0=TL, 1=TR, 2=BL, 3=BR) inside our
-    /// `bounds`. Cells form a 2×2 grid with `cellGap` between them.
+    /// `bounds`. Cells form a 2×2 grid with `cellGap` between them
+    /// and `cellMargin` inset from the outer edges.
     /// AppKit's default coordinate system is unflipped (Y=0 at
     /// bottom), so slots 0/1 (visually top) get the LARGER Y.
     static func frameForSlot(_ i: Int, in bounds: CGRect) -> CGRect {
-        let originX = bounds.minX
+        let originX = bounds.minX + cellMargin
             + (i % 2 == 0 ? 0 : cellSize + cellGap)
-        let originY = bounds.minY
+        let originY = bounds.minY + cellMargin
             + (i < 2 ? cellSize + cellGap : 0)
         return CGRect(x: originX, y: originY,
                       width: cellSize, height: cellSize)
@@ -299,15 +307,12 @@ final class TabGroupChipMosaicView: NSView {
         for i in 0..<4 {
             cellLayers[i].frame = Self.frameForSlot(i, in: bounds)
         }
-        // Overflow text layer overlays slot 3. `CATextLayer` baselines
-        // its glyph at the top of its bounds (unflipped), so we shift
-        // the frame down by ~1pt to roughly center the 7pt glyph on
-        // the slot's visual center.
+        // Overflow text layer overlays slot 3 at its native frame.
+        // The 8pt glyph in a 10pt-tall layer falls close enough to the
+        // visual center via `CATextLayer`'s default top-anchored
+        // rendering — no extra Y shift needed.
         let slot3 = Self.frameForSlot(3, in: bounds)
-        overflowLayer.frame = CGRect(x: slot3.minX,
-                                      y: slot3.minY - 1,
-                                      width: slot3.width,
-                                      height: slot3.height)
+        overflowLayer.frame = slot3
         CATransaction.commit()
     }
 }
