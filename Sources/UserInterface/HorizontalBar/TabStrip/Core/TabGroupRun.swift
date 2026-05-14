@@ -20,21 +20,9 @@ struct GroupRun {
     let isCollapsed: Bool
 }
 
-/// Render mode for `TabGroupChipView`. The layout engine — not the view —
-/// chooses the mode based on the strip's available width vs. the sum of
-/// chip full-mode widths, so chip width and tab-width allocation are always
-/// derived from the same `baseWidth` calculation.
-enum ChipMode {
-    /// Color bar + label (+ optional count badge). Width varies with text.
-    case full
-    /// Color bar + 16pt color swatch only, no label. Fixed 24pt width.
-    case compact
-}
-
-/// Frame + chosen mode for one chip in a layout pass. Returned by the
-/// engine in `chipFrames` keyed by group token; `TabStrip.applyLayout`
-/// hands the mode to the chip view via `configure(...)`.
+/// Frame for one chip in a layout pass. Returned by the engine in
+/// `chipFrames` keyed by group token; `TabStrip.applyLayout` applies
+/// the frame to the chip view.
 struct ChipPlacement {
     let frame: CGRect
-    let mode: ChipMode
 }
