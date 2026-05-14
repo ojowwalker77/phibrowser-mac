@@ -379,12 +379,12 @@ enum TabStripLayoutEngine {
         // always has a hit-testable area and (b) the post-measurement
         // jump only shrinks the chip (tabs gain width, never lose it).
         //
-        // Per-chip overhead = chipWidth + spacing + 1 (right separator) —
-        // matching the per-tab overhead pattern (`spacing*2 + 1`); the
-        // 1pt over-allocation for end-of-strip chips is a deliberate
-        // simplification (position isn't known at this point).
+        // Per-chip overhead = spacing (leading) + chipWidth + spacing
+        // (trailing) + 1 (right separator), mirroring the per-tab
+        // pattern. The 1pt over-allocation for end-of-strip chips is
+        // a deliberate simplification (position isn't known here).
         let chipsOverhead: CGFloat = visibleTokens.reduce(0.0) { acc, token in
-            acc + (input.chipFullWidths[token] ?? TabGroupChipView.maxFullWidth) + input.spacing + 1.0
+            acc + (input.chipFullWidths[token] ?? TabGroupChipView.maxFullWidth) + input.spacing * 2 + 1.0
         }
 
         var fixedOverheadBase = startOffsetX
@@ -452,13 +452,6 @@ enum TabStripLayoutEngine {
             }
 
             if let run = runStarts[i] {
-                // Same fallback semantics as chipsOverhead above.
-                let chipWidth: CGFloat = input.chipFullWidths[run.token] ?? TabGroupChipView.maxFullWidth
-                // Chip Y centers within the tab cell (not the full strip).
-                let chipY = TabStripMetrics.Strip.bottomSpacing
-                          + (TabStripMetrics.Strip.tabHeight - TabGroupChipView.height) / 2.0
-                let chipFrame = CGRect(x: currentX, y: chipY,
-                                        width: chipWidth, height: TabGroupChipView.height)
                 // Whole-group drag: the chip of the dragged group is kept
                 // in chipFrames so applyChipPlacements doesn't tear it
                 // down, but consumes no width — the chip view's frame
@@ -468,6 +461,25 @@ enum TabStripLayoutEngine {
                     guard let groupRange = input.excludedGroupRange else { return false }
                     return groupRange.contains(run.range.lowerBound)
                 }()
+
+                // Leading spacing for the chip — mirrors the
+                // `currentX += spacing` that every tab placement does
+                // below. Without it, chip sits flush against the prior
+                // tab's right separator (0pt gap) instead of the
+                // standard 2pt, making chip's hover bg and color dot
+                // visually 2pt closer to the separator than the
+                // equivalent tab/favicon geometry.
+                if !runIsExcluded {
+                    currentX += input.spacing
+                }
+
+                // Same fallback semantics as chipsOverhead above.
+                let chipWidth: CGFloat = input.chipFullWidths[run.token] ?? TabGroupChipView.maxFullWidth
+                // Chip Y centers within the tab cell (not the full strip).
+                let chipY = TabStripMetrics.Strip.bottomSpacing
+                          + (TabStripMetrics.Strip.tabHeight - TabGroupChipView.height) / 2.0
+                let chipFrame = CGRect(x: currentX, y: chipY,
+                                        width: chipWidth, height: TabGroupChipView.height)
 
                 // Right-neighbor index for the chip's right separator:
                 // collapsed group → first tab after the run; expanded →

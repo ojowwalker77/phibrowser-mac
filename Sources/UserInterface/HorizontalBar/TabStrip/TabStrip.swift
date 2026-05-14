@@ -134,6 +134,11 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
 
     /// Hovered normal-tab index.
     private var hoveredTabIndex: Int?
+    /// Token of the currently-hovered group chip, if any. Used by
+    /// `updateSeparators` / `updateChipRightSeparators` to hide the
+    /// separators on both sides of the chip while hovered (mirrors the
+    /// tab hover rule).
+    private var hoveredChipToken: String?
 
     // MARK: - Layout Lock
     /// Whether layout is temporarily locked after a tab closes.
@@ -995,6 +1000,7 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
         chipRightSeparatorViews.values.forEach { $0.removeFromSuperview() }
         chipRightSeparatorViews.removeAll()
         chipFullWidths.removeAll()
+        hoveredChipToken = nil
         collapsedGroupFaviconCancellables.removeAll()
 
         hoveredTabIndex = nil
@@ -1612,6 +1618,31 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
                 chip.onClick = { [weak self] tappedToken in
                     self?.handleChipClick(token: tappedToken)
                 }
+                chip.onHoverChanged = { [weak self] hoveredToken, hovered in
+                    guard let self else { return }
+                    self.hoveredChipToken = hovered ? hoveredToken : nil
+                    // Re-render both separator pools so the chip's left
+                    // separator (in `separatorViews`) and right separator
+                    // (in `chipRightSeparatorViews`) react to the change.
+                    let output = self.calculateLayout(
+                        containerWidth: self.normalContainer.bounds.width,
+                        tabs: self.browserState.normalTabs,
+                        activeTab: self.browserState.focusingTab,
+                        isPinned: false
+                    )
+                    self.updateSeparators(
+                        in: self.normalContainer,
+                        xPositions: output.separatorXPositions,
+                        tabs: self.browserState.normalTabs,
+                        activeTab: self.browserState.focusingTab
+                    )
+                    self.updateChipRightSeparators(
+                        in: self.normalContainer,
+                        chipFrames: output.chipFrames,
+                        tabs: self.browserState.normalTabs,
+                        activeTab: self.browserState.focusingTab
+                    )
+                }
                 chip.onMenuRequest = { [weak self] tappedToken in
                     self?.makeChipMenu(token: tappedToken)
                 }
@@ -1713,6 +1744,7 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
         for (token, view) in chipViews where chipFrames[token] == nil {
             view.removeFromSuperview()
             chipViews.removeValue(forKey: token)
+            if hoveredChipToken == token { hoveredChipToken = nil }
         }
         // Mirror teardown for chip-right separators.
         for (token, view) in chipRightSeparatorViews where chipFrames[token] == nil {
@@ -1759,7 +1791,9 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
             sep.frame = CGRect(x: finalX, y: y, width: sepSize.width, height: sepSize.height)
             let hideByActive = (activeIndex == neighborIdx)
             let hideByHover = (hoveredTabIndex == neighborIdx)
-            sep.isHidden = hideByActive || hideByHover
+            // Hide the chip's own right separator when the chip itself is hovered.
+            let hideByOwnChipHover = (hoveredChipToken == token)
+            sep.isHidden = hideByActive || hideByHover || hideByOwnChipHover
         }
     }
 
@@ -1820,12 +1854,19 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
         let y = TabStripMetrics.Strip.bottomSpacing + (TabStripMetrics.Strip.tabHeight - sepSize.height) / 2.0
         let activeIndex = tabs.firstIndex { isTabActive($0, activeTab: activeTab) }
 
+        // Hovered chip's left-edge sits between tab[firstMember - 1] and the chip.
+        // That tab's right separator (separator[firstMember - 1]) should hide.
+        let hoveredChipFirstMemberIdx: Int? = {
+            guard let token = hoveredChipToken else { return nil }
+            return tabs.firstIndex { $0.groupToken == token }
+        }()
+
         for (index, x) in xPositions.enumerated() {
             let sep = separatorViews[index]
             // Separators only render in the normal container, but keep the check explicit.
             let finalX = (container === normalContainer) ? (x - currentScrollOffset) : x
             sep.frame = CGRect(x: finalX, y: y, width: sepSize.width, height: sepSize.height)
- 
+
             // Hide separators adjacent to the active or hovered tab.
             var shouldHide = false
 
@@ -1836,6 +1877,10 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
             if let hoveredIdx = hoveredTabIndex {
                 if index == hoveredIdx { shouldHide = true }      // Separator on the tab's right side.
                 if index == hoveredIdx - 1 { shouldHide = true }  // Separator on the tab's left side.
+            }
+            if let firstMemberIdx = hoveredChipFirstMemberIdx,
+               index == firstMemberIdx - 1 {
+                shouldHide = true  // Separator on the hovered chip's left side.
             }
 
             sep.isHidden = shouldHide

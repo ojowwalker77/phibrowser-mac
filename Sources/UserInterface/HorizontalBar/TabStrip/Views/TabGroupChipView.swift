@@ -63,12 +63,18 @@ final class TabGroupChipView: NSView {
     /// Fired on `mouseUp` when the drag was active (not on a click).
     var onDragEnd: ((_ token: String, _ windowLocation: CGPoint) -> Void)?
 
+    /// Fired when the chip's hover state flips. `TabStrip` uses this to
+    /// hide / restore the separators on either side of the chip, mirroring
+    /// the hovered-tab rule in `updateSeparators`.
+    var onHoverChanged: ((_ token: String, _ isHovered: Bool) -> Void)?
+
     // MARK: - Hover state
 
     private var isHovered: Bool = false {
         didSet {
             guard oldValue != isHovered else { return }
             applyAppearance()
+            onHoverChanged?(token, isHovered)
         }
     }
     private var hoverTrackingArea: NSTrackingArea?
@@ -143,6 +149,9 @@ final class TabGroupChipView: NSView {
         wantsLayer = true
         layer?.masksToBounds = true
         layer?.cornerRadius = Self.cornerRadius
+        // Suppress implicit animation on the chip's own backgroundColor
+        // (toggled by hover in `applyAppearance`).
+        layer?.actions = ["backgroundColor": NSNull()]
 
         layer?.addSublayer(colorDotLayer)
         layer?.addSublayer(countBackgroundLayer)
@@ -217,6 +226,13 @@ final class TabGroupChipView: NSView {
     // MARK: - Appearance
 
     private func applyAppearance() {
+        // Hover background — same `ThemedColor.hover` used by tabs and
+        // bookmarks, so the click-to-collapse affordance reads with the
+        // same visual language as adjacent tabs.
+        layer?.backgroundColor = isHovered
+            ? ThemedColor.hover.resolve(in: self).cgColor
+            : NSColor.clear.cgColor
+
         colorDotLayer.backgroundColor = color.nsColor.cgColor
         countBackgroundLayer.backgroundColor = color.chipHoverTintColor.cgColor
         countBackgroundLayer.cornerRadius = (TabGroupChipView.countFont.pointSize +
