@@ -1165,11 +1165,12 @@ class WebContentViewController: NSViewController {
             return
         }
 
+        let bookmarkCount = attachedBookmarkBar.bookmarkCount
         if attachedBookmarkBar.superview === bookmarkBarSlotView {
             attachedBookmarkBar.removeFromSuperview()
         }
         self.attachedBookmarkBar = nil
-        updateBookmarkBarVisibility(bookmarkCount: 0)
+        updateBookmarkBarVisibility(bookmarkCount: bookmarkCount)
     }
 
     /// Update bookmark bar visibility and the slot height for the current layout mode.

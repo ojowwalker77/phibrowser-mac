@@ -651,6 +651,11 @@ class WebContentContainerViewController: NSViewController {
         controller.detachBookmarkBarIfAttached()
         sharedBookmarkBarHostController = nil
     }
+
+    private func prepareSharedBookmarkBarSlot(for controller: WebContentViewController) {
+        guard let bookmarkBar = ensureSharedBookmarkBar() else { return }
+        controller.updateBookmarkBarVisibility(bookmarkCount: bookmarkBar.bookmarkCount)
+    }
     
     /// Scenario 1: Switch to an already-painted tab (immediate switch, bring to front)
     private func switchToWebContentController(_ controller: WebContentViewController) {
@@ -666,15 +671,18 @@ class WebContentContainerViewController: NSViewController {
             addChild(controller)
         }
 
+        let controllerView = controller.view
+        prepareSharedBookmarkBarSlot(for: controller)
+
         // Add new view on top (old view stays underneath until cleanup)
-        if controller.view.superview !== contentContainer {
-            contentContainer.addSubview(controller.view)
-            controller.view.snp.remakeConstraints { make in
+        if controllerView.superview !== contentContainer {
+            contentContainer.addSubview(controllerView)
+            controllerView.snp.remakeConstraints { make in
                 make.edges.equalToSuperview()
             }
         } else {
             // If already in container, bring to front
-            contentContainer.addSubview(controller.view, positioned: .above, relativeTo: nil)
+            contentContainer.addSubview(controllerView, positioned: .above, relativeTo: nil)
         }
 
         attachSharedBookmarkBar(to: controller)
@@ -697,11 +705,14 @@ class WebContentContainerViewController: NSViewController {
             addChild(controller)
         }
 
+        let controllerView = controller.view
+        prepareSharedBookmarkBarSlot(for: controller)
+
         // Add new view BELOW the current view (old view stays on top and visible)
-        if controller.view.superview !== contentContainer {
+        if controllerView.superview !== contentContainer {
             // Insert at the bottom of the subview stack
-            contentContainer.addSubview(controller.view, positioned: .below, relativeTo: currentWebContentController?.view)
-            controller.view.snp.remakeConstraints { make in
+            contentContainer.addSubview(controllerView, positioned: .below, relativeTo: currentWebContentController?.view)
+            controllerView.snp.remakeConstraints { make in
                 make.edges.equalToSuperview()
             }
         }
