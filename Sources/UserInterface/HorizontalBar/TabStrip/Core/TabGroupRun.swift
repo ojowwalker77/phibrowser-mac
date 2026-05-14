@@ -20,9 +20,20 @@ struct GroupRun {
     let isCollapsed: Bool
 }
 
-/// Frame for one chip in a layout pass. Returned by the engine in
-/// `chipFrames` keyed by group token; `TabStrip.applyLayout` applies
-/// the frame to the chip view.
+/// Frame + right-separator info for one chip in a layout pass.
+/// Returned by the engine in `chipFrames` keyed by group token;
+/// `TabStrip.applyLayout` applies the frame to the chip view and
+/// renders the separator via `updateChipRightSeparators`.
 struct ChipPlacement {
     let frame: CGRect
+    /// X for the separator between chip and its right neighbor in
+    /// flow (tab[run.lowerBound] when expanded, or tab[run.upperBound+1]
+    /// when collapsed). Nil when there is no right neighbor (chip at
+    /// strip end, chip is excluded during whole-group drag, or the
+    /// neighbor is the single-tab drag-excluded tab).
+    let rightSeparatorX: CGFloat?
+    /// Tab index whose active/hovered state hides the right separator
+    /// (same rule as tab↔tab separators). Paired with `rightSeparatorX`;
+    /// nil when `rightSeparatorX` is nil.
+    let rightSeparatorNeighborIndex: Int?
 }

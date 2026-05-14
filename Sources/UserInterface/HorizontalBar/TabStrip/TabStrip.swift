@@ -117,6 +117,10 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
 
     // MARK: - Group view pools
     private var chipViews: [String: TabGroupChipView] = [:]
+    /// Right-side separator view per chip, keyed by group token.
+    /// Sits between chip and its right neighbor in flow; same visual
+    /// metrics as the tab↔tab separators in `separatorViews`.
+    private var chipRightSeparatorViews: [String: NSView] = [:]
     // Note: per-group underlines are no longer drawn here. They live
     // alongside the active-tab outline in `WebContentContainerViewController`,
     // tracing one unified path per group, so the chip/underline/active
@@ -988,6 +992,8 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
         separatorViews.removeAll()
         chipViews.values.forEach { $0.removeFromSuperview() }
         chipViews.removeAll()
+        chipRightSeparatorViews.values.forEach { $0.removeFromSuperview() }
+        chipRightSeparatorViews.removeAll()
         chipFullWidths.removeAll()
         collapsedGroupFaviconCancellables.removeAll()
 
@@ -1460,6 +1466,12 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
                         tabs: self.browserState.normalTabs,
                         activeTab: self.browserState.focusingTab
                     )
+                    self.updateChipRightSeparators(
+                        in: self.normalContainer,
+                        chipFrames: output.chipFrames,
+                        tabs: self.browserState.normalTabs,
+                        activeTab: self.browserState.focusingTab
+                    )
                 }
             }
 
@@ -1572,6 +1584,12 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
             applyChipPlacements(
                 container: container,
                 chipFrames: layoutOutput.chipFrames
+            )
+            updateChipRightSeparators(
+                in: container,
+                chipFrames: layoutOutput.chipFrames,
+                tabs: tabs,
+                activeTab: activeTab
             )
         }
     }
@@ -1695,6 +1713,53 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
         for (token, view) in chipViews where chipFrames[token] == nil {
             view.removeFromSuperview()
             chipViews.removeValue(forKey: token)
+        }
+        // Mirror teardown for chip-right separators.
+        for (token, view) in chipRightSeparatorViews where chipFrames[token] == nil {
+            view.removeFromSuperview()
+            chipRightSeparatorViews.removeValue(forKey: token)
+        }
+    }
+
+    /// Renders the chip→right-neighbor separator for each visible chip.
+    /// Hide rule mirrors `updateSeparators`: hide when the right
+    /// neighbor (by tab index) is active or hovered. A nil
+    /// `rightSeparatorX` on the placement means "no separator this
+    /// pass" (chip at strip end, excluded during whole-group drag,
+    /// or the neighbor itself is the drag-excluded tab); the view
+    /// is hidden in that case.
+    private func updateChipRightSeparators(
+        in container: NSView,
+        chipFrames: [String: ChipPlacement],
+        tabs: [Tab],
+        activeTab: Tab?
+    ) {
+        let sepSize = TabStripMetrics.Content.separatorSize
+        let y = TabStripMetrics.Strip.bottomSpacing
+              + (TabStripMetrics.Strip.tabHeight - sepSize.height) / 2.0
+        let activeIndex = tabs.firstIndex { isTabActive($0, activeTab: activeTab) }
+
+        for (token, placement) in chipFrames {
+            let sep: NSView
+            if let existing = chipRightSeparatorViews[token] {
+                sep = existing
+            } else {
+                sep = NSView()
+                sep.wantsLayer = true
+                sep.phiLayer?.setBackgroundColor(TabStripMetrics.Content.separatorColor)
+                container.addSubview(sep, positioned: .below, relativeTo: nil)
+                chipRightSeparatorViews[token] = sep
+            }
+            guard let sepX = placement.rightSeparatorX,
+                  let neighborIdx = placement.rightSeparatorNeighborIndex else {
+                sep.isHidden = true
+                continue
+            }
+            let finalX = (container === normalContainer) ? (sepX - currentScrollOffset) : sepX
+            sep.frame = CGRect(x: finalX, y: y, width: sepSize.width, height: sepSize.height)
+            let hideByActive = (activeIndex == neighborIdx)
+            let hideByHover = (hoveredTabIndex == neighborIdx)
+            sep.isHidden = hideByActive || hideByHover
         }
     }
 

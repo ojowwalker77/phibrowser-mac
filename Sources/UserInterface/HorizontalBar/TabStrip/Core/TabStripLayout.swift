@@ -378,8 +378,13 @@ enum TabStripLayoutEngine {
         // Reserve `maxFullWidth` for those tokens so (a) the chip frame
         // always has a hit-testable area and (b) the post-measurement
         // jump only shrinks the chip (tabs gain width, never lose it).
+        //
+        // Per-chip overhead = chipWidth + spacing + 1 (right separator) —
+        // matching the per-tab overhead pattern (`spacing*2 + 1`); the
+        // 1pt over-allocation for end-of-strip chips is a deliberate
+        // simplification (position isn't known at this point).
         let chipsOverhead: CGFloat = visibleTokens.reduce(0.0) { acc, token in
-            acc + (input.chipFullWidths[token] ?? TabGroupChipView.maxFullWidth) + input.spacing
+            acc + (input.chipFullWidths[token] ?? TabGroupChipView.maxFullWidth) + input.spacing + 1.0
         }
 
         var fixedOverheadBase = startOffsetX
@@ -454,7 +459,6 @@ enum TabStripLayoutEngine {
                           + (TabStripMetrics.Strip.tabHeight - TabGroupChipView.height) / 2.0
                 let chipFrame = CGRect(x: currentX, y: chipY,
                                         width: chipWidth, height: TabGroupChipView.height)
-                chipFrames[run.token] = ChipPlacement(frame: chipFrame)
                 // Whole-group drag: the chip of the dragged group is kept
                 // in chipFrames so applyChipPlacements doesn't tear it
                 // down, but consumes no width — the chip view's frame
@@ -464,9 +468,35 @@ enum TabStripLayoutEngine {
                     guard let groupRange = input.excludedGroupRange else { return false }
                     return groupRange.contains(run.range.lowerBound)
                 }()
+
+                // Right-neighbor index for the chip's right separator:
+                // collapsed group → first tab after the run; expanded →
+                // run's first member. Nil when no neighbor exists or
+                // the neighbor is the single-tab drag-excluded tab
+                // (matches the tab-side -1000 hiding trick).
+                let rightNeighborIdx: Int? = {
+                    let candidate = run.isCollapsed
+                        ? run.range.upperBound + 1
+                        : run.range.lowerBound
+                    guard candidate < input.tabCount else { return nil }
+                    if let excluded = input.excludedTabIndex, excluded == candidate { return nil }
+                    return candidate
+                }()
+
+                var rightSepX: CGFloat? = nil
                 if !runIsExcluded {
                     currentX += chipWidth + input.spacing
+                    if rightNeighborIdx != nil {
+                        rightSepX = currentX
+                        currentX += 1.0  // separator width
+                    }
                 }
+
+                chipFrames[run.token] = ChipPlacement(
+                    frame: chipFrame,
+                    rightSeparatorX: rightSepX,
+                    rightSeparatorNeighborIndex: rightSepX == nil ? nil : rightNeighborIdx
+                )
             }
 
             // Default gap placement: AFTER chip (when gap is at
