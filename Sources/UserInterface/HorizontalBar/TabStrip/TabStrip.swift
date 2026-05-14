@@ -1674,7 +1674,6 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
                 displayTitle: group.displayTitle(memberCount: memberCount),
                 memberCount: memberCount,
                 hasUserSetTitle: group.hasUserSetTitle,
-                mode: placement.mode,
                 isCollapsed: group.isCollapsed,
                 memberFavicons: collectMosaicFaviconData(for: token)
             )
@@ -1884,7 +1883,7 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
         let memberCount = browserState.normalTabs
             .lazy.filter { $0.groupToken == token }.count
         let title = group.displayTitle(memberCount: memberCount)
-        let width = TabGroupChipView.fullModeWidth(
+        let width = TabGroupChipView.chipWidth(
             forTitle: title,
             hasUserSetTitle: group.hasUserSetTitle,
             memberCount: memberCount,

@@ -9,7 +9,7 @@ import XCTest
 final class TabGroupChipWidthTests: XCTestCase {
 
     func test_named_expanded_includesCountBadge() {
-        let width = TabGroupChipView.fullModeWidth(
+        let width = TabGroupChipView.chipWidth(
             forTitle: "Work",
             hasUserSetTitle: true,
             memberCount: 5,
@@ -23,13 +23,13 @@ final class TabGroupChipWidthTests: XCTestCase {
     }
 
     func test_named_collapsed_includesMosaicInsteadOfCount() {
-        let expanded = TabGroupChipView.fullModeWidth(
+        let expanded = TabGroupChipView.chipWidth(
             forTitle: "Work",
             hasUserSetTitle: true,
             memberCount: 5,
             isCollapsed: false
         )
-        let collapsed = TabGroupChipView.fullModeWidth(
+        let collapsed = TabGroupChipView.chipWidth(
             forTitle: "Work",
             hasUserSetTitle: true,
             memberCount: 5,
@@ -42,13 +42,13 @@ final class TabGroupChipWidthTests: XCTestCase {
     }
 
     func test_unnamed_expanded_skipsBadge() {
-        let withBadge = TabGroupChipView.fullModeWidth(
+        let withBadge = TabGroupChipView.chipWidth(
             forTitle: "Blue · 5 tabs",
             hasUserSetTitle: true,
             memberCount: 5,
             isCollapsed: false
         )
-        let withoutBadge = TabGroupChipView.fullModeWidth(
+        let withoutBadge = TabGroupChipView.chipWidth(
             forTitle: "Blue · 5 tabs",
             hasUserSetTitle: false,
             memberCount: 5,
@@ -61,13 +61,13 @@ final class TabGroupChipWidthTests: XCTestCase {
     func test_unnamed_collapsed_widensVersusExpanded() {
         // Unnamed group: expanded has no badge, collapsed has mosaic
         // → collapse widens the chip by mosaic + countToLabelGap (~24pt).
-        let expanded = TabGroupChipView.fullModeWidth(
+        let expanded = TabGroupChipView.chipWidth(
             forTitle: "Blue · 5 tabs",
             hasUserSetTitle: false,
             memberCount: 5,
             isCollapsed: false
         )
-        let collapsed = TabGroupChipView.fullModeWidth(
+        let collapsed = TabGroupChipView.chipWidth(
             forTitle: "Blue · 5 tabs",
             hasUserSetTitle: false,
             memberCount: 5,
@@ -83,13 +83,13 @@ final class TabGroupChipWidthTests: XCTestCase {
         // Mosaic is fixed-size regardless of whether overflow shows
         // (overflow lives inside slot 3, not as separate text width
         // budget).
-        let smallGroup = TabGroupChipView.fullModeWidth(
+        let smallGroup = TabGroupChipView.chipWidth(
             forTitle: "Work",
             hasUserSetTitle: true,
             memberCount: 2,
             isCollapsed: true
         )
-        let bigGroup = TabGroupChipView.fullModeWidth(
+        let bigGroup = TabGroupChipView.chipWidth(
             forTitle: "Work",
             hasUserSetTitle: true,
             memberCount: 100,

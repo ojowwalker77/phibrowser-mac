@@ -47,9 +47,9 @@ struct TabStripLayoutInput {
     /// → engine takes the byte-equivalent ungrouped fast path.
     let groupRuns: [GroupRun]
 
-    /// Pre-measured chip widths in `.full` mode, keyed by token.
-    /// Computed by `TabStrip` (via `TabGroupChipView.fullModeWidth(...)`)
-    /// once per chip when title / color / member count change.
+    /// Pre-measured chip widths keyed by token. Computed by `TabStrip`
+    /// (via `TabGroupChipView.chipWidth(...)`) once per chip when
+    /// title / color / member count change.
     let chipFullWidths: [String: CGFloat]
 
     /// When `gapAtIndex` lands at a group's leading edge (= the
@@ -118,8 +118,8 @@ struct TabStripLayoutOutput {
     /// Total logical content width including tabs, spacing, button, and trailing inset.
     let totalContentWidth: CGFloat
 
-    /// Frame + chosen render mode for each visible group's chip. Empty
-    /// when `groupRuns` was empty in input.
+    /// Frame for each visible group's chip. Empty when `groupRuns`
+    /// was empty in input.
     let chipFrames: [String: ChipPlacement]
 
     init(tabFrames: [CGRect],
@@ -334,14 +334,11 @@ enum TabStripLayoutEngine {
         )
     }
 
-    /// Group-aware variant. Decides chip mode (all-or-nothing — every
-    /// chip in the strip switches together) by trying `.full` first;
-    /// chips only switch to `.compact` when the full-chip overhead
-    /// would force tabs below `minTabWidth` (i.e. chip width is
-    /// literally what's pushing tabs off the floor). The three-tier
-    /// width allocation (Spacious / Medium / Tight) and active-tab
-    /// protection are byte-identical to `layoutNormalUngrouped` —
-    /// they just receive a smaller `availableForTabs`.
+    /// Group-aware variant. Reserves chip width up front (from the
+    /// pre-measured `input.chipFullWidths`), then runs the same
+    /// three-tier width allocation (Spacious / Medium / Tight) and
+    /// active-tab protection as `layoutNormalUngrouped` against a
+    /// smaller `availableForTabs`.
     private static func layoutNormalWithGroups(input: TabStripLayoutInput) -> TabStripLayoutOutput {
         let startOffsetX = calculateStartXOffset()
         let perTabOverhead: CGFloat = input.spacing * 2 + 1.0
@@ -373,11 +370,17 @@ enum TabStripLayoutEngine {
         // a chip on the strip).
         let visibleTokens = input.groupRuns.map { $0.token }
 
-        let chipsFullOverhead: CGFloat = visibleTokens.reduce(0.0) { acc, token in
-            acc + (input.chipFullWidths[token] ?? 0) + input.spacing
+        // Fallback for cache misses: `chipFullWidths` is populated by
+        // `TabStrip.refreshChipWidth(...)` in response to group state
+        // changes, so a visible run may briefly appear with no cached
+        // measurement (newly-created group, cross-window join, the
+        // frame between `removeValue(forKey:)` and the next configure).
+        // Reserve `maxFullWidth` for those tokens so (a) the chip frame
+        // always has a hit-testable area and (b) the post-measurement
+        // jump only shrinks the chip (tabs gain width, never lose it).
+        let chipsOverhead: CGFloat = visibleTokens.reduce(0.0) { acc, token in
+            acc + (input.chipFullWidths[token] ?? TabGroupChipView.maxFullWidth) + input.spacing
         }
-        let chipsCompactOverhead: CGFloat =
-            CGFloat(visibleTokens.count) * (TabGroupChipView.compactWidth + input.spacing)
 
         var fixedOverheadBase = startOffsetX
                               + CGFloat(effectiveTabCount) * perTabOverhead
@@ -387,25 +390,10 @@ enum TabStripLayoutEngine {
             fixedOverheadBase += gapWidth
         }
 
-        // ── Try full mode first.
-        var chipMode: ChipMode = .full
-        var availableForTabs = input.containerWidth - fixedOverheadBase - chipsFullOverhead
-        var baseWidth: CGFloat = effectiveTabCount > 0
+        let availableForTabs = input.containerWidth - fixedOverheadBase - chipsOverhead
+        let baseWidth: CGFloat = effectiveTabCount > 0
             ? max(0, availableForTabs / CGFloat(effectiveTabCount))
             : 0
-        // Chip names take priority over tab readability. Switch to
-        // compact only when full-chip overhead would push tabs below
-        // their minimum width — i.e. chip width is literally what's
-        // pinning tabs against the floor; compact's 24pt chips claw
-        // back enough room to lift them off it. Otherwise tabs shrink
-        // (down to `minTabWidth`) but chips keep their title + count.
-        // (`effectiveTabCount == 0` means there's no tab to allocate
-        // to — no pressure, stay full.)
-        if effectiveTabCount > 0 && baseWidth < input.minTabWidth {
-            chipMode = .compact
-            availableForTabs = input.containerWidth - fixedOverheadBase - chipsCompactOverhead
-            baseWidth = max(0, availableForTabs / CGFloat(effectiveTabCount))
-        }
 
         // ── Width allocation — byte-identical logic to ungrouped path.
         var activeW: CGFloat = input.idealTabWidth
@@ -459,17 +447,14 @@ enum TabStripLayoutEngine {
             }
 
             if let run = runStarts[i] {
-                let chipWidth: CGFloat = (chipMode == .full)
-                    ? (input.chipFullWidths[run.token] ?? TabGroupChipView.compactWidth)
-                    : TabGroupChipView.compactWidth
-                // Chip Y centers within the tab cell (not the full strip),
-                // so chip baseline sits 5pt above tab-cell baseline:
-                // Strip.bottomSpacing (4) + (Strip.tabHeight (32) - Chip.height (22)) / 2 = 9.
+                // Same fallback semantics as chipsOverhead above.
+                let chipWidth: CGFloat = input.chipFullWidths[run.token] ?? TabGroupChipView.maxFullWidth
+                // Chip Y centers within the tab cell (not the full strip).
                 let chipY = TabStripMetrics.Strip.bottomSpacing
                           + (TabStripMetrics.Strip.tabHeight - TabGroupChipView.height) / 2.0
                 let chipFrame = CGRect(x: currentX, y: chipY,
                                         width: chipWidth, height: TabGroupChipView.height)
-                chipFrames[run.token] = ChipPlacement(frame: chipFrame, mode: chipMode)
+                chipFrames[run.token] = ChipPlacement(frame: chipFrame)
                 // Whole-group drag: the chip of the dragged group is kept
                 // in chipFrames so applyChipPlacements doesn't tear it
                 // down, but consumes no width — the chip view's frame

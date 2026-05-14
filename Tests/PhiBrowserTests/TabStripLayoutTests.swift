@@ -143,4 +143,40 @@ final class TabStripLayoutTests: XCTestCase {
         XCTAssertEqual(activeWidth, 100, "The active tab width should remain 100 px.")
         XCTAssertEqual(width0, width2, "Non-active tabs should have the same width.")
     }
+
+    // MARK: - Chip width cache miss
+
+    /// Regression: `chipFullWidths` is populated asynchronously by
+    /// `TabStrip.refreshChipWidth(...)`, so a visible `GroupRun` may
+    /// briefly appear with no cached measurement (newly-created group,
+    /// cross-window join, frame between cache eviction and reconfigure).
+    /// The engine must reserve a nonzero, hit-testable area for that
+    /// chip; otherwise click / context-menu / whole-group drag silently
+    /// vanish for that group until the cache catches up.
+    func testGroupedLayoutFallsBackToMaxFullWidthWhenChipMeasurementMissing() {
+        let token = "g1"
+        let input = TabStripLayoutInput(
+            containerWidth: 1000,
+            tabCount: 4,
+            activeTabIndex: 0,
+            spacing: 2,
+            idealTabWidth: 160,
+            minTabWidth: 36,
+            activeTabWidth: 100,
+            tabHeight: 32,
+            groupRuns: [GroupRun(token: token, range: 1...2, isCollapsed: false)],
+            chipFullWidths: [:]  // cache miss
+        )
+
+        let output = TabStripLayoutEngine.layoutNormal(input: input)
+
+        guard let placement = output.chipFrames[token] else {
+            XCTFail("Visible group should produce a chip frame even with no cached width.")
+            return
+        }
+        XCTAssertEqual(placement.frame.width, TabGroupChipView.maxFullWidth,
+            "Cache miss must reserve `maxFullWidth` so the chip stays hit-testable.")
+        XCTAssertGreaterThan(placement.frame.width, 0,
+            "Chip frame must have a nonzero hit-test area.")
+    }
 }

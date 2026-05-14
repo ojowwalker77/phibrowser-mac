@@ -5,20 +5,17 @@
 
 import AppKit
 
-/// Chip rendered to the left of each visible group's first member tab on
-/// the horizontal strip. Renders one of two modes
-/// (`ChipMode.full` / `.compact`) — the mode is decided by
-/// `TabStripLayoutEngine`, not by the chip itself, so chip width is
-/// consistent with the engine's tab-width allocation in the same pass.
+/// Chip rendered to the left of each visible group's first member tab
+/// on the horizontal strip.
 ///
 /// Visual structure:
 ///   ┌─────────────────────────────────┐
-///   │ ● Work · 3 tabs            [3]  │  full
+///   │ ● Work · 3 tabs            [3]  │
 ///   └─────────────────────────────────┘
-///       (compact: 24pt empty chip — visuals pending design decision)
 ///
-/// Click + right-click + hover handling lives in a separate task; this
-/// task is rendering-only.
+/// Width is pre-measured by `chipWidth(...)` and fed to the layout
+/// engine via `TabStripLayoutInput.chipFullWidths` so chip width and
+/// tab-width allocation are derived from the same pass.
 final class TabGroupChipView: NSView {
     // MARK: - Metrics
 
@@ -43,10 +40,6 @@ final class TabGroupChipView: NSView {
     /// and gets aggressively truncated to "h…" even for short
     /// titles like "hello".
     static let labelSafetyMargin: CGFloat = 4
-    /// Compact mode: 16pt swatch + 4pt right pad + 4pt slack = 24pt.
-    static let compactWidth: CGFloat = 24
-    static let compactSwatchWidth: CGFloat = 16
-    static let compactRightPad: CGFloat = 4
 
     // MARK: - Callbacks (set by TabStrip)
 
@@ -107,14 +100,12 @@ final class TabGroupChipView: NSView {
     private(set) var displayTitle: String = ""
     private(set) var memberCount: Int = 0
     private(set) var hasUserSetTitle: Bool = false
-    private(set) var mode: ChipMode = .full
     private(set) var isCollapsed: Bool = false
     private(set) var memberFavicons: [Data?] = []
 
     // MARK: - Subviews / sublayers
 
     private let colorDotLayer = CALayer()
-    private let compactSwatchLayer = CALayer()
     private let labelField: NSTextField = {
         let tf = NSTextField(labelWithString: "")
         tf.isEditable = false
@@ -154,7 +145,6 @@ final class TabGroupChipView: NSView {
         layer?.cornerRadius = Self.cornerRadius
 
         layer?.addSublayer(colorDotLayer)
-        layer?.addSublayer(compactSwatchLayer)
         layer?.addSublayer(countBackgroundLayer)
 
         colorDotLayer.cornerRadius = Self.dotSize / 2.0
@@ -162,7 +152,6 @@ final class TabGroupChipView: NSView {
 
         // Suppress implicit animations for layers we manage explicitly.
         colorDotLayer.actions = ["backgroundColor": NSNull(), "bounds": NSNull(), "position": NSNull()]
-        compactSwatchLayer.actions = ["backgroundColor": NSNull(), "bounds": NSNull(), "position": NSNull()]
         countBackgroundLayer.actions = ["backgroundColor": NSNull(), "bounds": NSNull(), "position": NSNull(),
                                         "cornerRadius": NSNull()]
 
@@ -190,7 +179,6 @@ final class TabGroupChipView: NSView {
         displayTitle: String,
         memberCount: Int,
         hasUserSetTitle: Bool,
-        mode: ChipMode,
         isCollapsed: Bool,
         memberFavicons: [Data?]
     ) {
@@ -199,7 +187,6 @@ final class TabGroupChipView: NSView {
         self.displayTitle = displayTitle
         self.memberCount = memberCount
         self.hasUserSetTitle = hasUserSetTitle
-        self.mode = mode
         self.isCollapsed = isCollapsed
         self.memberFavicons = memberFavicons
 
@@ -219,9 +206,9 @@ final class TabGroupChipView: NSView {
     ///
     /// Precondition: caller must have already invoked `configure(...)`
     /// with `isCollapsed: true` at least once, so `mosaicView.frame`
-    /// is set by a prior `layoutFullMode()` pass. Calling this
-    /// before the first collapsed layout would leave the mosaic at
-    /// `.zero` until the next layout pass.
+    /// is set by a prior `layout()` pass. Calling this before the
+    /// first collapsed layout would leave the mosaic at `.zero` until
+    /// the next layout pass.
     func updateMosaic(memberFavicons: [Data?]) {
         self.memberFavicons = memberFavicons
         mosaicView.configure(memberFavicons: memberFavicons, memberCount: memberCount)
@@ -231,26 +218,17 @@ final class TabGroupChipView: NSView {
 
     private func applyAppearance() {
         colorDotLayer.backgroundColor = color.nsColor.cgColor
-        compactSwatchLayer.backgroundColor = color.chipCompactSwatchColor.cgColor
         countBackgroundLayer.backgroundColor = color.chipHoverTintColor.cgColor
         countBackgroundLayer.cornerRadius = (TabGroupChipView.countFont.pointSize +
                                               Self.countVerticalPadding * 2) / 2.0
 
-        let showLabel = (mode == .full)
-        let showDot = (mode == .full)
-        let showMosaic = (mode == .full) && isCollapsed
-        // Count badge only when expanded + user-named (existing
-        // behavior). When the mosaic shows, the count is suppressed
-        // because the mosaic carries the count via the overflow cell.
-        let showCount = (mode == .full) && hasUserSetTitle && !isCollapsed
-        let showCompactSwatch = false
-
-        labelField.isHidden = !showLabel
+        // Count badge: only when expanded + user-named. When the mosaic
+        // shows (collapsed), the count is suppressed because the mosaic
+        // carries the count via the overflow cell.
+        let showCount = hasUserSetTitle && !isCollapsed
         countField.isHidden = !showCount
         countBackgroundLayer.isHidden = !showCount
-        colorDotLayer.isHidden = !showDot
-        compactSwatchLayer.isHidden = !showCompactSwatch
-        mosaicView.isHidden = !showMosaic
+        mosaicView.isHidden = !isCollapsed
     }
 
     override func viewDidChangeEffectiveAppearance() {
@@ -267,17 +245,6 @@ final class TabGroupChipView: NSView {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
 
-        switch mode {
-        case .full:
-            layoutFullMode()
-        case .compact:
-            layoutCompactMode()
-        }
-
-        CATransaction.commit()
-    }
-
-    private func layoutFullMode() {
         // Color dot sits at the leading edge, vertically centered.
         let dotY = (bounds.height - Self.dotSize) / 2
         colorDotLayer.frame = CGRect(x: Self.leadingPadding, y: dotY,
@@ -285,7 +252,6 @@ final class TabGroupChipView: NSView {
 
         let labelX = Self.leadingPadding + Self.dotSize + Self.dotToLabelGap
         let labelHeight = ceil(Self.labelFont.ascender - Self.labelFont.descender + Self.labelFont.leading)
-
         let trailingX = bounds.width - Self.labelRightPadding
 
         if isCollapsed {
@@ -320,13 +286,8 @@ final class TabGroupChipView: NSView {
             labelField.frame = CGRect(x: labelX, y: (bounds.height - labelHeight) / 2,
                                        width: max(0, trailingX - labelX), height: labelHeight)
         }
-    }
 
-    private func layoutCompactMode() {
-        // Compact mode currently has no rendered content beyond the
-        // 24pt chip frame itself — labelField / countField / dot all
-        // hidden via applyAppearance(). Compact-mode visuals are a
-        // pending design decision; see Slice D follow-up.
+        CATransaction.commit()
     }
 
     // MARK: - Width measurement
@@ -345,7 +306,7 @@ final class TabGroupChipView: NSView {
     ///   - isCollapsed: when true, reserves mosaic (`TabGroupChipMosaicView.mosaicSize`)
     ///     in place of the count badge — even for unnamed groups, since
     ///     the mosaic is the preview signal.
-    static func fullModeWidth(forTitle title: String,
+    static func chipWidth(forTitle title: String,
                               hasUserSetTitle: Bool,
                               memberCount: Int,
                               isCollapsed: Bool) -> CGFloat {
