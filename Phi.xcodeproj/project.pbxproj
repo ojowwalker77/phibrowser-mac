@@ -72,9 +72,6 @@
 		376CE4152F2897D30093D937 /* Profile.swift in Sources */ = {isa = PBXBuildFile; fileRef = 376CE40D2F2897D30093D937 /* Profile.swift */; };
 		376CE4162F2897D30093D937 /* Response.swift in Sources */ = {isa = PBXBuildFile; fileRef = 376CE40E2F2897D30093D937 /* Response.swift */; };
 		376CE4172F2897D30093D937 /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 376CE4102F2897D30093D937 /* APIClient.swift */; };
-		AE00FFFE0000000000000002 /* PhiAgentEndpointResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE00FFFE0000000000000001 /* PhiAgentEndpointResolver.swift */; };
-		AE00FFFE0000000000000003 /* PhiAgentEndpointResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE00FFFE0000000000000001 /* PhiAgentEndpointResolver.swift */; };
-		AE00FFFE0000000000000004 /* PhiAgentEndpointResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE00FFFE0000000000000001 /* PhiAgentEndpointResolver.swift */; };
 		376CE5E62F2C66900093D937 /* TabStripBarController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 376CE5E52F2C66900093D937 /* TabStripBarController.swift */; };
 		376CE5E82F2C669B0093D937 /* TabStripRightButtons.swift in Sources */ = {isa = PBXBuildFile; fileRef = 376CE5E72F2C669B0093D937 /* TabStripRightButtons.swift */; };
 		377D210F2F51986900A68BE5 /* WebContentContainerViewController+FloatingSidebar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 377D210E2F51986900A68BE5 /* WebContentContainerViewController+FloatingSidebar.swift */; };
@@ -187,6 +184,9 @@
 		AA10000000000000000000B3 /* TabSwitchCellView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA10000000000000000000F3 /* TabSwitchCellView.swift */; };
 		AA10000000000000000000B4 /* TabSwitchWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA10000000000000000000F4 /* TabSwitchWindowController.swift */; };
 		AA10000000000000000000B5 /* TabSwitchManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA10000000000000000000F5 /* TabSwitchManager.swift */; };
+		AE00FFFE0000000000000002 /* PhiAgentEndpointResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE00FFFE0000000000000001 /* PhiAgentEndpointResolver.swift */; };
+		AE00FFFE0000000000000003 /* PhiAgentEndpointResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE00FFFE0000000000000001 /* PhiAgentEndpointResolver.swift */; };
+		AE00FFFE0000000000000004 /* PhiAgentEndpointResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE00FFFE0000000000000001 /* PhiAgentEndpointResolver.swift */; };
 		B001795A2E49CF84007B4635 /* PhiChromiumCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00179592E49CF84007B4635 /* PhiChromiumCoordinator.swift */; };
 		B02586F52E42FD97001B08FC /* ChromiumLauncher.m in Sources */ = {isa = PBXBuildFile; fileRef = B02586EE2E42FD97001B08FC /* ChromiumLauncher.m */; };
 		B02586F62E42FD97001B08FC /* AppController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B02586F02E42FD97001B08FC /* AppController.swift */; };
@@ -241,6 +241,7 @@
 		CC450AE42EA74AD5004EE144 /* CommandDispatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC450AE32EA74AD5004EE144 /* CommandDispatcher.swift */; };
 		CC4BFB932E97991A00CC6162 /* Auth0.plist in Resources */ = {isa = PBXBuildFile; fileRef = CC4BFB922E9798ED00CC6162 /* Auth0.plist */; };
 		CC5025FC2E702603004223DC /* NSImage+Extension.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC5025FB2E702603004223DC /* NSImage+Extension.swift */; };
+		CC5C51F62FB5C5560044D255 /* credits.html in Resources */ = {isa = PBXBuildFile; fileRef = CC5C51F52FB5C5560044D255 /* credits.html */; };
 		CC6335F72E4B29E000A176DA /* Logging.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC6335F62E4B29E000A176DA /* Logging.swift */; };
 		CC6335F92E4DF65700A176DA /* PhiLogFormatter.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC6335F82E4DF65700A176DA /* PhiLogFormatter.swift */; };
 		CC6336032E4EE43200A176DA /* PhiLogging.m in Sources */ = {isa = PBXBuildFile; fileRef = CC6336022E4EE43200A176DA /* PhiLogging.m */; };
@@ -441,7 +442,6 @@
 		376CE40D2F2897D30093D937 /* Profile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Profile.swift; sourceTree = "<group>"; };
 		376CE40E2F2897D30093D937 /* Response.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Response.swift; sourceTree = "<group>"; };
 		376CE4102F2897D30093D937 /* APIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIClient.swift; sourceTree = "<group>"; };
-		AE00FFFE0000000000000001 /* PhiAgentEndpointResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhiAgentEndpointResolver.swift; sourceTree = "<group>"; };
 		376CE5E52F2C66900093D937 /* TabStripBarController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TabStripBarController.swift; sourceTree = "<group>"; };
 		376CE5E72F2C669B0093D937 /* TabStripRightButtons.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TabStripRightButtons.swift; sourceTree = "<group>"; };
 		377D210E2F51986900A68BE5 /* WebContentContainerViewController+FloatingSidebar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "WebContentContainerViewController+FloatingSidebar.swift"; sourceTree = "<group>"; };
@@ -548,6 +548,7 @@
 		AA10000000000000000000F3 /* TabSwitchCellView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TabSwitchCellView.swift; sourceTree = "<group>"; };
 		AA10000000000000000000F4 /* TabSwitchWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TabSwitchWindowController.swift; sourceTree = "<group>"; };
 		AA10000000000000000000F5 /* TabSwitchManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TabSwitchManager.swift; sourceTree = "<group>"; };
+		AE00FFFE0000000000000001 /* PhiAgentEndpointResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhiAgentEndpointResolver.swift; sourceTree = "<group>"; };
 		B00179592E49CF84007B4635 /* PhiChromiumCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhiChromiumCoordinator.swift; sourceTree = "<group>"; };
 		B02586EC2E42FD97001B08FC /* PhiBrowser-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "PhiBrowser-Bridging-Header.h"; sourceTree = "<group>"; };
 		B02586ED2E42FD97001B08FC /* ChromiumLauncher.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ChromiumLauncher.h; sourceTree = "<group>"; };
@@ -611,6 +612,7 @@
 		CC4BFB922E9798ED00CC6162 /* Auth0.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Auth0.plist; sourceTree = "<group>"; };
 		CC5025FB2E702603004223DC /* NSImage+Extension.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "NSImage+Extension.swift"; sourceTree = "<group>"; };
 		CC50262C2E716982004223DC /* OmniBoxViewController+Suggestion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "OmniBoxViewController+Suggestion.swift"; sourceTree = "<group>"; };
+		CC5C51F52FB5C5560044D255 /* credits.html */ = {isa = PBXFileReference; lastKnownFileType = text.html; path = credits.html; sourceTree = "<group>"; };
 		CC6335F62E4B29E000A176DA /* Logging.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Logging.swift; sourceTree = "<group>"; };
 		CC6335F82E4DF65700A176DA /* PhiLogFormatter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhiLogFormatter.swift; sourceTree = "<group>"; };
 		CC6336012E4EE43200A176DA /* PhiLogging.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = PhiLogging.h; sourceTree = "<group>"; };
@@ -1228,6 +1230,7 @@
 				CC99097B2EBC9F090046BC81 /* login-bg.mp4 */,
 				37B977D42EF3F62F007E0568 /* login-dot-bg.mp4 */,
 				37F574472F7A7C5D00879867 /* PhiIcon.icon */,
+				CC5C51F52FB5C5560044D255 /* credits.html */,
 			);
 			path = Resources;
 			sourceTree = "<group>";
@@ -1809,6 +1812,7 @@
 				3765817B2EE963AD00D3E031 /* Localizable.xcstrings in Resources */,
 				37B977D52EF3F62F007E0568 /* login-dot-bg.mp4 in Resources */,
 				CC99097C2EBC9F090046BC81 /* login-bg.mp4 in Resources */,
+				CC5C51F62FB5C5560044D255 /* credits.html in Resources */,
 				8EC502152F67AF7F00CE7338 /* DownloadSafety.xcstrings in Resources */,
 				CC4BFB932E97991A00CC6162 /* Auth0.plist in Resources */,
 			);
