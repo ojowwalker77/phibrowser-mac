@@ -145,9 +145,6 @@
     "%d min ago" : {
       "comment" : "Download item row - Relative time showing minutes since download completed"
     },
-    "%lld" : {
-
-    },
     "%lld/%lld" : {
       "localizations" : {
         "en" : {

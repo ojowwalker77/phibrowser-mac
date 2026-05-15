@@ -5,6 +5,7 @@
 
 import AppKit
 import Combine
+import QuartzCore
 import SnapKit
 import SwiftUI
 
@@ -24,6 +25,9 @@ protocol TabGroupCellViewDelegate: AnyObject {
     /// path).
     func tabGroupCellDidToggleCollapse(_ cell: TabGroupCellView,
                                        group: WebContentGroupInfo)
+
+    func tabGroupCellDidRequestCloseGroup(_ cell: TabGroupCellView,
+                                          group: WebContentGroupInfo)
 
     func tabGroupCell(_ cell: TabGroupCellView,
                       beginDraggingGroup group: WebContentGroupInfo,
@@ -151,6 +155,7 @@ protocol GroupTabsDragSource: AnyObject {
 
 private protocol TabGroupHeaderHostingViewDelegate: AnyObject {
     func tabGroupHeaderHostingViewDidToggleCollapse(_ view: TabGroupHeaderHostingView)
+    func tabGroupHeaderHostingViewDidRequestCloseGroup(_ view: TabGroupHeaderHostingView)
     func tabGroupHeaderHostingView(_ view: TabGroupHeaderHostingView,
                                    beginDraggingWith mouseDownEvent: NSEvent)
 }
@@ -160,16 +165,25 @@ private final class TabGroupHeaderHostingView: NSHostingView<TabGroupHeaderView>
 
     private var pendingMouseDownEvent: NSEvent?
     private var pendingMouseDownPoint: NSPoint?
+    private var pendingHitTarget: TabGroupHeaderHitTarget?
     private var manualDragInProgress = false
 
     override func mouseDown(with event: NSEvent) {
         pendingMouseDownEvent = event
         pendingMouseDownPoint = convert(event.locationInWindow, from: nil)
+        pendingHitTarget = TabGroupHeaderHitTargetResolver.target(
+            at: pendingMouseDownPoint ?? .zero,
+            in: bounds
+        )
+        if pendingHitTarget == .closeGroup, rootView.viewModel.isHovered == false {
+            pendingHitTarget = nil
+        }
         manualDragInProgress = false
     }
 
     override func mouseDragged(with event: NSEvent) {
         guard !manualDragInProgress,
+              pendingHitTarget == nil,
               let mouseDownEvent = pendingMouseDownEvent else {
             return
         }
@@ -183,25 +197,25 @@ private final class TabGroupHeaderHostingView: NSHostingView<TabGroupHeaderView>
         defer {
             pendingMouseDownEvent = nil
             pendingMouseDownPoint = nil
+            pendingHitTarget = nil
             manualDragInProgress = false
         }
         guard !manualDragInProgress,
-              let downPoint = pendingMouseDownPoint else {
+              let downPoint = pendingMouseDownPoint,
+              let hitTarget = pendingHitTarget else {
             return
         }
         let upPoint = convert(event.locationInWindow, from: nil)
-        guard chevronHitRect.contains(downPoint),
-              chevronHitRect.contains(upPoint) else {
+        guard TabGroupHeaderHitTargetResolver.target(at: downPoint, in: bounds) == hitTarget,
+              TabGroupHeaderHitTargetResolver.target(at: upPoint, in: bounds) == hitTarget else {
             return
         }
-        dragDelegate?.tabGroupHeaderHostingViewDidToggleCollapse(self)
-    }
-
-    private var chevronHitRect: NSRect {
-        NSRect(x: max(0, bounds.maxX - 32),
-               y: bounds.minY,
-               width: min(32, bounds.width),
-               height: bounds.height)
+        switch hitTarget {
+        case .collapse:
+            dragDelegate?.tabGroupHeaderHostingViewDidToggleCollapse(self)
+        case .closeGroup:
+            dragDelegate?.tabGroupHeaderHostingViewDidRequestCloseGroup(self)
+        }
     }
 }
 
@@ -212,18 +226,43 @@ private final class TabGroupHeaderHostingView: NSHostingView<TabGroupHeaderView>
 /// (computed by `desiredHeight(for:browserState:)`).
 final class TabGroupCellView: SidebarCellView {
 
-    static let headerHeight: CGFloat = 36
-    static let memberRowHeight: CGFloat = 36
+    static let containerLeadingInset: CGFloat = WebContentConstant.edgesSpacing
+    /// Container trailing is `0` so the rounded border aligns flush with
+    /// the right edge of an ungrouped tab row.
+    static let containerTrailingInset: CGFloat = 0
+    static let containerVerticalInset: CGFloat = 2
+    static let headerHeight: CGFloat = 32
+    /// Collapsed row matches the height of an ungrouped tab row (`36`).
+    /// In this mode the container fills the row (no vertical inset) and
+    /// the header stretches to fill the container so the rounded card
+    /// stroke aligns flush with the row top/bottom.
+    static let collapsedRowHeight: CGFloat = 36
+    static let memberRowHeight: CGFloat = 32
     static let innerTableTopInset: CGFloat = 4
     static let innerTableBottomInset: CGFloat = 4
+    static let innerTableLeadingInset: CGFloat = 0
+    /// Inner tab card's own 8pt corner radius keeps it safely inside the
+    /// container's 12pt corner curve, so the inner table can extend flush
+    /// to the container's trailing edge — the inner card's right edge
+    /// then aligns with both the group border line and an ungrouped tab
+    /// card's right edge.
+    static let innerTableTrailingInset: CGFloat = 4
 
     weak var groupCellDelegate: TabGroupCellViewDelegate?
 
     private(set) var token: String = ""
 
+    private var containerView: NSView!
+    private var containerBorderOverlayView: NSView!
     private var hostingView: TabGroupHeaderHostingView!
     private(set) var innerTable: GroupTabsTableView!
     private let viewModel = TabGroupHeaderViewModel()
+
+    private var containerTopInsetConstraint: Constraint?
+    private var containerBottomInsetConstraint: Constraint?
+    private var hostingHeightConstraint: Constraint?
+    private var innerTableBottomConstraint: Constraint?
+    private var innerTableCollapsedHeightConstraint: Constraint?
 
     private var dataSource: GroupTabsDiffableDataSource!
     private var tabsByGuid: [Int: Tab] = [:]
@@ -231,7 +270,9 @@ final class TabGroupCellView: SidebarCellView {
     private var activeDragTabGuid: Int?
 
     private var isDropTargetHighlighted = false
+    private var isHovered = false
     private var lastGroupColor: GroupColor = .grey
+    private var hoverTrackingArea: NSTrackingArea?
 
     private var collapseSubscription: AnyCancellable?
     private weak var configuredGroup: WebContentGroupInfo?
@@ -245,14 +286,12 @@ final class TabGroupCellView: SidebarCellView {
         super.init(frame: frameRect)
         setupViews()
         setupDataSource()
-        wireHeaderToggleCallback()
     }
 
     required init?(coder: NSCoder) {
         super.init(coder: coder)
         setupViews()
         setupDataSource()
-        wireHeaderToggleCallback()
     }
 
     override func prepareForReuse() {
@@ -263,6 +302,8 @@ final class TabGroupCellView: SidebarCellView {
         tabsByGuid = [:]
         currentMemberOrder = []
         activeDragTabGuid = nil
+        isHovered = false
+        viewModel.isHovered = false
         configuredGroup = nil
         configuredBrowserState = nil
 
@@ -271,18 +312,60 @@ final class TabGroupCellView: SidebarCellView {
         dataSource.apply(snap, animatingDifferences: false)
     }
 
+    override func layout() {
+        super.layout()
+        if Self.isDebugVisualizeEnabled {
+            logDebugFrames()
+        }
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let hoverTrackingArea {
+            removeTrackingArea(hoverTrackingArea)
+        }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.activeAlways, .inVisibleRect, .mouseEnteredAndExited],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        hoverTrackingArea = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        super.mouseEntered(with: event)
+        setHovered(true)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        super.mouseExited(with: event)
+        setHovered(false)
+    }
+
     // MARK: - Setup
 
     private func setupViews() {
+        containerView = NSView()
+        containerView.wantsLayer = true
+        addSubview(containerView)
+        containerView.snp.makeConstraints { make in
+            containerTopInsetConstraint = make.top.equalToSuperview()
+                .inset(Self.containerVerticalInset).constraint
+            containerBottomInsetConstraint = make.bottom.equalToSuperview()
+                .inset(Self.containerVerticalInset).constraint
+            make.leading.equalToSuperview().inset(Self.containerLeadingInset)
+            make.trailing.equalToSuperview().inset(Self.containerTrailingInset)
+        }
+
         hostingView = TabGroupHeaderHostingView(
             rootView: TabGroupHeaderView(viewModel: viewModel))
         hostingView.dragDelegate = self
-        addSubview(hostingView)
+        containerView.addSubview(hostingView)
         hostingView.snp.makeConstraints { make in
-            make.top.equalToSuperview()
-            make.leading.equalToSuperview()
-            make.trailing.equalToSuperview()
-            make.height.equalTo(Self.headerHeight)
+            make.top.leading.trailing.equalToSuperview()
+            hostingHeightConstraint = make.height.equalTo(Self.headerHeight).constraint
         }
 
         innerTable = GroupTabsTableView()
@@ -312,17 +395,52 @@ final class TabGroupCellView: SidebarCellView {
             .normalTab, .pinnedTab, .phiBookmark, .sourceWindowId
         ])
 
+        // Cell width is controlled by `GroupTabsTableView.frameOfCell`,
+        // not `column.width`, so the resizing mask here is irrelevant —
+        // keep the AppKit default to avoid surprising any future code
+        // that consults the column directly.
         let column = NSTableColumn(
             identifier: NSUserInterfaceItemIdentifier("InnerGroupTab"))
         column.resizingMask = .autoresizingMask
         innerTable.addTableColumn(column)
 
-        addSubview(innerTable)
+        containerView.addSubview(innerTable)
         innerTable.snp.makeConstraints { make in
             make.top.equalTo(hostingView.snp.bottom).offset(Self.innerTableTopInset)
-            make.leading.equalToSuperview()
-            make.trailing.equalToSuperview()
-            make.bottom.equalToSuperview().inset(Self.innerTableBottomInset)
+            make.leading.equalToSuperview().inset(Self.innerTableLeadingInset)
+            make.trailing.equalToSuperview().inset(Self.innerTableTrailingInset)
+            innerTableBottomConstraint = make.bottom.equalToSuperview()
+                .inset(Self.innerTableBottomInset).constraint
+            innerTableCollapsedHeightConstraint = make.height.equalTo(0).constraint
+        }
+        innerTableCollapsedHeightConstraint?.deactivate()
+
+        containerBorderOverlayView = NSView()
+        containerBorderOverlayView.wantsLayer = true
+        containerBorderOverlayView.layer?.backgroundColor = NSColor.clear.cgColor
+        containerBorderOverlayView.layer?.cornerRadius = 12
+        containerBorderOverlayView.layer?.cornerCurve = .continuous
+        containerBorderOverlayView.layer?.borderWidth = 1
+        containerBorderOverlayView.layer?.borderColor = NSColor.clear.cgColor
+        // Suppress fade-in on hover/drop color flips while leaving
+        // bounds/position animations alone — the height-change animation
+        // driven by the outer outline view relies on those.
+        containerBorderOverlayView.layer?.actions = [
+            "borderColor": NSNull(),
+            "borderWidth": NSNull(),
+            "backgroundColor": NSNull(),
+            "hidden": NSNull(),
+        ]
+        containerBorderOverlayView.isHidden = true
+        containerView.addSubview(containerBorderOverlayView)
+        containerBorderOverlayView.snp.makeConstraints { make in
+            make.edges.equalToSuperview()
+        }
+
+        applyHighlightVisuals()
+
+        if Self.isDebugVisualizeEnabled {
+            applyDebugTints()
         }
     }
 
@@ -353,13 +471,6 @@ final class TabGroupCellView: SidebarCellView {
         dataSource.apply(snap, animatingDifferences: false)
     }
 
-    private func wireHeaderToggleCallback() {
-        viewModel.onToggleCollapsed = { [weak self] in
-            guard let self, let group = self.configuredGroup else { return }
-            self.groupCellDelegate?.tabGroupCellDidToggleCollapse(self, group: group)
-        }
-    }
-
     // MARK: - Configuration
 
     override func configureAppearance() {
@@ -381,6 +492,7 @@ final class TabGroupCellView: SidebarCellView {
         applyMembers(initialMembers, animated: false)
 
         innerTable.isHidden = groupItem.group.isCollapsed
+        updateLayoutForCollapseState(groupItem.group.isCollapsed)
 
         collapseSubscription?.cancel()
         let captureToken = groupItem.group.token
@@ -390,9 +502,27 @@ final class TabGroupCellView: SidebarCellView {
             .sink { [weak self] isCollapsed in
                 guard let self else { return }
                 self.innerTable.isHidden = isCollapsed
+                self.updateLayoutForCollapseState(isCollapsed)
                 self.groupCellDelegate?.tabGroupCellNeedsHeightUpdate(
                     self, for: captureToken)
             }
+    }
+
+    private func updateLayoutForCollapseState(_ isCollapsed: Bool) {
+        if isCollapsed {
+            containerTopInsetConstraint?.update(inset: 0)
+            containerBottomInsetConstraint?.update(inset: 0)
+            hostingHeightConstraint?.update(offset: Self.collapsedRowHeight)
+            innerTableBottomConstraint?.deactivate()
+            innerTableCollapsedHeightConstraint?.activate()
+        } else {
+            containerTopInsetConstraint?.update(inset: Self.containerVerticalInset)
+            containerBottomInsetConstraint?.update(inset: Self.containerVerticalInset)
+            hostingHeightConstraint?.update(offset: Self.headerHeight)
+            innerTableCollapsedHeightConstraint?.deactivate()
+            innerTableBottomConstraint?.activate()
+        }
+        needsLayout = true
     }
 
     /// Apply a new member set, animating insertions/deletions/moves
@@ -420,17 +550,18 @@ final class TabGroupCellView: SidebarCellView {
     static func desiredHeight(for groupItem: TabGroupSidebarItem,
                               browserState: BrowserState) -> CGFloat {
         if groupItem.group.isCollapsed {
-            return headerHeight
+            return collapsedRowHeight
         }
         let memberCount = browserState.normalTabs.lazy
             .filter { $0.groupToken == groupItem.group.token }.count
         if memberCount == 0 {
-            return headerHeight
+            return collapsedRowHeight
         }
         return headerHeight
             + CGFloat(memberCount) * memberRowHeight
             + innerTableTopInset
             + innerTableBottomInset
+            + containerVerticalInset * 2
     }
 
     // MARK: - Drop highlight
@@ -442,17 +573,30 @@ final class TabGroupCellView: SidebarCellView {
     }
 
     private func applyHighlightVisuals() {
-        wantsLayer = true
+        containerView.wantsLayer = true
+        containerView.layer?.cornerRadius = 12
+        containerView.layer?.cornerCurve = .continuous
         if isDropTargetHighlighted {
             let tint = lastGroupColor.nsColor
-            layer?.backgroundColor = tint.withAlphaComponent(0.18).cgColor
-            layer?.cornerRadius = 6
-            layer?.borderColor = tint.withAlphaComponent(0.40).cgColor
-            layer?.borderWidth = 1
+            containerView.layer?.backgroundColor = tint.withAlphaComponent(0.12).cgColor
+            containerBorderOverlayView.isHidden = false
+            containerBorderOverlayView.layer?.borderColor = tint.withAlphaComponent(0.36).cgColor
+        } else if isHovered {
+            containerView.layer?.backgroundColor = NSColor.clear.cgColor
+            containerBorderOverlayView.isHidden = false
+            containerBorderOverlayView.layer?.borderColor = ThemedColor.border.resolve(in: containerView).cgColor
         } else {
-            layer?.backgroundColor = nil
-            layer?.borderWidth = 0
+            containerView.layer?.backgroundColor = NSColor.clear.cgColor
+            containerBorderOverlayView.isHidden = true
+            containerBorderOverlayView.layer?.borderColor = NSColor.clear.cgColor
         }
+    }
+
+    private func setHovered(_ hovered: Bool) {
+        guard isHovered != hovered else { return }
+        isHovered = hovered
+        viewModel.isHovered = hovered
+        applyHighlightVisuals()
     }
 }
 
@@ -479,7 +623,13 @@ extension TabGroupCellView {
 
 extension TabGroupCellView: TabGroupHeaderHostingViewDelegate {
     fileprivate func tabGroupHeaderHostingViewDidToggleCollapse(_ view: TabGroupHeaderHostingView) {
-        viewModel.onToggleCollapsed?()
+        guard let group = configuredGroup else { return }
+        groupCellDelegate?.tabGroupCellDidToggleCollapse(self, group: group)
+    }
+
+    fileprivate func tabGroupHeaderHostingViewDidRequestCloseGroup(_ view: TabGroupHeaderHostingView) {
+        guard let group = configuredGroup else { return }
+        groupCellDelegate?.tabGroupCellDidRequestCloseGroup(self, group: group)
     }
 
     fileprivate func tabGroupHeaderHostingView(_ view: TabGroupHeaderHostingView,
@@ -491,7 +641,7 @@ extension TabGroupCellView: TabGroupHeaderHostingViewDelegate {
         groupCellDelegate?.tabGroupCell(
             self,
             beginDraggingGroup: group,
-            from: view,
+            from: containerView,
             mouseDownEvent: mouseDownEvent)
     }
 }
@@ -712,5 +862,61 @@ extension TabGroupCellView: GroupTabsDragSource {
 extension TabGroupCellView: TabCellDelegate {
     func tabCellDidRequestClose(_ tab: Tab) {
         groupCellDelegate?.tabGroupCell(self, tabDidRequestClose: tab)
+    }
+}
+
+// MARK: - Runtime layout diagnostics
+
+// Toggle at runtime:
+//   defaults write <bundle-id> PhiTabGroupCellDebugVisualize -bool YES
+// then relaunch. When the flag is off, this file is behaviorally identical
+// to a build without the diagnostic. When on, every nested view gets a
+// distinct 1pt tint border and per-frame values are logged after each
+// `layout()` pass so we can visually correlate row / cell / container /
+// header / innerTable / overlay frames against the missing bottom border.
+extension TabGroupCellView {
+    fileprivate static let debugVisualizeKey = "PhiTabGroupCellDebugVisualize"
+
+    fileprivate static var isDebugVisualizeEnabled: Bool {
+        UserDefaults.standard.bool(forKey: debugVisualizeKey)
+    }
+
+    fileprivate func applyDebugTints() {
+        wantsLayer = true
+        layer?.borderColor = NSColor.systemRed.cgColor
+        layer?.borderWidth = 1
+
+        containerView.wantsLayer = true
+        containerView.layer?.borderColor = NSColor.systemGreen.cgColor
+        containerView.layer?.borderWidth = 1
+
+        hostingView.wantsLayer = true
+        hostingView.layer?.borderColor = NSColor.systemOrange.cgColor
+        hostingView.layer?.borderWidth = 1
+
+        innerTable.wantsLayer = true
+        innerTable.layer?.borderColor = NSColor.systemPurple.cgColor
+        innerTable.layer?.borderWidth = 1
+
+        containerBorderOverlayView.layer?.borderColor = NSColor.systemBlue.cgColor
+        containerBorderOverlayView.layer?.borderWidth = 1
+    }
+
+    fileprivate func logDebugFrames() {
+        let rowFrame = (superview as? NSTableRowView)?.frame ?? .zero
+        let collapsed = configuredGroup?.isCollapsed ?? false
+        let overlayLayerBounds = containerBorderOverlayView.layer?.bounds ?? .zero
+        let overlayPresentationBounds = containerBorderOverlayView.layer?.presentation()?.bounds ?? .zero
+        AppLogDebug(
+            "[TAB_GROUPS][LAYOUT_DEBUG] token=\(token) collapsed=\(collapsed) " +
+            "row=\(rowFrame) " +
+            "cell.frame=\(frame) cell.bounds=\(bounds) cellFlipped=\(isFlipped) " +
+            "container=\(containerView.frame) containerFlipped=\(containerView.isFlipped) " +
+            "header=\(hostingView.frame) " +
+            "innerTable=\(innerTable.frame) hidden=\(innerTable.isHidden) " +
+            "overlay.frame=\(containerBorderOverlayView.frame) " +
+            "overlay.layer.bounds=\(overlayLayerBounds) " +
+            "overlay.layer.presentation.bounds=\(overlayPresentationBounds)"
+        )
     }
 }

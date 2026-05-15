@@ -17,6 +17,21 @@ final class GroupTabsTableView: NSTableView {
     private var pendingMouseDownEvent: NSEvent?
     private var manualDragInProgress = false
 
+    /// Pin the inner cell to the row's full rect so it always tracks
+    /// `bounds.width`, regardless of `NSTableColumn.width`. The default
+    /// implementation derives the cell rect from `column.width`, which
+    /// can lag behind the table's actual bounds (autoresizing mask is
+    /// proportional, and existing rows are not re-framed when we mutate
+    /// `column.width` manually). This mirrors the pattern used in
+    /// `SideBarOutlineView.frameOfCell` for tab-group rows.
+    override func frameOfCell(atColumn column: Int, row: Int) -> NSRect {
+        let rowRect = rect(ofRow: row)
+        return NSRect(x: 0,
+                      y: rowRect.minY,
+                      width: rowRect.width - 4,
+                      height: rowRect.height)
+    }
+
     override func mouseDown(with event: NSEvent) {
         let row = row(at: convert(event.locationInWindow, from: nil))
         pendingDragRow = row

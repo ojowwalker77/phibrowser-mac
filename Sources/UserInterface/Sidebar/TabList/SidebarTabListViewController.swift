@@ -1640,6 +1640,22 @@ extension SidebarTabListViewController: NSOutlineViewDelegate {
                                        tokenHex: group.token,
                                        isCollapsed: collapsed)
     }
+
+    private func requestTabGroupClose(group: WebContentGroupInfo) {
+        guard let bridge = ChromiumLauncher.sharedInstance().bridge else {
+            AppLogDebug(
+                "[TAB_GROUPS] closeGroup: no bridge windowId=\(browserState.windowId) " +
+                "token=\(group.token)"
+            )
+            return
+        }
+        AppLogDebug(
+            "[TAB_GROUPS] closeGroup→bridge windowId=\(browserState.windowId) " +
+            "token=\(group.token)"
+        )
+        bridge.closeGroup(withWindowId: Int64(browserState.windowId),
+                          tokenHex: group.token)
+    }
     
     func outlineView(_ outlineView: NSOutlineView, shouldSelectItem item: Any) -> Bool {
         guard let sidebarItem = item as? SidebarItem else { return false }
@@ -2688,6 +2704,11 @@ extension SidebarTabListViewController: TabGroupCellViewDelegate {
         // kVisualsChanged echo updates `group.isCollapsed`, which the
         // cell already subscribes to.
         requestTabGroupCollapseChange(group: group, collapsed: !group.isCollapsed)
+    }
+
+    func tabGroupCellDidRequestCloseGroup(_ cell: TabGroupCellView,
+                                          group: WebContentGroupInfo) {
+        requestTabGroupClose(group: group)
     }
 
     func tabGroupCell(_ cell: TabGroupCellView,

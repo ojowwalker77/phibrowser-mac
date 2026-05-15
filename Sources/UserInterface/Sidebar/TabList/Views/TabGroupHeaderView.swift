@@ -18,21 +18,10 @@ final class TabGroupHeaderViewModel {
     var color: GroupColor = .grey
     var displayTitle: String = ""
     var tabCount: Int = 0
-    /// True iff the user has set an explicit title. Drives count-badge
-    /// visibility: when false, `displayTitle` already includes the count
-    /// ("Blue · 3 tabs") so a separate badge would be redundant — same as
-    /// upstream Chrome's tab-strip group chip.
-    var hasUserSetTitle: Bool = false
+    var isHovered: Bool = false
     /// Mirrors `WebContentGroupInfo.isCollapsed` so the inline chevron
-    /// in `TabGroupHeaderView` can rotate without driving the state
-    /// itself. The cell owns the bridge round-trip via `onToggleCollapsed`.
+    /// in `TabGroupHeaderView` can rotate without driving the state.
     var isCollapsed: Bool = false
-
-    /// Fires when the inline chevron is tapped. Cell wires this to its
-    /// `TabGroupCellViewDelegate.tabGroupCellDidToggleCollapse(_:group:)`
-    /// dispatch.
-    @ObservationIgnored
-    var onToggleCollapsed: (() -> Void)?
 
     private var configuredToken: String?
     private var cancellables = Set<AnyCancellable>()
@@ -44,7 +33,6 @@ final class TabGroupHeaderViewModel {
         color = group.color
         tabCount = initialCount
         displayTitle = group.displayTitle(memberCount: initialCount)
-        hasUserSetTitle = group.hasUserSetTitle
         isCollapsed = group.isCollapsed
 
         cancellables.removeAll()
@@ -59,14 +47,12 @@ final class TabGroupHeaderViewModel {
             }
             .store(in: &cancellables)
 
-        // Title change rewrites both the display string and the badge
-        // visibility (badge hides on auto-name).
+        // Title changes can rewrite the resolved display title.
         group.$title
             .removeDuplicates()
             .receive(on: DispatchQueue.main)
-            .sink { [weak self, weak group] newTitle in
+            .sink { [weak self, weak group] _ in
                 guard let self, let group, self.configuredToken == expectedToken else { return }
-                self.hasUserSetTitle = !newTitle.isEmpty
                 self.displayTitle = group.displayTitle(memberCount: self.tabCount)
             }
             .store(in: &cancellables)
@@ -104,46 +90,82 @@ final class TabGroupHeaderViewModel {
     }
 }
 
-/// Compact header row for a tab group: color bar + display title +
-/// optional count badge + trailing inline chevron driving the
-/// expand/collapse toggle.
+/// Compact header row for a tab group. Interaction is handled by
+/// `TabGroupHeaderHostingView` so the title area can stay draggable.
 struct TabGroupHeaderView: View {
     var viewModel: TabGroupHeaderViewModel
+    @State private var isCloseButtonHovered = false
 
     var body: some View {
         HStack(spacing: 8) {
-            RoundedRectangle(cornerRadius: 1.5, style: .continuous)
-                .fill(Color(nsColor: viewModel.color.nsColor))
-                .frame(width: 3, height: 16)
-
+            Image(systemName: "chevron.right")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(Color(nsColor: .secondaryLabelColor))
+                .frame(width: 24, height: 24)
+                .rotationEffect(.degrees(viewModel.isCollapsed ? 0 : 90))
+                .animation(.easeInOut(duration: 0.15), value: viewModel.isCollapsed)
+            
             Text(viewModel.displayTitle)
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundColor(Color(nsColor: .labelColor))
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Color(nsColor: .labelColor))
                 .lineLimit(1)
                 .truncationMode(.tail)
 
-            if viewModel.hasUserSetTitle {
-                Text("\(viewModel.tabCount)")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundColor(Color(nsColor: .secondaryLabelColor))
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 1)
-                    .background(
-                        Capsule().fill(Color(nsColor: .quaternaryLabelColor))
-                    )
-            }
-
             Spacer(minLength: 0)
 
-            Image(systemName: "chevron.right")
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundColor(Color(nsColor: .secondaryLabelColor))
-                .frame(width: 16, height: 16)
-                .rotationEffect(.degrees(viewModel.isCollapsed ? 0 : 90))
-                .animation(.easeInOut(duration: 0.15), value: viewModel.isCollapsed)
+            ZStack {
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .themedFill(.hover)
+                    .opacity(isCloseButtonHovered ? 1 : 0)
+
+                Image(systemName: "xmark")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(Color(nsColor: .secondaryLabelColor))
+            }
+            .frame(width: 24, height: 24)
+            .opacity(viewModel.isHovered ? 1 : 0)
+            .onHover { hovering in
+                isCloseButtonHovered = hovering && viewModel.isHovered
+            }
         }
-        .padding(.leading, 2)
-        .padding(.trailing, 8)
+//        .debugBorder()
+        .padding(.leading, 0)
+        .padding(.trailing, 6)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+enum TabGroupHeaderHitTarget {
+    case collapse
+    case closeGroup
+}
+
+struct TabGroupHeaderHitTargetResolver {
+    static let controlSize: CGFloat = 24
+    static let horizontalInset: CGFloat = 6
+
+    static func target(at point: CGPoint, in bounds: CGRect) -> TabGroupHeaderHitTarget? {
+        let originY = bounds.midY - controlSize * 0.5
+        let collapseRect = CGRect(
+            x: horizontalInset,
+            y: originY,
+            width: controlSize,
+            height: controlSize
+        )
+        if collapseRect.contains(point) {
+            return .collapse
+        }
+
+        let closeRect = CGRect(
+            x: bounds.maxX - horizontalInset - controlSize,
+            y: originY,
+            width: controlSize,
+            height: controlSize
+        )
+        if closeRect.contains(point) {
+            return .closeGroup
+        }
+
+        return nil
     }
 }

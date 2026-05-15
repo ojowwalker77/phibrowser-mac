@@ -43,6 +43,7 @@ struct SideTabView: View {
                 UnifiedTabCloseButton { onClose?() }
             }
         }
+//        .debugBorder(.green)
         .help(model.displayTitle)
         .padding(.leading, 6)
         .padding(.trailing, 8)
@@ -55,34 +56,12 @@ struct SideTabView: View {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .stroke(borderColor, lineWidth: model.isActive ? 1 : 0)
         )
+//        .debugBorder()
         .shadow(color: model.isActive ? .black.opacity(0.15) : .clear, radius: 1, x: 0, y: 1)
         .padding(.horizontal, WebContentConstant.edgesSpacing)
         .padding(.vertical, 2)
-        // Group affiliation bar: 4pt color stripe pinned to the cell's
-        // leading edge, sitting in the 10pt outer padding. Drawn after the
-        // base padding so the rounded background isn't displaced. Hidden
-        // when the tab is ungrouped, so root rows look identical to the
-        // pre-tab-groups behavior.
-        .overlay(alignment: .leading) {
-            if let color = model.groupColor {
-                RoundedRectangle(cornerRadius: 1.5, style: .continuous)
-                    .fill(Color(nsColor: color.nsColor))
-                    .frame(width: 3)
-                    .padding(.leading, 2)
-                    .padding(.vertical, 6)
-                    .allowsHitTesting(false)
-            }
-        }
-        // Indent grouped tabs 4pt to the right of ungrouped rows so the
-        // visual hierarchy ("this tab belongs to the group above") is
-        // obvious at a glance. Applied after the color-stripe overlay so
-        // the stripe shifts with the cell — the indent IS the affordance.
-        // Driven by `isInGroup` (mirrors `tab.groupToken != nil` directly)
-        // rather than `groupColor != nil` so the indent doesn't flicker
-        // out for one frame in the kJoined-before-kCreated race window.
-        .padding(.leading, model.isInGroup ? 4 : 0)
         .scaleEffect(model.isPressed ? 0.985 : 1.0)
-        .animation(.easeOut(duration: 0.1), value: model.isPressed)
+        .animation(.easeOut(duration: 0.08), value: model.isPressed)
         .onHover { hovering in
             model.setHovered(hovering)
         }
