@@ -4,7 +4,21 @@
 // found in the LICENSE file.
 
 import Foundation
+import Combine
 import Settings
+
+/// Tracks the context from which the Settings window was last presented so
+/// individual panes can adapt their UI (e.g. hide app-wide preferences when
+/// invoked from an incognito window).
+@MainActor
+final class SettingsPresentationState: ObservableObject {
+    static let shared = SettingsPresentationState()
+
+    @Published var openedFromIncognito: Bool = false
+
+    private init() {}
+}
+
 extension AppController {
     
     private func panes() -> [SettingsPane] {
@@ -17,8 +31,12 @@ extension AppController {
     }
     
     /// Returns the shared settings window controller, creating it on first access.
+    /// Refreshes the presentation context (e.g. incognito source) on every call so
+    /// individual panes see the right state regardless of which entry point was used.
     @discardableResult
     func ensureSettingsWindowController() -> SettingsWindowController {
+        refreshSettingsPresentationState()
+
         if let existingController = settingsWindowController {
             return existingController
         }
@@ -40,7 +58,15 @@ extension AppController {
         
         return controller
     }
+
+    private func refreshSettingsPresentationState() {
+        Task { @MainActor in
+            let isIncognito = MainBrowserWindowControllersManager.shared.activeWindowController?.browserState.isIncognito ?? false
+            SettingsPresentationState.shared.openedFromIncognito = isIncognito
+        }
+    }
     
+    @MainActor
     @objc func showPreferences(_ sender: Any?) {
         let controller = ensureSettingsWindowController()
         controller.show()

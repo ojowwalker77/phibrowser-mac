@@ -204,6 +204,7 @@ public final class ThemeManager: NSObject, ThemeSource {
     @MainActor
     func applyThemeSnapshot(_ snapshot: ThemeSnapshot) {
         let theme = snapshot.makeTheme()
+        AppLogDebug("[OverlayOpacity] applyThemeSnapshot id=\(theme.id) lightAlpha=\(theme.windowOverlayOpacity(for: .light)) darkAlpha=\(theme.windowOverlayOpacity(for: .dark))")
         registeredThemes[theme.id] = theme
         persistedThemeIDs.insert(theme.id)
         persistThemeSnapshots()
@@ -213,9 +214,12 @@ public final class ThemeManager: NSObject, ThemeSource {
     @MainActor
     public func updateCurrentThemeOverlayOpacity(_ opacity: CGFloat, for appearance: Appearance? = nil) {
         let targetAppearance = appearance ?? currentAppearance
+        let beforeLight = currentTheme.windowOverlayOpacity(for: .light)
+        let beforeDark = currentTheme.windowOverlayOpacity(for: .dark)
         let updatedSnapshot = currentTheme
             .makeSnapshot()
             .updatingOverlayOpacity(opacity, for: targetAppearance)
+        AppLogDebug("[OverlayOpacity] updateCurrentThemeOverlayOpacity opacity=\(opacity) target=\(targetAppearance) before(light=\(beforeLight),dark=\(beforeDark)) after(light=\(updatedSnapshot.colors.windowOverlayBackground.light.alpha),dark=\(updatedSnapshot.colors.windowOverlayBackground.dark.alpha))")
         applyThemeSnapshot(updatedSnapshot)
     }
     

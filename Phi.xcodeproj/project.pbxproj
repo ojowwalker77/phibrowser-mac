@@ -110,7 +110,7 @@
 		37C1B3322EE691E700DD4496 /* LottieAnimationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37C1B3312EE691E700DD4496 /* LottieAnimationView.swift */; };
 		37C1B4F72EE6CE8A00DD4496 /* GeneralSettingHostingViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37C1B4F32EE6CE8A00DD4496 /* GeneralSettingHostingViewController.swift */; };
 		37C1B4F82EE6CE8A00DD4496 /* GeneralSettingViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37C1B4F42EE6CE8A00DD4496 /* GeneralSettingViewController.swift */; };
-		37C1B4F92EE6CE8A00DD4496 /* GeneratlSettingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37C1B4F52EE6CE8A00DD4496 /* GeneratlSettingView.swift */; };
+		37C1B4F92EE6CE8A00DD4496 /* GeneralSettingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37C1B4F52EE6CE8A00DD4496 /* GeneralSettingView.swift */; };
 		37C76E162F8FAD510042FE45 /* SharedTokenLock.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37C76E152F8FAD510042FE45 /* SharedTokenLock.swift */; };
 		37C76E182F8FAD570042FE45 /* SharedHeartbeatStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37C76E172F8FAD570042FE45 /* SharedHeartbeatStore.swift */; };
 		37C76E1A2F8FAD730042FE45 /* SharedAuth0Config.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37C76E192F8FAD730042FE45 /* SharedAuth0Config.swift */; };
@@ -479,7 +479,7 @@
 		37C1B3312EE691E700DD4496 /* LottieAnimationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LottieAnimationView.swift; sourceTree = "<group>"; };
 		37C1B4F32EE6CE8A00DD4496 /* GeneralSettingHostingViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeneralSettingHostingViewController.swift; sourceTree = "<group>"; };
 		37C1B4F42EE6CE8A00DD4496 /* GeneralSettingViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeneralSettingViewController.swift; sourceTree = "<group>"; };
-		37C1B4F52EE6CE8A00DD4496 /* GeneratlSettingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeneratlSettingView.swift; sourceTree = "<group>"; };
+		37C1B4F52EE6CE8A00DD4496 /* GeneralSettingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeneralSettingView.swift; sourceTree = "<group>"; };
 		37C2A68A2F8E1585006E856E /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
 		37C2A68B2F8E1585006E856E /* tab-order-spec.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = "tab-order-spec.md"; sourceTree = "<group>"; };
 		37C6AAD82F1F761D00C0A46E /* DraggingSession.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = DraggingSession.md; sourceTree = "<group>"; };
@@ -972,7 +972,7 @@
 			children = (
 				37C1B4F32EE6CE8A00DD4496 /* GeneralSettingHostingViewController.swift */,
 				37C1B4F42EE6CE8A00DD4496 /* GeneralSettingViewController.swift */,
-				37C1B4F52EE6CE8A00DD4496 /* GeneratlSettingView.swift */,
+				37C1B4F52EE6CE8A00DD4496 /* GeneralSettingView.swift */,
 				37FC8DA92F39B2DE004675B8 /* LayoutModeSettingView.swift */,
 			);
 			path = General;
@@ -2062,7 +2062,7 @@
 				37C1B4F72EE6CE8A00DD4496 /* GeneralSettingHostingViewController.swift in Sources */,
 				37C1B4F82EE6CE8A00DD4496 /* GeneralSettingViewController.swift in Sources */,
 				8EE5BEEC2F14FF9800698D7D /* TabCloseButton.swift in Sources */,
-				37C1B4F92EE6CE8A00DD4496 /* GeneratlSettingView.swift in Sources */,
+				37C1B4F92EE6CE8A00DD4496 /* GeneralSettingView.swift in Sources */,
 				37C1B0E72ED851CE00DD4496 /* ShortcutsViewModel.swift in Sources */,
 				3769C6ED2EFA6CBE00A94DE0 /* GaussianEffectView.swift in Sources */,
 				B0F370B92E430CA5000B51F9 /* WebContentViewController.swift in Sources */,
