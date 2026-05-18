@@ -245,12 +245,11 @@ final class TabGroupChipMosaicView: NSView {
         }
 
         // Overflow text layer: only visible when slot 3 is `.overflow`.
-        // ≤9 renders the exact "+N" (e.g., "+5"); ≥10 caps to the
-        // "9+" idiom — both stay within the 10pt slot at 8pt font,
-        // and the prefix↔suffix flip is the standard "exact vs cap"
-        // signal (iOS badge, Slack, etc.).
+        // ≤9 renders the exact "+N" (e.g., "+5"); ≥10 collapses to an
+        // ellipsis to signal "many more" without a misleading precise
+        // number in the 10pt slot.
         if case .overflow(let count) = cells[3] {
-            overflowLayer.string = count <= 9 ? "+\(count)" : "9+"
+            overflowLayer.string = count <= 9 ? "+\(count)" : "..."
             overflowLayer.foregroundColor = currentOverflowTextColor().cgColor
             overflowLayer.isHidden = false
         } else {
