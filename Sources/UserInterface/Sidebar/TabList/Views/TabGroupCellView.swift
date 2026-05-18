@@ -200,22 +200,22 @@ private final class TabGroupHeaderHostingView: NSHostingView<TabGroupHeaderView>
             pendingHitTarget = nil
             manualDragInProgress = false
         }
-        guard !manualDragInProgress,
-              let downPoint = pendingMouseDownPoint,
-              let hitTarget = pendingHitTarget else {
+        guard !manualDragInProgress else { return }
+
+        // Close button uses standard cancel-on-drift semantics: fires
+        // only when both mouseDown and mouseUp land inside the close
+        // hit zone. A drift off the button cancels (no toggle either).
+        if pendingHitTarget == .closeGroup {
+            let upPoint = convert(event.locationInWindow, from: nil)
+            let upTarget = TabGroupHeaderHitTargetResolver.target(at: upPoint, in: bounds)
+            if upTarget == .closeGroup {
+                dragDelegate?.tabGroupHeaderHostingViewDidRequestCloseGroup(self)
+            }
             return
         }
-        let upPoint = convert(event.locationInWindow, from: nil)
-        guard TabGroupHeaderHitTargetResolver.target(at: downPoint, in: bounds) == hitTarget,
-              TabGroupHeaderHitTargetResolver.target(at: upPoint, in: bounds) == hitTarget else {
-            return
-        }
-        switch hitTarget {
-        case .collapse:
-            dragDelegate?.tabGroupHeaderHostingViewDidToggleCollapse(self)
-        case .closeGroup:
-            dragDelegate?.tabGroupHeaderHostingViewDidRequestCloseGroup(self)
-        }
+
+        // Any other mouseUp on the header strip toggles collapse.
+        dragDelegate?.tabGroupHeaderHostingViewDidToggleCollapse(self)
     }
 }
 
@@ -699,6 +699,22 @@ extension TabGroupCellView: GroupTabsTableViewDelegate {
             return
         }
         tab.performAction(with: nil)
+    }
+
+    func tableView(_ tableView: GroupTabsTableView,
+                   didRequest target: GroupTabsTableInteractionTarget,
+                   row: Int) {
+        guard currentMemberOrder.indices.contains(row),
+              let tab = tabsByGuid[currentMemberOrder[row]] else {
+            return
+        }
+
+        switch target {
+        case .close:
+            groupCellDelegate?.tabGroupCell(self, tabDidRequestClose: tab)
+        case .mute:
+            tab.setAudioMuted(!tab.isAudioMuted)
+        }
     }
 }
 

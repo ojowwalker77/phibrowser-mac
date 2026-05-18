@@ -14,6 +14,13 @@ import AppKit
 final class GroupTabsTableView: NSTableView {
     weak var phiTableDelegate: GroupTabsTableViewDelegate?
     private var pendingDragRow: Int?
+    /// When the user presses inside the SwiftUI close or mute control areas, `NSHostingView` may
+    /// receive the mouse sequence but the SwiftUI `Button` actions do not run reliably in this
+    /// embedded inner-table path. We detect control hits in `mouseDown`, store the target here,
+    /// and on `mouseUp` (same row and matching target) dispatch `didRequest` instead of row
+    /// activation. Non-nil also suppresses manual row drag so a press on those controls does not
+    /// start a tab drag.
+    private var pendingInteractionTarget: GroupTabsTableInteractionTarget?
     private var pendingMouseDownEvent: NSEvent?
     private var manualDragInProgress = false
 
@@ -33,8 +40,10 @@ final class GroupTabsTableView: NSTableView {
     }
 
     override func mouseDown(with event: NSEvent) {
-        let row = row(at: convert(event.locationInWindow, from: nil))
+        let point = convert(event.locationInWindow, from: nil)
+        let row = row(at: point)
         pendingDragRow = row
+        pendingInteractionTarget = interactionTarget(at: point, row: row)
         pendingMouseDownEvent = event
         manualDragInProgress = false
         AppLogDebug(
@@ -55,6 +64,10 @@ final class GroupTabsTableView: NSTableView {
             return
         }
 
+        guard pendingInteractionTarget == nil else {
+            return
+        }
+
         manualDragInProgress = true
         AppLogDebug("[TAB_GROUPS][INNER_DRAG] inner.beginManualDrag row=\(row)")
         phiTableDelegate?.tableView(self,
@@ -63,17 +76,67 @@ final class GroupTabsTableView: NSTableView {
     }
 
     override func mouseUp(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        let upRow = row(at: point)
         if !manualDragInProgress,
            let clickedRow = pendingDragRow,
            clickedRow >= 0,
-           clickedRow == row(at: convert(event.locationInWindow, from: nil)) {
-            phiTableDelegate?.tableView(self, didClickRow: clickedRow)
+           clickedRow == upRow {
+            let upTarget = interactionTarget(at: point, row: upRow)
+            if let pendingInteractionTarget,
+               pendingInteractionTarget == upTarget {
+                phiTableDelegate?.tableView(self,
+                                            didRequest: pendingInteractionTarget,
+                                            row: clickedRow)
+            } else if pendingInteractionTarget == nil {
+                phiTableDelegate?.tableView(self, didClickRow: clickedRow)
+            }
         }
         pendingDragRow = nil
+        pendingInteractionTarget = nil
         pendingMouseDownEvent = nil
         manualDragInProgress = false
         AppLogDebug("[TAB_GROUPS][INNER_DRAG] inner.mouseUp")
     }
+
+    private func interactionTarget(at point: NSPoint, row: Int) -> GroupTabsTableInteractionTarget? {
+        guard row >= 0,
+              let cellView = view(atColumn: 0,
+                                  row: row,
+                                  makeIfNecessary: false) as? SidebarTabCellView,
+              let tab = cellView.item as? Tab else {
+            return nil
+        }
+
+        let cellPoint = cellView.convert(point, from: self)
+        let closeRect = NSRect(x: cellView.bounds.maxX - 32,
+                               y: cellView.bounds.midY - 12,
+                               width: 24,
+                               height: 24)
+        if closeRect.contains(cellPoint) {
+            return .close
+        }
+
+        guard tab.isCurrentlyAudible || tab.isAudioMuted else {
+            return nil
+        }
+
+        let mediaLeading = WebContentConstant.edgesSpacing + 6 + 16 + 8
+        let muteRect = NSRect(x: mediaLeading,
+                              y: cellView.bounds.midY - 12,
+                              width: 24,
+                              height: 24)
+        if muteRect.contains(cellPoint) {
+            return .mute
+        }
+
+        return nil
+    }
+}
+
+enum GroupTabsTableInteractionTarget: String {
+    case close
+    case mute
 }
 
 protocol GroupTabsTableViewDelegate: AnyObject {
@@ -82,4 +145,7 @@ protocol GroupTabsTableViewDelegate: AnyObject {
                    with event: NSEvent)
     func tableView(_ tableView: GroupTabsTableView,
                    didClickRow row: Int)
+    func tableView(_ tableView: GroupTabsTableView,
+                   didRequest target: GroupTabsTableInteractionTarget,
+                   row: Int)
 }

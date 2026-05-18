@@ -164,36 +164,25 @@ struct TabGroupHeaderView: View {
 }
 
 enum TabGroupHeaderHitTarget {
-    case collapse
     case closeGroup
 }
 
+/// Resolves the close-button hit zone on the header. The rest of the
+/// header strip (chevron, color dot, title, empty space) is treated as
+/// a single "toggle / drag" surface by `TabGroupHeaderHostingView` —
+/// click toggles collapse, drag starts a whole-group drag.
 struct TabGroupHeaderHitTargetResolver {
     static let controlSize: CGFloat = 24
     static let horizontalInset: CGFloat = 6
 
     static func target(at point: CGPoint, in bounds: CGRect) -> TabGroupHeaderHitTarget? {
         let originY = bounds.midY - controlSize * 0.5
-        let collapseRect = CGRect(
-            x: horizontalInset,
-            y: originY,
-            width: controlSize,
-            height: controlSize
-        )
-        if collapseRect.contains(point) {
-            return .collapse
-        }
-
         let closeRect = CGRect(
             x: bounds.maxX - horizontalInset - controlSize,
             y: originY,
             width: controlSize,
             height: controlSize
         )
-        if closeRect.contains(point) {
-            return .closeGroup
-        }
-
-        return nil
+        return closeRect.contains(point) ? .closeGroup : nil
     }
 }
