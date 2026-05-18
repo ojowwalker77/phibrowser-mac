@@ -1793,7 +1793,18 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
             let hideByHover = (hoveredTabIndex == neighborIdx)
             // Hide the chip's own right separator when the chip itself is hovered.
             let hideByOwnChipHover = (hoveredChipToken == token)
-            sep.isHidden = hideByActive || hideByHover || hideByOwnChipHover
+            // Hide when the chip directly to the right is hovered — covers
+            // adjacent-collapsed-groups (chipA's right separator = chipB's
+            // left separator) and collapsed-then-expanded adjacency. The
+            // `!= token` guard prevents double-firing for own hover, which
+            // `hideByOwnChipHover` already covers.
+            let neighborChipToken: String? = (neighborIdx < tabs.count)
+                ? tabs[neighborIdx].groupToken
+                : nil
+            let hideByNeighborChipHover = (neighborChipToken != nil
+                                           && neighborChipToken == hoveredChipToken
+                                           && neighborChipToken != token)
+            sep.isHidden = hideByActive || hideByHover || hideByOwnChipHover || hideByNeighborChipHover
         }
     }
 
@@ -1861,6 +1872,21 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
             return tabs.firstIndex { $0.groupToken == token }
         }()
 
+        // True when tab[i] is the first visible member of an EXPANDED group.
+        // The "hide left-adjacent separator" rule must NOT fire in this case:
+        // a chip sits between tab[i-1] and tab[i], so separator[i-1] is the
+        // chip's left separator (not directly adjacent to tab[i]). For
+        // collapsed groups this check is unnecessary — their members are
+        // zero-width with separators pre-hidden at x=-1000.
+        let firstMemberOfExpandedGroup: (Int) -> Bool = { [weak self] idx in
+            guard let self = self,
+                  idx >= 0, idx < tabs.count,
+                  let token = tabs[idx].groupToken,
+                  let group = self.browserState.groups[token],
+                  !group.isCollapsed else { return false }
+            return tabs.firstIndex(where: { $0.groupToken == token }) == idx
+        }
+
         for (index, x) in xPositions.enumerated() {
             let sep = separatorViews[index]
             // Separators only render in the normal container, but keep the check explicit.
@@ -1872,11 +1898,15 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
 
             if let activeIdx = activeIndex {
                 if index == activeIdx { shouldHide = true }      // Separator on the tab's right side.
-                if index == activeIdx - 1 { shouldHide = true }  // Separator on the tab's left side.
+                if index == activeIdx - 1 && !firstMemberOfExpandedGroup(activeIdx) {
+                    shouldHide = true  // Tab's left side (chip-between guard).
+                }
             }
             if let hoveredIdx = hoveredTabIndex {
                 if index == hoveredIdx { shouldHide = true }      // Separator on the tab's right side.
-                if index == hoveredIdx - 1 { shouldHide = true }  // Separator on the tab's left side.
+                if index == hoveredIdx - 1 && !firstMemberOfExpandedGroup(hoveredIdx) {
+                    shouldHide = true  // Tab's left side (chip-between guard).
+                }
             }
             if let firstMemberIdx = hoveredChipFirstMemberIdx,
                index == firstMemberIdx - 1 {
