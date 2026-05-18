@@ -279,6 +279,7 @@ final class TabGroupCellView: SidebarCellView {
     private var collapseSubscription: AnyCancellable?
     private weak var configuredGroup: WebContentGroupInfo?
     private weak var configuredBrowserState: BrowserState?
+    private var isTemporarilyCollapsedForDrag = false
 
     enum Section: Hashable { case members }
 
@@ -306,6 +307,7 @@ final class TabGroupCellView: SidebarCellView {
         activeDragTabGuid = nil
         isHovered = false
         viewModel.isHeaderHovered = false
+        isTemporarilyCollapsedForDrag = false
         configuredGroup = nil
         configuredBrowserState = nil
 
@@ -481,6 +483,7 @@ final class TabGroupCellView: SidebarCellView {
         token = groupItem.group.token
         configuredGroup = groupItem.group
         configuredBrowserState = state
+        isTemporarilyCollapsedForDrag = false
         viewModel.configure(with: groupItem.group, in: state)
         lastGroupColor = groupItem.group.color
         applyHighlightVisuals()
@@ -490,21 +493,35 @@ final class TabGroupCellView: SidebarCellView {
         }
         applyMembers(initialMembers, animated: false)
 
-        innerTable.isHidden = groupItem.group.isCollapsed
-        updateLayoutForCollapseState(groupItem.group.isCollapsed)
+        applyEffectiveCollapseState()
 
         collapseSubscription?.cancel()
         let captureToken = groupItem.group.token
         collapseSubscription = groupItem.group.$isCollapsed
             .removeDuplicates()
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] isCollapsed in
+            .sink { [weak self] _ in
                 guard let self else { return }
-                self.innerTable.isHidden = isCollapsed
-                self.updateLayoutForCollapseState(isCollapsed)
+                self.applyEffectiveCollapseState()
                 self.groupCellDelegate?.tabGroupCellNeedsHeightUpdate(
                     self, for: captureToken)
             }
+    }
+
+    func setTemporarilyCollapsedForDrag(_ collapsed: Bool) {
+        guard isTemporarilyCollapsedForDrag != collapsed else { return }
+        isTemporarilyCollapsedForDrag = collapsed
+        applyEffectiveCollapseState()
+    }
+
+    private var effectiveIsCollapsed: Bool {
+        (configuredGroup?.isCollapsed ?? false) || isTemporarilyCollapsedForDrag
+    }
+
+    private func applyEffectiveCollapseState() {
+        let collapsed = effectiveIsCollapsed
+        innerTable.isHidden = collapsed
+        updateLayoutForCollapseState(collapsed)
     }
 
     /// Container and header keep the same constraints across collapse

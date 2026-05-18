@@ -106,6 +106,10 @@ class SidebarTabListViewController: NSViewController {
     
     /// Temporarily allows folder expansion even during drag, used by `expandFloatingBookmarkParentsIfNeeded`.
     private var allowExpandDuringDrag = false
+
+    /// UI-only drag overlay for a whole group drag. This never changes
+    /// Chromium's persisted collapsed state.
+    private var temporarilyCollapsedGroupTokenForDrag: String?
     
     private var scrollAnimationGeneration: Int = 0
     private var scrollScheduleGeneration: Int = 0
@@ -855,7 +859,10 @@ extension SidebarTabListViewController: NSOutlineViewDataSource {
         }()
         let resolvedIndex = index
         
-        defer { clearDropFeedback() }
+        defer {
+            clearDropFeedback()
+            restoreTemporarilyCollapsedGroupAfterDragIfNeeded()
+        }
 
         let pasteboard = info.draggingPasteboard
         guard pasteboard.pasteboardItems?.isEmpty == false else {
@@ -1128,6 +1135,11 @@ extension SidebarTabListViewController: NSOutlineViewDataSource {
                      draggingSession session: NSDraggingSession,
                      willBeginAt screenPoint: NSPoint,
                      forItems draggedItems: [Any]) {
+        if let groupItem = draggedItems.first as? TabGroupSidebarItem {
+            temporarilyCollapseGroupForDragIfNeeded(
+                groupItem: groupItem,
+                cell: nil)
+        }
         DispatchQueue.main.async { [weak self] in
             self?.expandFloatingBookmarkParentsIfNeeded()
             self?.browserState.isDraggingTab = true
@@ -1145,6 +1157,7 @@ extension SidebarTabListViewController: NSOutlineViewDataSource {
                      endedAt screenPoint: NSPoint,
                      operation: NSDragOperation) {
         clearDropFeedback()
+        restoreTemporarilyCollapsedGroupAfterDragIfNeeded()
         DispatchQueue.main.async { [weak self] in
             self?.browserState.isDraggingTab = false
         }
@@ -1306,6 +1319,87 @@ extension SidebarTabListViewController: NSOutlineViewDataSource {
 
     private func clearDropFeedback() {
         setDropFeedback(.none)
+    }
+
+    private func temporarilyCollapseGroupForDragIfNeeded(
+        groupItem: TabGroupSidebarItem,
+        cell: TabGroupCellView?
+    ) {
+        let token = groupItem.group.token
+        guard !groupItem.group.isCollapsed else { return }
+
+        if let activeToken = temporarilyCollapsedGroupTokenForDrag,
+           activeToken != token {
+            restoreTemporarilyCollapsedGroupAfterDragIfNeeded()
+        }
+
+        guard temporarilyCollapsedGroupTokenForDrag != token else { return }
+        temporarilyCollapsedGroupTokenForDrag = token
+        let targetCell = cell ?? visibleTabGroupCell(for: token)
+        targetCell?.setTemporarilyCollapsedForDrag(true)
+        noteTabGroupRowHeightChanged(for: groupItem, animated: false)
+        AppLogDebug(
+            "[TAB_GROUPS][GROUP_DRAG] temporarilyCollapse token=\(token)"
+        )
+    }
+
+    private func restoreTemporarilyCollapsedGroupAfterDragIfNeeded() {
+        guard let token = temporarilyCollapsedGroupTokenForDrag else { return }
+        temporarilyCollapsedGroupTokenForDrag = nil
+
+        guard let groupItem = tabGroupItem(for: token) else {
+            AppLogDebug(
+                "[TAB_GROUPS][GROUP_DRAG] restoreTemporaryCollapse skipped missing token=\(token)"
+            )
+            return
+        }
+
+        visibleTabGroupCell(for: token)?.setTemporarilyCollapsedForDrag(false)
+        noteTabGroupRowHeightChanged(for: groupItem, animated: false)
+        AppLogDebug(
+            "[TAB_GROUPS][GROUP_DRAG] restoreTemporaryCollapse token=\(token)"
+        )
+    }
+
+    private func tabGroupItem(for token: String) -> TabGroupSidebarItem? {
+        tabSectionController.tabItems
+            .compactMap { $0 as? TabGroupSidebarItem }
+            .first { $0.group.token == token }
+    }
+
+    private func visibleTabGroupCell(for token: String) -> TabGroupCellView? {
+        guard let groupItem = tabGroupItem(for: token) else { return nil }
+        let row = outlineView.row(forItem: groupItem)
+        guard row >= 0 else { return nil }
+        return outlineView.view(
+            atColumn: 0,
+            row: row,
+            makeIfNecessary: false
+        ) as? TabGroupCellView
+    }
+
+    private func noteTabGroupRowHeightChanged(for groupItem: TabGroupSidebarItem,
+                                              animated: Bool) {
+        let row = outlineView.row(forItem: groupItem)
+        guard row >= 0 else { return }
+        let updates = {
+            self.outlineView.noteHeightOfRows(
+                withIndexesChanged: IndexSet(integer: row))
+        }
+        if animated {
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0.2
+                context.allowsImplicitAnimation = true
+                updates()
+            }
+        } else {
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0
+                context.allowsImplicitAnimation = false
+                updates()
+            }
+        }
+        outlineView.layoutSubtreeIfNeeded()
     }
 
     private func applyDropFeedback(_ target: DropFeedbackTarget, highlighted: Bool) {
@@ -1530,6 +1624,8 @@ extension SidebarTabListViewController: NSOutlineViewDelegate {
         }
         if let groupCell = cellView as? TabGroupCellView,
            let groupItem = sidebarItem as? TabGroupSidebarItem {
+            groupCell.setTemporarilyCollapsedForDrag(
+                temporarilyCollapsedGroupTokenForDrag == groupItem.group.token)
             groupCell.setDropTargetHighlighted(
                 dropFeedbackTarget == .tabGroup(token: groupItem.group.token))
         }
@@ -1544,6 +1640,9 @@ extension SidebarTabListViewController: NSOutlineViewDelegate {
             return 16.0 // Smaller height for separator
         case .tabGroup:
             guard let groupItem = sidebarItem as? TabGroupSidebarItem else { return 36.0 }
+            if temporarilyCollapsedGroupTokenForDrag == groupItem.group.token {
+                return TabGroupCellView.collapsedRowHeight
+            }
             return TabGroupCellView.desiredHeight(
                 for: groupItem, browserState: browserState)
         default:
@@ -2526,9 +2625,16 @@ extension SidebarTabListViewController: TabGroupCellViewDelegate {
             "[TAB_GROUPS][GROUP_DRAG] controller.beginDraggingGroup " +
             "token=\(group.token) eventWindowPoint=\(mouseDownEvent.locationInWindow)"
         )
-        let draggingView: NSView = group.isCollapsed ? headerView : cell
-        guard let groupItem = cell.item as? TabGroupSidebarItem,
-              let image = draggingView.createDraggingSnapshot() else {
+        guard let groupItem = cell.item as? TabGroupSidebarItem else {
+            return
+        }
+        temporarilyCollapseGroupForDragIfNeeded(groupItem: groupItem, cell: cell)
+
+        let isCollapsedForDrag = group.isCollapsed
+            || temporarilyCollapsedGroupTokenForDrag == group.token
+        let draggingView: NSView = isCollapsedForDrag ? headerView : cell
+        guard let image = draggingView.createDraggingSnapshot() else {
+            restoreTemporarilyCollapsedGroupAfterDragIfNeeded()
             return
         }
 
@@ -2635,6 +2741,7 @@ extension SidebarTabListViewController: TabGroupCellViewDelegate {
         )
         clearDropFeedback()
         clearVisibleGroupInnerDropRows()
+        restoreTemporarilyCollapsedGroupAfterDragIfNeeded()
         DispatchQueue.main.async { [weak self] in
             self?.browserState.isDraggingTab = false
         }
@@ -2745,6 +2852,7 @@ extension SidebarTabListViewController: NSDraggingSource {
         )
         clearDropFeedback()
         clearVisibleGroupInnerDropRows()
+        restoreTemporarilyCollapsedGroupAfterDragIfNeeded()
         DispatchQueue.main.async { [weak self] in
             self?.browserState.isDraggingTab = false
         }
