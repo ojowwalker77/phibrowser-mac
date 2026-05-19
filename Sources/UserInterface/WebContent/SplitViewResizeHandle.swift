@@ -3,7 +3,9 @@
 // Use of this source code is governed by an Apache license that can be
 // found in the LICENSE file.
 
+import AppKit
 import Foundation
+
 class SplitViewResizeHandle: NSView {
     private(set) var isDragging = false
     private var isMouseEntered = false
@@ -13,6 +15,7 @@ class SplitViewResizeHandle: NSView {
 
     private var hoverIndicatorLayer: CALayer?
     private var showDelayTimer: Timer?
+    private var themeSubscription: AnyObject?
 
     var onDragEnded: (() -> Void)?
 
@@ -44,11 +47,31 @@ class SplitViewResizeHandle: NSView {
 
         // Build the hover indicator shown while the handle is active.
         hoverIndicatorLayer = CALayer()
-        hoverIndicatorLayer?.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.15).cgColor
         hoverIndicatorLayer?.cornerRadius = 2
         hoverIndicatorLayer?.opacity = 0.0 // Start fully transparent.
 
         layer?.addSublayer(hoverIndicatorLayer!)
+
+        rebindThemeSubscription()
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        rebindThemeSubscription()
+    }
+
+    private func rebindThemeSubscription() {
+        themeSubscription = nil
+        themeSubscription = themeStateProvider.subscribe { [weak self] _, _ in
+            self?.updateHoverIndicatorThemeColor()
+        }
+    }
+
+    private func updateHoverIndicatorThemeColor() {
+        hoverIndicatorLayer?.backgroundColor = ThemedColor.themeColor
+            .withAlphaComponent(0.6)
+            .resolve(in: self)
+            .cgColor
     }
 
     override func layout() {

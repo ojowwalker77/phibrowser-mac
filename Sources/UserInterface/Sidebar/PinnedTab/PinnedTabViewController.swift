@@ -53,7 +53,10 @@ class PinnedTabViewController: NSViewController {
                 guard let tabItem = collectionView.makeItem(withIdentifier: PinnedTabItem.reuseIdentifier, for: indexPath) as? PinnedTabItem else {
                     return NSCollectionViewItem()
                 }
-                tabItem.configure(with: tab)
+                tabItem.configure(
+                    with: tab,
+                    themeProvider: browserState?.themeContext ?? ThemeManager.shared
+                )
                 tabItem.itemClicked = { [weak self] tab in
                     guard let tab else { return }
                     self?.handleTabClicked(tab)

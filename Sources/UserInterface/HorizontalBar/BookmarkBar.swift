@@ -71,7 +71,7 @@ class BookmarkBar: NSView {
     private lazy var dropIndicator: NSView = {
         let view = NSView()
         view.wantsLayer = true
-        view.layer?.backgroundColor = NSColor.controlAccentColor.cgColor
+        view.layer?.backgroundColor = NSColor.clear.cgColor
         view.isHidden = true
         return view
     }()
@@ -130,14 +130,14 @@ class BookmarkBar: NSView {
         state.themeContext.themeAppearancePublisher
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _, _ in
-                self?.setBackgroundColor()
+                self?.applyThemeAppearance()
             }
             .store(in: &cancellables)
     }
 
     private func syncCurrentState() {
         updateBookmarks(state.bookmarkManager.rootFolder.children)
-        setBackgroundColor()
+        applyThemeAppearance()
     }
 
     private func clearRenderedBookmarks() {
@@ -166,15 +166,24 @@ class BookmarkBar: NSView {
         self.needsLayout = true
     }
 
-    private func setBackgroundColor() {
+    private func applyThemeAppearance() {
         phiLayer?.setBackgroundColor(ThemedColor.contentOverlayBackground)
+        updateDropIndicatorColor()
+    }
+
+    private func updateDropIndicatorColor() {
+        let theme = state.themeContext.currentTheme
+        let appearance = state.themeContext.currentAppearance
+        dropIndicator.layer?.backgroundColor = ThemedColor.themeColor
+            .resolve(theme: theme, appearance: appearance)
+            .cgColor
     }
 
     // MARK: -Setup
     private func setupUI() {
         wantsLayer = true
         layer?.masksToBounds = true
-        setBackgroundColor()
+        applyThemeAppearance()
 
         addSubview(stackView)
         addSubview(dropIndicator)

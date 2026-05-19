@@ -14,6 +14,8 @@ class PinnedTabItem: NSCollectionViewItem, NSMenuDelegate {
     private var tab: Tab?
     private var cancellables = Set<AnyCancellable>()
     private var faviconLoadHandle: ProfileScopedFaviconLoadHandle?
+    private weak var themeProvider: ThemeStateProvider?
+    private var themeSubscription: AnyObject?
 
     var itemClicked: ((Tab?) -> Void)?
     // Shared context menu bound to the entire pinned item.
@@ -35,6 +37,8 @@ class PinnedTabItem: NSCollectionViewItem, NSMenuDelegate {
     override func prepareForReuse() {
         super.prepareForReuse()
         cancellables.removeAll()
+        themeSubscription = nil
+        themeProvider = nil
         faviconLoadHandle?.cancel()
         faviconLoadHandle = nil
         iconImageView.image = nil
@@ -83,9 +87,11 @@ class PinnedTabItem: NSCollectionViewItem, NSMenuDelegate {
         view.menu = contextMenu
     }
 
-    func configure(with tab: Tab) {
+    func configure(with tab: Tab, themeProvider: ThemeStateProvider) {
         self.tab = tab
+        self.themeProvider = themeProvider
         cancellables.removeAll()
+        themeSubscription = nil
         faviconLoadHandle?.cancel()
         faviconLoadHandle = nil
 
@@ -136,7 +142,8 @@ class PinnedTabItem: NSCollectionViewItem, NSMenuDelegate {
                 self?.isSelected = isActive
             }
             .store(in: &cancellables)
-        
+
+        rebindThemeSubscription()
     }
 
     
@@ -146,11 +153,22 @@ class PinnedTabItem: NSCollectionViewItem, NSMenuDelegate {
         }
     }
 
+    private func rebindThemeSubscription() {
+        themeSubscription = nil
+        let provider = themeProvider ?? ThemeManager.shared
+        themeSubscription = provider.subscribe { [weak self] _, _ in
+            self?.updateSelectedState()
+        }
+    }
+
     private func updateSelectedState() {
         if isSelected {
             backgroundView.isSelected = true
             backgroundView.layer?.borderWidth = 2
-            backgroundView.layer?.borderColor = NSColor.controlAccentColor.cgColor
+            let provider = themeProvider ?? ThemeManager.shared
+            backgroundView.layer?.borderColor = ThemedColor.themeColor
+                .resolve(theme: provider.currentTheme, appearance: provider.currentAppearance)
+                .cgColor
         } else {
             backgroundView.isSelected = false
             backgroundView.layer?.borderWidth = 0
