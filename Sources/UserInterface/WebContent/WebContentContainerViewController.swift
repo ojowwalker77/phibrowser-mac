@@ -692,6 +692,13 @@ class WebContentContainerViewController: NSViewController {
         attachSharedBookmarkBar(to: controller)
 
         currentWebContentController = controller
+        // Force a full layout sweep before reading splitViewContainer's frame.
+        // Otherwise — if the window was just resized (e.g. titlebar
+        // double-click zoom) and a layout pass is still pending — the convert
+        // chain (splitViewContainer → controller.view → contentContainer →
+        // self.view) returns a stale rect, and the path gets drawn at the
+        // previous size until the next viewDidLayout corrects it.
+        view.layoutSubtreeIfNeeded()
         updateContentOuterBorder()
 
         // Notify Chromium that view switch is complete, it can now hide the old WebContents
@@ -913,6 +920,9 @@ class WebContentContainerViewController: NSViewController {
         // Update current controller and identifier
         currentWebContentController = pending.controller
         currentTabIdentifier = pending.identifier
+        // Same reason as switchToWebContentController: force layout so the
+        // splitViewContainer frame chain is fresh before computing the path.
+        view.layoutSubtreeIfNeeded()
         updateContentOuterBorder()
 
         // Clear pending state
