@@ -108,6 +108,23 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
     /// Never written to Chromium.
     private var temporarilyCollapsedGroupTokenForDrag: String?
 
+    /// True while `animateGroupDragSettle`'s NSAnimationContext is in
+    /// flight (the post-drop / post-cancel reflow). Layout passes that
+    /// land during this window must NOT reassign frames or transforms
+    /// instantly — that would cancel the in-flight CA animation and
+    /// snap the chip to its destination. See `layout()` for the gate.
+    private var groupDragSettling: Bool = false
+
+    /// Monotonic counter bumped at the start of every
+    /// `animateGroupDragSettle` call. The completion handler only
+    /// clears `groupDragSettling` when its captured generation still
+    /// matches the current one — protects against a stale completion
+    /// (from settle N) firing during settle N+1's animation window
+    /// and prematurely re-enabling layout()'s else branch, which
+    /// would snap settle N+1 to its end state. Triggered when the
+    /// user drops two whole-group drags within ~180ms.
+    private var groupDragSettleGeneration: Int = 0
+
     // MARK: - Scroll
     private var currentScrollOffset: CGFloat = 0.0
     private var lastContentWidth: CGFloat = 0.0
@@ -359,36 +376,68 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
                 : (externalPreview?.zone == .normal ? externalPreview?.gapWidth : nil)
         }
 
-        // Pinned zone.
-        updateLayoutOnly(
-            container: pinnedContainer,
-            viewPool: pinnedTabViews,
-            tabs: pinnedTabs,
-            activeTab: activeTab,
-            isPinned: true,
-            excludedIndex: pinnedExcluded,
-            gapIndex: pinnedGap
-        )
+        // Layout-pass dispatch. Three states:
+        //   1. Active whole-group drag (`groupContext != nil`):
+        //      wrap frame assignment in NSAnimationContext so the
+        //      non-dragged tabs' make-way reflow animates (0.18s,
+        //      parallel to single-tab drag's
+        //      `dragControllerDidUpdateLayout` path). The chip's own
+        //      transform is set inside `setDisableActions(true)` so
+        //      it tracks the cursor without a 0.18s lag.
+        //   2. Settling after drop / cancel (`groupDragSettling`):
+        //      `animateGroupDragSettle` already queued an animated
+        //      frame + transform reset. Don't run a competing layout
+        //      pass here — it would assign frames / reset transforms
+        //      INSTANTLY and cancel the in-flight animation.
+        //   3. Idle: original instant assignment, matches pre-existing
+        //      layout triggers (resize, scroll, data-change paths
+        //      wrapped separately by `performLayout(...)`).
+        let runLayoutPasses = { [self] in
+            updateLayoutOnly(
+                container: pinnedContainer,
+                viewPool: pinnedTabViews,
+                tabs: pinnedTabs,
+                activeTab: activeTab,
+                isPinned: true,
+                excludedIndex: pinnedExcluded,
+                gapIndex: pinnedGap
+            )
+            updateLayoutOnly(
+                container: normalContainer,
+                viewPool: normalTabViews,
+                tabs: normalTabs,
+                activeTab: activeTab,
+                isPinned: false,
+                excludedIndex: normalExcluded,
+                excludedGroupRange: normalExcludedRange,
+                gapIndex: normalGap,
+                gapWidth: normalGapW
+            )
+        }
 
-        // Normal zone.
-        updateLayoutOnly(
-            container: normalContainer,
-            viewPool: normalTabViews,
-            tabs: normalTabs,
-            activeTab: activeTab,
-            isPinned: false,
-            excludedIndex: normalExcluded,
-            excludedGroupRange: normalExcludedRange,
-            gapIndex: normalGap,
-            gapWidth: normalGapW
-        )
-
-        // Apply / clear translation transform on the dragged slice's
-        // chip + member views. Runs every layout pass: when a group
-        // drag is active, deltaX shifts the slice with the cursor;
-        // when it's nil, transforms reset to identity so the views
-        // render at their newly-assigned natural frames.
-        applyGroupDragTransforms(context: groupContext)
+        if groupContext != nil {
+            NSAnimationContext.runAnimationGroup { ctx in
+                ctx.duration = 0.18
+                ctx.timingFunction = CAMediaTimingFunction(name: .default)
+                ctx.allowsImplicitAnimation = true
+                runLayoutPasses()
+            }
+            // Chip transform — instant, even though the surrounding
+            // layout was in an animation block.
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            applyGroupDragTransforms(context: groupContext)
+            CATransaction.commit()
+        } else if groupDragSettling {
+            // In-flight settle animation owns frames AND transforms;
+            // do nothing here.
+        } else {
+            runLayoutPasses()
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            applyGroupDragTransforms(context: nil)
+            CATransaction.commit()
+        }
 
         onLayoutChanged?()
     }
@@ -1659,6 +1708,22 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
                     guard let self else { return }
                     let local = self.convert(winLoc, from: nil)
                     self.updateDragScreenPoint(fromWindowPoint: winLoc)
+                    // If a prior whole-group drag's settle animation is
+                    // still in flight (drop happened in the last ~180ms),
+                    // tear it down before doing anything else. Two
+                    // reasons:
+                    //   (a) `layout()`'s middle branch would otherwise
+                    //       skip the snapshot's prerequisite layout pass
+                    //       below — snapshot would read pre-collapse
+                    //       chipView.frame and miscompute sliceWidth /
+                    //       snap candidates.
+                    //   (b) In-flight CA transform animations on the
+                    //       prior dragged group's chip + member layers
+                    //       would otherwise shadow this new drag's
+                    //       `setDisableActions`-wrapped transform sets,
+                    //       so the new chip wouldn't visibly track the
+                    //       cursor until the stale animation ends.
+                    self.cancelInFlightGroupDragSettle()
                     // If the dragged group is currently expanded,
                     // temp-collapse it visually for the duration of
                     // the drag. Must happen BEFORE startDragging so
@@ -3549,17 +3614,108 @@ extension TabStrip: TabGroupDragDelegate {
     }
 
     func groupDragControllerDidUpdate() {
-        // Drag finished (context just transitioned to nil via one of
-        // endDragging's commit branches: .local / .external / .tearOff).
-        // Release the temp-collapse overlay so the next layout pass
-        // re-renders the group at its persisted expanded state.
         if groupDragController.context == nil {
+            // Drag finished (context just transitioned to nil via one
+            // of endDragging's commit branches: .local / .external /
+            // .tearOff). Animate the settling so the final reflow
+            // slides in rather than snaps.
             releaseTemporaryCollapseIfNeeded()
+            animateGroupDragSettle()
+        } else {
+            // Active drag: `layout()` reads the live group context and
+            // wraps `updateLayoutOnly` in NSAnimationContext so the
+            // non-dragged tabs' frame changes animate while the
+            // dragged chip's transform stays instant via the
+            // CATransaction.setDisableActions wrapper there.
+            needsLayout = true
         }
-        // Triggers `layout()`, which honors the controller's context
-        // (excludedGroupRange + slice-wide gap) and drives
-        // `applyGroupDragTransforms` for the slice's cursor follow.
-        needsLayout = true
+    }
+
+    /// Animated cleanup pass to run when a whole-group drag ends
+    /// (commit / cancel / rejected / liveness abort). Runs the
+    /// transform reset (`applyGroupDragTransforms(context: nil)`) and
+    /// the data-rebind pass (`rebindData`) inside a single
+    /// `NSAnimationContext` so the chip's `layer.transform` interpolates
+    /// from its last drag value back to identity in lockstep with the
+    /// view frames sliding to their post-commit positions. Without
+    /// this, the transform would reset on a later layout pass after
+    /// the frame animation already played, snapping the chip mid-flight.
+    ///
+    /// `groupDragSettling` gates `layout()` for the duration so any
+    /// pending `needsLayout = true` from the last `continueDragging`
+    /// tick can't race in with an instant frame reset and cancel the
+    /// in-flight animation.
+    /// Aborts an in-flight `animateGroupDragSettle` immediately. Called
+    /// when a new whole-group drag is about to start while the previous
+    /// drag's settle is still animating (user dropped one drag and
+    /// began another within ~180ms).
+    ///
+    /// Three things must happen before the new drag's setup code runs:
+    ///   1. Clear `groupDragSettling` so `layout()`'s middle branch no
+    ///      longer skips the upcoming `layoutSubtreeIfNeeded()` pass —
+    ///      otherwise the snapshot reads stale geometry.
+    ///   2. Bump `groupDragSettleGeneration` so the prior settle's
+    ///      completion handler (still scheduled to fire) sees its
+    ///      generation as stale and no-ops, leaving the new drag's
+    ///      state untouched.
+    ///   3. Remove in-flight CA animations on chip + tab layers. CA
+    ///      animations aren't cancelled by `setDisableActions(true)` or
+    ///      by setting the same property to a new value — they run to
+    ///      their own programmed `toValue` and ignore subsequent model
+    ///      writes. Without this, the new drag's `applyGroupDragTransforms`
+    ///      would set `layer.transform = translation(deltaX)` on the
+    ///      model layer, but the presentation layer would still be
+    ///      animating toward the old settle's `identity` target. Chip
+    ///      wouldn't visibly track the cursor until the stale animation
+    ///      ends.
+    ///
+    /// `removeAllAnimations()` may also clear unrelated animations
+    /// (e.g., a brand-new tab's alpha fade-in). Within the 180ms
+    /// post-drop window the only realistic animations attached to
+    /// these layers are this settle's own, so the collateral cost is
+    /// negligible.
+    private func cancelInFlightGroupDragSettle() {
+        guard groupDragSettling else { return }
+        groupDragSettleGeneration += 1
+        groupDragSettling = false
+        for view in normalTabViews.values {
+            view.layer?.removeAllAnimations()
+        }
+        for chip in chipViews.values {
+            chip.layer?.removeAllAnimations()
+        }
+        AppLogDebug(
+            "[TAB_GROUPS][GROUP_DRAG] cancelInFlightGroupDragSettle " +
+            "(generation=\(groupDragSettleGeneration))"
+        )
+    }
+
+    private func animateGroupDragSettle() {
+        groupDragSettleGeneration += 1
+        let myGeneration = groupDragSettleGeneration
+        groupDragSettling = true
+        let cfg = TabStripAnimationConfig.config(for: .dataChanged)
+        NSAnimationContext.runAnimationGroup({ ctx in
+            ctx.duration = cfg.duration
+            ctx.timingFunction = cfg.timingFunction
+            ctx.allowsImplicitAnimation = cfg.allowsImplicitAnimation
+            applyGroupDragTransforms(context: nil)
+            rebindData()
+        }, completionHandler: { [weak self] in
+            guard let self else { return }
+            // Stale completion guard: a newer settle bumped the
+            // generation while this one was in flight (user dropped
+            // a second drag inside the 0.18s window). The newer
+            // settle owns the state now; this completion would
+            // wrongly clear `groupDragSettling` and let the next
+            // layout() snap the live animation.
+            guard self.groupDragSettleGeneration == myGeneration else { return }
+            self.groupDragSettling = false
+            // Re-arm a normal (instant) layout pass so any state that
+            // accumulated during the settle window (e.g., scroll, mask
+            // updates) gets a clean reapply.
+            self.needsLayout = true
+        })
     }
 
     /// Clears `temporarilyCollapsedGroupTokenForDrag` if set, refreshes
@@ -3612,10 +3768,10 @@ extension TabStrip: TabGroupDragDelegate {
         // Covers .rejected (endDragging) and cancelDragging (Esc /
         // mid-drag liveness abort). Mirror the cleanup from
         // didUpdate's nil-context branch so the temp-collapse overlay
-        // also clears here — didCancel is the only callback fired in
-        // these paths.
+        // and chip transforms also clear here — didCancel is the only
+        // callback fired in these paths.
         releaseTemporaryCollapseIfNeeded()
-        needsLayout = true
+        animateGroupDragSettle()
         removeGroupDragEscMonitor()
     }
 
