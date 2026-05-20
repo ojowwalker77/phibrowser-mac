@@ -99,6 +99,15 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
     /// drag. Local-only so it doesn't leak past this app's events.
     private var groupDragEscMonitor: Any?
 
+    /// UI-only overlay for whole-group drag: while non-nil, the group
+    /// identified by this token is rendered as collapsed (mosaic chip,
+    /// zero-width members) regardless of its persisted
+    /// `BrowserState.groups[token].isCollapsed`. Set at drag start when
+    /// the dragged group is expanded so the proxy + let-way calc use
+    /// chipW instead of chipW + members; cleared at drop / cancel.
+    /// Never written to Chromium.
+    private var temporarilyCollapsedGroupTokenForDrag: String?
+
     // MARK: - Scroll
     private var currentScrollOffset: CGFloat = 0.0
     private var lastContentWidth: CGFloat = 0.0
@@ -1650,8 +1659,45 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
                     guard let self else { return }
                     let local = self.convert(winLoc, from: nil)
                     self.updateDragScreenPoint(fromWindowPoint: winLoc)
-                    if self.groupDragController.startDragging(token: tappedToken, mouseLocation: local) {
+                    // If the dragged group is currently expanded,
+                    // temp-collapse it visually for the duration of
+                    // the drag. Must happen BEFORE startDragging so
+                    // the snapshot's chipFrame / sliceWidth / snap
+                    // candidates are computed against the post-collapse
+                    // layout (sliceWidth = chipW, members .zero-width).
+                    // Restored on drop/cancel via
+                    // `releaseTemporaryCollapseIfNeeded`.
+                    let wasExpanded = !(self.browserState.groups[tappedToken]?.isCollapsed ?? false)
+                    if wasExpanded {
+                        self.temporarilyCollapsedGroupTokenForDrag = tappedToken
+                        self.refreshChipWidth(for: tappedToken)
+                        // `refreshChipWidth` mutates `chipFullWidths`
+                        // but does not invalidate layout, so
+                        // `layoutSubtreeIfNeeded()` would no-op without
+                        // this. Snapshot then reads pre-collapse
+                        // chipView.frame and miscomputes sliceWidth.
+                        self.needsLayout = true
+                        self.layoutSubtreeIfNeeded()
+                        AppLogDebug(
+                            "[TAB_GROUPS][GROUP_DRAG] temporarilyCollapse " +
+                            "token=\(tappedToken)"
+                        )
+                    }
+                    let started = self.groupDragController.startDragging(
+                        token: tappedToken, mouseLocation: local)
+                    if started {
                         self.installGroupDragEscMonitor()
+                    } else if wasExpanded {
+                        // Snapshot vetoed the drag — undo the
+                        // temp-collapse so the strip doesn't stay
+                        // stuck in the wrong visual state.
+                        self.temporarilyCollapsedGroupTokenForDrag = nil
+                        self.refreshChipWidth(for: tappedToken)
+                        self.needsLayout = true
+                        AppLogDebug(
+                            "[TAB_GROUPS][GROUP_DRAG] startDragging vetoed; " +
+                            "undid temp-collapse token=\(tappedToken)"
+                        )
                     }
                 }
                 chip.onDrag = { [weak self] _, winLoc in
@@ -1723,7 +1769,7 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
                 displayTitle: group.displayTitle(memberCount: memberCount),
                 memberCount: memberCount,
                 hasUserSetTitle: group.hasUserSetTitle,
-                isCollapsed: group.isCollapsed,
+                isCollapsed: effectiveIsCollapsed(for: token),
                 memberFavicons: collectMosaicFaviconData(for: token)
             )
             // The chip of the actively-dragged group keeps its
@@ -1922,6 +1968,17 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
         return tab.uniqueId
     }
 
+    /// Effective collapsed state for `token` — folds the data-layer
+    /// `BrowserState.groups[token].isCollapsed` together with the
+    /// UI-only `temporarilyCollapsedGroupTokenForDrag` overlay. Every
+    /// site that decides whether to render a group as collapsed
+    /// (layout, chip configure, chip width measurement) should go
+    /// through this so the overlay applies consistently.
+    private func effectiveIsCollapsed(for token: String) -> Bool {
+        let dataLayer = browserState.groups[token]?.isCollapsed ?? false
+        return dataLayer || temporarilyCollapsedGroupTokenForDrag == token
+    }
+
     /// Walks `browserState.normalTabs` and emits one `GroupRun` per
     /// maximal stretch of adjacent tabs sharing the same `groupToken`.
     /// Used both by the layout engine input and the drag-end auto-leave
@@ -1936,7 +1993,7 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
             while j + 1 < tabs.count && tabs[j + 1].groupToken == token {
                 j += 1
             }
-            let isCollapsed = browserState.groups[token]?.isCollapsed ?? false
+            let isCollapsed = effectiveIsCollapsed(for: token)
             runs.append(GroupRun(token: token, range: i...j, isCollapsed: isCollapsed))
             i = j + 1
         }
@@ -2027,7 +2084,7 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
             forTitle: title,
             hasUserSetTitle: group.hasUserSetTitle,
             memberCount: memberCount,
-            isCollapsed: group.isCollapsed
+            isCollapsed: effectiveIsCollapsed(for: token)
         )
         chipFullWidths[token] = width
     }
@@ -3492,10 +3549,34 @@ extension TabStrip: TabGroupDragDelegate {
     }
 
     func groupDragControllerDidUpdate() {
+        // Drag finished (context just transitioned to nil via one of
+        // endDragging's commit branches: .local / .external / .tearOff).
+        // Release the temp-collapse overlay so the next layout pass
+        // re-renders the group at its persisted expanded state.
+        if groupDragController.context == nil {
+            releaseTemporaryCollapseIfNeeded()
+        }
         // Triggers `layout()`, which honors the controller's context
         // (excludedGroupRange + slice-wide gap) and drives
         // `applyGroupDragTransforms` for the slice's cursor follow.
         needsLayout = true
+    }
+
+    /// Clears `temporarilyCollapsedGroupTokenForDrag` if set, refreshes
+    /// the chip's cached full width so the layout engine picks up the
+    /// restored (expanded) measurement, and lets the caller drive the
+    /// `needsLayout = true` that re-renders the strip. Safe to call
+    /// when the flag is nil or when the source group has already left
+    /// the strip (cross-window / tear-off committed) — `refreshChipWidth`
+    /// no-ops cleanly in that case via its `browserState.groups[token]`
+    /// guard.
+    private func releaseTemporaryCollapseIfNeeded() {
+        guard let token = temporarilyCollapsedGroupTokenForDrag else { return }
+        temporarilyCollapsedGroupTokenForDrag = nil
+        refreshChipWidth(for: token)
+        AppLogDebug(
+            "[TAB_GROUPS][GROUP_DRAG] releaseTemporaryCollapse token=\(token)"
+        )
     }
 
     func groupDragControllerCommitMove(memberTabIds: [Int], to: Int) {
@@ -3528,6 +3609,12 @@ extension TabStrip: TabGroupDragDelegate {
     }
 
     func groupDragControllerDidCancel() {
+        // Covers .rejected (endDragging) and cancelDragging (Esc /
+        // mid-drag liveness abort). Mirror the cleanup from
+        // didUpdate's nil-context branch so the temp-collapse overlay
+        // also clears here — didCancel is the only callback fired in
+        // these paths.
+        releaseTemporaryCollapseIfNeeded()
         needsLayout = true
         removeGroupDragEscMonitor()
     }
