@@ -8,6 +8,7 @@ import Sentry
 
 @objc class SentryService: NSObject {
     static let maxSentryLogSize: UInt = 98000
+    static let maxAuthReauthenticationSentryLogSize: UInt = 1024 * 1024
 
     @objc static func setup() {
         SentrySDK.start { options in
@@ -122,6 +123,10 @@ import Sentry
             }
             if let sentinelLogData = SentinelHelper.recentBootLog() {
                 scope.addAttachment(Attachment(data: sentinelLogData, filename: "sentinel-boot.log"))
+            }
+            if let logData = PhiLogging.applicationLog(maxLength: Int(maxAuthReauthenticationSentryLogSize))?
+                .data(using: .utf8) {
+                scope.addAttachment(Attachment(data: logData, filename: "logs.txt"))
             }
         }
     }

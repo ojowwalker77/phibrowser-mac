@@ -57,6 +57,7 @@ final class AuthFailureTraceBuffer {
             if entries.count > capacity {
                 entries.removeFirst(entries.count - capacity)
             }
+            AppLogInfo("[AuthTrace] \(formatLocalLogLine(entry))")
         }
     }
 
@@ -66,23 +67,36 @@ final class AuthFailureTraceBuffer {
                 return "Auth trace is empty."
             }
 
-            return entries.map { entry in
-                var line = "\(formatter.string(from: entry.timestamp)) | \(entry.event)"
-                let sortedDetails = entry.details
-                    .sorted { $0.key < $1.key }
-                    .map { "\($0.key)=\($0.value)" }
-                    .joined(separator: ", ")
-                if !sortedDetails.isEmpty {
-                    line += " | \(sortedDetails)"
-                }
-                line += " | \(entry.fileID):\(entry.line) | \(entry.function)"
-                if !entry.callStackSymbols.isEmpty {
-                    line += "\n    stack:\n    \(entry.callStackSymbols.joined(separator: "\n    "))"
-                }
-                return line
-            }
-            .joined(separator: "\n")
+            return entries.map(formatTraceLine).joined(separator: "\n")
         }
+    }
+
+    private func formatLocalLogLine(_ entry: Entry) -> String {
+        var line = entry.event
+        let sortedDetails = entry.details
+            .sorted { $0.key < $1.key }
+            .map { "\($0.key)=\($0.value)" }
+            .joined(separator: ", ")
+        if !sortedDetails.isEmpty {
+            line += " | \(sortedDetails)"
+        }
+        return line
+    }
+
+    private func formatTraceLine(_ entry: Entry) -> String {
+        var line = "\(formatter.string(from: entry.timestamp)) | \(entry.event)"
+        let sortedDetails = entry.details
+            .sorted { $0.key < $1.key }
+            .map { "\($0.key)=\($0.value)" }
+            .joined(separator: ", ")
+        if !sortedDetails.isEmpty {
+            line += " | \(sortedDetails)"
+        }
+        line += " | \(entry.fileID):\(entry.line) | \(entry.function)"
+        if !entry.callStackSymbols.isEmpty {
+            line += "\n    stack:\n    \(entry.callStackSymbols.joined(separator: "\n    "))"
+        }
+        return line
     }
 }
 
