@@ -18,6 +18,8 @@ struct TabGroupDragStartSnapshot {
     let snapCandidates: [(index: Int, x: CGFloat)]
     /// Leftmost normal-zone x for pinned soft-clamping.
     let firstNormalSlotX: CGFloat
+    /// See `TabGroupDragContext.chipPositionShift`.
+    let chipPositionShift: CGFloat
 }
 
 /// Delegate for whole-group drag. Parallel to `TabStripDragDelegate`,
@@ -127,7 +129,8 @@ final class TabGroupDragController {
             initialSliceWidth: snap.sliceWidth,
             isCollapsedAtDragStart: snap.isCollapsed,
             snapCandidates: snap.snapCandidates,
-            firstNormalSlotX: snap.firstNormalSlotX
+            firstNormalSlotX: snap.firstNormalSlotX,
+            chipPositionShift: snap.chipPositionShift
         )
         context = ctx
         AppLogDebug(

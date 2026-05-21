@@ -103,6 +103,12 @@ final class TabGroupDragContext {
     /// Leftmost x-coordinate of the normal zone — also captured at
     /// drag-start. Used for pinned-region soft-clamping.
     let firstNormalSlotX: CGFloat
+    /// `P_post − P_pre`: how far the chip's natural slot moved when
+    /// temp-collapse triggered a relayout before snapshot. Subtracted
+    /// from `deltaX` in `applyGroupDragTransforms` so the chip's
+    /// visual position stays under the cursor where the user grabbed
+    /// it. Zero when no relayout shift occurred.
+    let chipPositionShift: CGFloat
 
     // MARK: - Derived
 
@@ -159,7 +165,8 @@ final class TabGroupDragContext {
         initialSliceWidth: CGFloat,
         isCollapsedAtDragStart: Bool,
         snapCandidates: [(index: Int, x: CGFloat)],
-        firstNormalSlotX: CGFloat
+        firstNormalSlotX: CGFloat,
+        chipPositionShift: CGFloat
     ) {
         self.draggingChipToken = draggingChipToken
         self.memberTabIds = memberTabIds
@@ -170,6 +177,7 @@ final class TabGroupDragContext {
         self.isCollapsedAtDragStart = isCollapsedAtDragStart
         self.snapCandidates = snapCandidates
         self.firstNormalSlotX = firstNormalSlotX
+        self.chipPositionShift = chipPositionShift
         self.targetIndex = sourceRange.lowerBound
         self.currentMouseLocation = initialMouseLocation
     }
