@@ -311,6 +311,8 @@
 		D10000000000000000000007 /* ImagePreviewOverlayViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = D10000000000000000000017 /* ImagePreviewOverlayViewController.swift */; };
 		D10000000000000000000008 /* ExtensionDialogManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = D10000000000000000000031 /* ExtensionDialogManager.swift */; };
 		D10000000000000000000009 /* ExtensionDialogViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = D10000000000000000000032 /* ExtensionDialogViewController.swift */; };
+		7B00AAAA000000050000A5B5 /* PostHogEnv.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B00AAAA000000040000A4B4 /* PostHogEnv.swift */; };
+		7B00AAAA000000070000A7B7 /* PostHogConfig.generated.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B00AAAA000000060000A6B6 /* PostHogConfig.generated.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -688,6 +690,8 @@
 		D1B584F695BF7833FAA99558 /* AISettingHostingViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AISettingHostingViewController.swift; sourceTree = "<group>"; };
 		D8FCAEAE328C802016D87943 /* AISettingsConnectorViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AISettingsConnectorViewModel.swift; sourceTree = "<group>"; };
 		E10000000000000000000001 /* PhiBrowser-OpenSource.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "PhiBrowser-OpenSource.entitlements"; sourceTree = "<group>"; };
+		7B00AAAA000000040000A4B4 /* PostHogEnv.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PostHogEnv.swift; sourceTree = "<group>"; };
+		7B00AAAA000000060000A6B6 /* PostHogConfig.generated.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PostHogConfig.generated.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
