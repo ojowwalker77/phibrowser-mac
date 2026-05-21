@@ -241,6 +241,17 @@ class WebContentContainerViewController: NSViewController {
         outerBorderThemeObservation = view.subscribe { [weak self] _, _ in
             guard let self else { return }
             self.outerBorderLayer.strokeColor = ThemedColor.border.resolve(in: self.view).cgColor
+            // Group boundary layers use `group.color.nsColor.cgColor`,
+            // which doesn't auto-rebind on appearance change. Refresh
+            // each live layer here so the underline tracks the system
+            // theme. Wrap in `performAsCurrentDrawingAppearance` to
+            // ensure resolution picks the correct asset variant.
+            self.view.effectiveAppearance.performAsCurrentDrawingAppearance {
+                for (token, layer) in self.groupBoundaryLayers {
+                    guard let group = self.browserState?.groups[token] else { continue }
+                    layer.strokeColor = group.color.nsColor.cgColor
+                }
+            }
         }
         
         // Add left-edge hover trigger for floating sidebar.
@@ -666,7 +677,15 @@ class WebContentContainerViewController: NSViewController {
             }
 
             layer.path = path
-            layer.strokeColor = group.color.nsColor.cgColor
+            // `NSColor(resource:).cgColor` resolves against
+            // `NSAppearance.currentDrawing()`, which isn't pinned here
+            // — `updateGroupBoundaryLayers` runs from `viewDidLayout`,
+            // a layout callback (not a draw callback). Pin it to the
+            // host view's appearance so the underline picks up the
+            // same variant the chip dot uses.
+            view.effectiveAppearance.performAsCurrentDrawingAppearance {
+                layer.strokeColor = group.color.nsColor.cgColor
+            }
         }
     }
 
