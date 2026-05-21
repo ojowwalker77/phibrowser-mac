@@ -73,6 +73,9 @@ private struct ThemeSectionView: View {
         forOpacityPercent: ThemeManager.shared.currentTheme.windowOverlayOpacity(for: ThemeManager.shared.currentAppearance) * 100
     )
 
+    @AppStorage(PhiPreferences.ThemeSettings.selectionTintEnabled.rawValue)
+    private var selectionTintEnabled: Bool = true
+
     @Environment(\.phiAppearance) private var appearance
 
     private var themes: [Theme] {
@@ -132,6 +135,16 @@ private struct ThemeSectionView: View {
                             borderColor: sliderBorderColor
                         )
                         .frame(width: 324, height: 20)
+                    }
+
+                    Divider()
+
+                    GeneralRowView(title: NSLocalizedString("Apply theme to text selection on web pages", comment: "General settings - Toggle title for tinting ::selection on third-party pages with the window theme accent")) {
+                        Toggle("", isOn: $selectionTintEnabled)
+                            .labelsHidden()
+                            .toggleStyle(.switch)
+                            .controlSize(.mini)
+                            .themedTint(.themeColor)
                     }
                 }
             }

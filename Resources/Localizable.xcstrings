@@ -212,6 +212,9 @@
     "AppKit" : {
 
     },
+    "Apply theme to text selection on web pages" : {
+      "comment" : "General settings - Toggle title for tinting ::selection on third-party pages with the window theme accent"
+    },
     "Aqua" : {
       "comment" : "Aqua theme color name"
     },

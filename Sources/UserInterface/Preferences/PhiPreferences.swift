@@ -154,7 +154,11 @@ extension PhiPreferences {
         case currentThemeId = "PhiCurrentThemeId"
         /// Archived snapshots for themes customized by the user.
         case themeSnapshots = "PhiThemeSnapshots"
-        
+        /// When `true`, the Mirage extension applies the window theme's accent
+        /// to `::selection` on every web page; when `false`, it leaves the
+        /// page's native selection color alone. Default `true`.
+        case selectionTintEnabled = "PhiSelectionTintEnabled"
+
         var defaultValue: Any {
             switch self {
             case .userAppearanceChoice:
@@ -163,6 +167,8 @@ extension PhiPreferences {
                 return "default"
             case .themeSnapshots:
                 return Data()
+            case .selectionTintEnabled:
+                return true
             }
         }
         

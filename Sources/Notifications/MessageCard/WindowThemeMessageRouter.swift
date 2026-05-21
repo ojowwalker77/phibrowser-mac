@@ -30,13 +30,27 @@ final class WindowThemeMessageRouter {
     private struct WindowThemePayload: Encodable {
         let windowId: Int
         let theme: ThemePayload
+        /// Mirrors `PhiPreferences.ThemeSettings.selectionTintEnabled`. When
+        /// `false`, the Mirage extension must skip injecting its `::selection`
+        /// rule on third-party pages (and clear any previously injected one).
+        let selectionTintEnabled: Bool
     }
 
     private let messenger: ExtensionMessagingProtocol
     private var subscriptions: [Int: AnyCancellable] = [:]
+    private var lastSelectionTintEnabled: Bool
+    private var userDefaultsObserver: NSObjectProtocol?
 
     init(messenger: ExtensionMessagingProtocol = ExtensionMessaging.shared) {
         self.messenger = messenger
+        self.lastSelectionTintEnabled = Self.currentSelectionTintEnabled()
+        observeSelectionTintPreference()
+    }
+
+    deinit {
+        if let observer = userDefaultsObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
     }
 
     func observeWindow(_ browserState: BrowserState) {
@@ -80,6 +94,34 @@ final class WindowThemeMessageRouter {
         messenger.broadcast(type: "windowThemechanged", payload: json)
     }
 
+    private func observeSelectionTintPreference() {
+        // `UserDefaults.didChangeNotification` fires for every key. We dedupe
+        // by tracking the last broadcast value so unrelated key changes are
+        // ignored — the existing per-window theme publisher already covers
+        // theme-state changes.
+        userDefaultsObserver = NotificationCenter.default.addObserver(
+            forName: UserDefaults.didChangeNotification,
+            object: UserDefaults.standard,
+            queue: .main
+        ) { [weak self] _ in
+            self?.handleUserDefaultsChange()
+        }
+    }
+
+    private func handleUserDefaultsChange() {
+        let current = Self.currentSelectionTintEnabled()
+        guard current != lastSelectionTintEnabled else { return }
+        lastSelectionTintEnabled = current
+        rebroadcastAllObservedWindows()
+    }
+
+    private func rebroadcastAllObservedWindows() {
+        for windowId in subscriptions.keys {
+            guard let browserState = MainBrowserWindowControllersManager.shared.getBrowserState(for: windowId) else { continue }
+            broadcastThemeChanged(for: browserState)
+        }
+    }
+
     private func decodeRequest(_ payload: String) -> RequestPayload? {
         guard let data = payload.data(using: .utf8) else { return nil }
         return try? JSONDecoder().decode(RequestPayload.self, from: data)
@@ -88,7 +130,8 @@ final class WindowThemeMessageRouter {
     private func encodeWindowTheme(for browserState: BrowserState) -> String? {
         let payload = WindowThemePayload(
             windowId: browserState.windowId,
-            theme: makeThemePayload(from: browserState.themeContext.currentTheme)
+            theme: makeThemePayload(from: browserState.themeContext.currentTheme),
+            selectionTintEnabled: Self.currentSelectionTintEnabled()
         )
         guard let data = try? JSONEncoder().encode(payload) else { return nil }
         return String(data: data, encoding: .utf8)
@@ -108,6 +151,13 @@ final class WindowThemeMessageRouter {
         ColorPayload(
             light: theme.color(for: role, appearance: .light).hexRGBString,
             dark: theme.color(for: role, appearance: .dark).hexRGBString
+        )
+    }
+
+    private static func currentSelectionTintEnabled() -> Bool {
+        UserDefaults.standard.bool(
+            forKey: PhiPreferences.ThemeSettings.selectionTintEnabled.rawValue,
+            default: true
         )
     }
 }
