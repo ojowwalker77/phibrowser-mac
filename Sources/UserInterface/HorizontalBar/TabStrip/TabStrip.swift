@@ -918,6 +918,19 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
         unlockLayoutIfNeeded()
     }
 
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        // The cached NTP / internal-page default-favicon TIFF was
+        // rasterized against the prior appearance; invalidate it so
+        // the next mosaic refresh re-rasterizes with the new variant.
+        // Then repush mosaic data to every live chip so currently-
+        // collapsed groups update immediately.
+        cachedPhiDefaultFaviconMosaicData = nil
+        for token in chipViews.keys {
+            refreshChipMosaic(for: token)
+        }
+    }
+
     override func scrollWheel(with event: NSEvent) {
         let visibleWidth = normalContainer.bounds.width
         if lastContentWidth <= visibleWidth {
@@ -2109,13 +2122,27 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
         return runs
     }
 
-    /// TIFF-encoded bytes of `NSImage.phiDefaultFavicon`, used to
-    /// represent NTP / internal `phi://` / `chrome://` pages in the
-    /// mosaic. Computed once on first access and reused for every
-    /// such tab — the mosaic's `[Data: CGImage]` cache hits on the
-    /// shared bytes so each unique mosaic still pays only one decode.
-    private static let phiDefaultFaviconMosaicData: Data? =
-        NSImage.phiDefaultFavicon.tiffRepresentation
+    /// TIFF-encoded bytes of `NSImage.phiDefaultFavicon`, cached
+    /// per-appearance. `NSImage.phiDefaultFavicon` ships light + dark
+    /// variants; rasterizing it bakes whichever variant resolved at
+    /// generation time into static bytes. We cache one rasterization
+    /// at a time and invalidate on `viewDidChangeEffectiveAppearance`
+    /// so a theme switch repaints NTP / internal-page mosaic slots
+    /// (regular NTP tab favicons re-render automatically because they
+    /// host the dynamic `NSImage` directly).
+    private var cachedPhiDefaultFaviconMosaicData: Data?
+
+    private func phiDefaultFaviconMosaicData() -> Data? {
+        if let cached = cachedPhiDefaultFaviconMosaicData {
+            return cached
+        }
+        var data: Data?
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            data = NSImage.phiDefaultFavicon.tiffRepresentation
+        }
+        cachedPhiDefaultFaviconMosaicData = data
+        return data
+    }
 
     /// Returns the favicon `Data?` for the first `min(memberCount, 4)`
     /// members of group `token`, in tab-strip order.
@@ -2152,7 +2179,7 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
                     if let urlString = tab.url,
                        let url = URL(string: urlString),
                        FaviconConfiguration.shouldUseDefaultFavicon(for: url) {
-                        return Self.phiDefaultFaviconMosaicData
+                        return self.phiDefaultFaviconMosaicData()
                     }
                     return tab.liveFaviconData ?? tab.cachedFaviconData
                 }
