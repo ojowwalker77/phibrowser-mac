@@ -1,6 +1,6 @@
 # Analytics
 
-Last updated: 2026-04-24
+Last updated: 2026-05-21
 
 Phi Browser emits product analytics to both [Countly](https://phi-browser-eaade70cfd902.flex.countly.com) (legacy) and [PostHog](https://us.posthog.com/project/385742) (current). Both pipelines run side-by-side; PostHog is the forward-looking source of truth.
 
@@ -46,6 +46,14 @@ Distinct ID == Auth0 `sub`.
 ## Super properties
 
 We don't register any custom super properties. Everything we need is auto-attached by the SDK: `$app_version` (from `CFBundleShortVersionString`), `$app_build` (from `CFBundleVersion`), `$app_namespace` (the bundle identifier — filter on `contains '.canary.'` to split canary vs. release), `$app_name`, `$os_name`, `$os_version`, `$lib`, `$lib_version`, `$device_*`, `$locale`, `$timezone`.
+
+## Feature flags
+
+Feature flag payloads are resolved through `ExperimentConfigProvider`. The live provider uses `getFeatureFlagResult(_:)` so reading a payload also records the feature flag exposure for experiment attribution.
+
+| Flag key | Payload keys | Defaults | Allowed range | Consumer |
+| --- | --- | --- | --- | --- |
+| `auth0-refresh-timing` | `refresh_check_interval_seconds`, `refresh_urgent_window_seconds` | `3600`, `3600` | check interval: `300...86400`; urgent window: `300...604800` | `AuthManager` refresh timer and renew preflight |
 
 ## Events
 

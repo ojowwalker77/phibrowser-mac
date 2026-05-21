@@ -153,8 +153,15 @@ class AuthManager {
     // skip importing a fresher Sentinel-written token after Phi had a recent failed renew,
     // which leaves the local Auth0 SDK with a rotated (stale) refresh token.
     private var lastSuccessfulSyncAt: Date?
-    private let renewCooldown: TimeInterval = 60 * 60 // 1 hour
-    private let renewUrgentWindow: TimeInterval = 60 * 60 // 60 minutes before expiry
+    private var auth0RefreshConfig: ResolvedAuth0RefreshConfig {
+        ExperimentConfigProvider.live.resolveAuth0RefreshConfig(.auth0RefreshTimingExperiment)
+    }
+    private var renewCooldown: TimeInterval {
+        TimeInterval(auth0RefreshConfig.checkInterval)
+    }
+    private var renewUrgentWindow: TimeInterval {
+        TimeInterval(auth0RefreshConfig.urgentWindow)
+    }
 
     private var isRenewing = false
     private let failureTrace = AuthFailureTraceBuffer()
@@ -169,6 +176,7 @@ class AuthManager {
 
     // Periodic renew timer: checks whether credentials are close enough to expiry to renew.
     private var renewTimer: Timer?
+    private var renewTimerInterval: TimeInterval?
     private var heartbeatTimer: DispatchSourceTimer?
     
     #if DEBUG
@@ -487,7 +495,7 @@ class AuthManager {
     /// into a constant ferrt risk: each reopen is a fresh chance to submit a
     /// stale RT to Auth0. We now skip the renew unless one of:
     /// - we have no in-memory credentials (let the regular recovery flow run);
-    /// - access token is within the urgent window (~30 min from expiry).
+    /// - access token is within the configured urgent window.
     /// The periodic renew timer still checks long-running sessions for refresh needs.
     ///
     /// Delegates the urgent-window logic to `shouldRenewNow()` so reopen and
@@ -855,21 +863,27 @@ class AuthManager {
     /// to avoid redundant renew attempts if a manual renew happened recently.
     @MainActor
     func startRenewTimer() {
-        if let renewTimer, renewTimer.isValid {
+        let timerInterval = renewCooldown
+        if let renewTimer, renewTimer.isValid, renewTimerInterval == timerInterval {
             return
         }
+        renewTimer?.invalidate()
 
         let timer = Timer(
-            timeInterval: renewCooldown,
+            timeInterval: timerInterval,
             repeats: true
         ) { [weak self] _ in
             AppLogInfo("periodic renew check fired")
+            Task { @MainActor [weak self] in
+                self?.startRenewTimer()
+            }
             self?.renewCredentials()
         }
 
         renewTimer = timer
+        renewTimerInterval = timerInterval
         RunLoop.main.add(timer, forMode: .common)
-        AppLogInfo("renew timer started, interval: \(renewCooldown)s")
+        AppLogInfo("renew timer started, interval: \(timerInterval)s")
     }
     
     /// Stops the periodic renew timer. Should be called on logout or when credentials are cleared.
@@ -877,6 +891,7 @@ class AuthManager {
     func stopRenewTimer() {
         renewTimer?.invalidate()
         renewTimer = nil
+        renewTimerInterval = nil
     }
 
     func startHeartbeat() {
