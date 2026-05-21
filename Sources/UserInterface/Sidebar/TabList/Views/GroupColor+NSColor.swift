@@ -44,18 +44,23 @@ extension NSImage {
     /// Small rounded square swatch filled with a tab-group color. Sized
     /// for the leading-edge image of an `NSMenuItem` (used by the "Add
     /// to Group" submenu and the group header's "Change Color" submenu).
+    ///
+    /// Uses `NSImage(size:flipped:drawingHandler:)` (lazy redraw) so
+    /// the dynamic `NSColor(resource:)` picks up the menu's current
+    /// drawing appearance every time the swatch is rendered. Eager
+    /// `lockFocus` would bake whichever variant resolved at swatch
+    /// creation, which can mismatch the menu's actual appearance.
     static func tabGroupColorSwatch(for groupColor: GroupColor,
                                     size: NSSize = NSSize(width: 12, height: 12),
                                     cornerRadius: CGFloat = 3) -> NSImage {
-        let image = NSImage(size: size)
-        image.lockFocus()
-        defer { image.unlockFocus() }
-        let rect = NSRect(origin: .zero, size: size)
-        let path = NSBezierPath(roundedRect: rect,
-                                xRadius: cornerRadius,
-                                yRadius: cornerRadius)
-        groupColor.nsColor.setFill()
-        path.fill()
-        return image
+        return NSImage(size: size, flipped: false) { _ in
+            let rect = NSRect(origin: .zero, size: size)
+            let path = NSBezierPath(roundedRect: rect,
+                                    xRadius: cornerRadius,
+                                    yRadius: cornerRadius)
+            groupColor.nsColor.setFill()
+            path.fill()
+            return true
+        }
     }
 }

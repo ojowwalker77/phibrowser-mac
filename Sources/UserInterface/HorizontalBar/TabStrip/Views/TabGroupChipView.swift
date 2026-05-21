@@ -232,15 +232,24 @@ final class TabGroupChipView: NSView {
     // MARK: - Appearance
 
     private func applyAppearance() {
-        // Hover background — same `ThemedColor.hover` used by tabs and
-        // bookmarks, so the click-to-collapse affordance reads with the
-        // same visual language as adjacent tabs.
-        layer?.backgroundColor = isHovered
-            ? ThemedColor.hover.resolve(in: self).cgColor
-            : NSColor.clear.cgColor
+        // `NSColor(resource:).cgColor` resolves against
+        // `NSAppearance.currentDrawing()`, which is only well-defined
+        // inside a draw cycle. `applyAppearance` is called from non-
+        // draw contexts too (configure, isHovered didSet), so without
+        // pinning the appearance the dot's color can resolve to the
+        // wrong variant — visible as deep red during hover and pinkish
+        // red after hover in light mode.
+        effectiveAppearance.performAsCurrentDrawingAppearance { [self] in
+            // Hover background — same `ThemedColor.hover` used by tabs
+            // and bookmarks, so the click-to-collapse affordance reads
+            // with the same visual language as adjacent tabs.
+            layer?.backgroundColor = isHovered
+                ? ThemedColor.hover.resolve(in: self).cgColor
+                : NSColor.clear.cgColor
 
-        colorDotLayer.backgroundColor = color.nsColor.cgColor
-        countBackgroundLayer.backgroundColor = color.chipHoverTintColor.cgColor
+            colorDotLayer.backgroundColor = color.nsColor.cgColor
+            countBackgroundLayer.backgroundColor = color.chipHoverTintColor.cgColor
+        }
         countBackgroundLayer.cornerRadius = (TabGroupChipView.countFont.pointSize +
                                               Self.countVerticalPadding * 2) / 2.0
 
