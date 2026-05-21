@@ -125,6 +125,14 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
     /// user drops two whole-group drags within ~180ms.
     private var groupDragSettleGeneration: Int = 0
 
+    /// Chip's `metricsSpace.minX` captured in `chip.onDragStart` BEFORE
+    /// the temp-collapse relayout. Consumed once by
+    /// `groupDragControllerSnapshot` to compute `chipPositionShift` and
+    /// override the snapshot's `chipFrame` with the pre-relayout
+    /// position. Cleared after the snapshot is built (or after
+    /// `startDragging` returns) so it doesn't leak into a later drag.
+    private var chipPreCollapseMetricsMinXForDrag: CGFloat?
+
     // MARK: - Scroll
     private var currentScrollOffset: CGFloat = 0.0
     private var lastContentWidth: CGFloat = 0.0
@@ -450,7 +458,11 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
     private func applyGroupDragTransforms(context: TabGroupDragContext?) {
         let identity = CATransform3DIdentity
         if let ctx = context {
+            // Subtract the relayout-induced shift so the chip's visible
+            // position stays under the cursor at the user's grab point.
+            // See `TabGroupDragContext.chipPositionShift`.
             let deltaX = ctx.currentMouseLocation.x - ctx.initialMouseLocation.x
+                       - ctx.chipPositionShift
             let translation = CATransform3DMakeTranslation(deltaX, 0, 0)
             let memberSet = Set(ctx.memberTabIds)
             let token = ctx.draggingChipToken
@@ -1734,6 +1746,13 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
                     // `releaseTemporaryCollapseIfNeeded`.
                     let wasExpanded = !(self.browserState.groups[tappedToken]?.isCollapsed ?? false)
                     if wasExpanded {
+                        // Stash chip's pre-relayout metrics-space minX
+                        // so the snapshot can compute chipPositionShift
+                        // and override its chipFrame to the user-grabbed
+                        // position.
+                        self.chipPreCollapseMetricsMinXForDrag =
+                            chip.frame.minX + self.currentScrollOffset
+
                         self.temporarilyCollapsedGroupTokenForDrag = tappedToken
                         self.refreshChipWidth(for: tappedToken)
                         // `refreshChipWidth` mutates `chipFullWidths`
@@ -1764,6 +1783,12 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
                             "undid temp-collapse token=\(tappedToken)"
                         )
                     }
+                    // Defensive: snapshot consumes-and-clears the ivar
+                    // on its happy path, but if `startDragging` returned
+                    // early without calling snapshot (e.g., a live drag
+                    // already had `context != nil`), the stale value
+                    // would leak into the next drag.
+                    self.chipPreCollapseMetricsMinXForDrag = nil
                 }
                 chip.onDrag = { [weak self] _, winLoc in
                     guard let self else { return }
@@ -3484,7 +3509,29 @@ extension TabStrip: TabGroupDragDelegate {
         // Bring chipView.frame into normalTabFrames space (scroll offset
         // is subtracted from chip.frame in `applyChipPlacements`, but
         // metrics' normalTabFrames add it back; mirror that).
-        let chipFrameInMetricsSpace = chipView.frame.offsetBy(dx: currentScrollOffset, dy: 0)
+        let chipFramePostRelayout = chipView.frame.offsetBy(dx: currentScrollOffset, dy: 0)
+        // If onDragStart captured the chip's pre-temp-collapse position,
+        // anchor the snapshot to that position so the chip's visual
+        // origin stays under the user's grab point. `chipPositionShift`
+        // = how far the chip's natural slot slid during the temp-collapse
+        // relayout; consumed by `applyGroupDragTransforms` to compensate
+        // the transform delta. Single-shot consume: clear the ivar so a
+        // stale value can't leak into a later drag.
+        let chipFrameInMetricsSpace: CGRect
+        let chipPositionShift: CGFloat
+        if let prePostMinX = chipPreCollapseMetricsMinXForDrag {
+            chipPositionShift = chipFramePostRelayout.minX - prePostMinX
+            chipFrameInMetricsSpace = CGRect(
+                x: prePostMinX,
+                y: chipFramePostRelayout.minY,
+                width: chipFramePostRelayout.width,
+                height: chipFramePostRelayout.height
+            )
+        } else {
+            chipPositionShift = 0
+            chipFrameInMetricsSpace = chipFramePostRelayout
+        }
+        chipPreCollapseMetricsMinXForDrag = nil
 
         let metrics = dragControllerRequestMetrics()
         let frames = metrics.normalTabFrames
@@ -3609,7 +3656,8 @@ extension TabStrip: TabGroupDragDelegate {
             sliceWidth: sliceWidth,
             isCollapsed: run.isCollapsed,
             snapCandidates: snapCandidates,
-            firstNormalSlotX: firstNormalSlotX
+            firstNormalSlotX: firstNormalSlotX,
+            chipPositionShift: chipPositionShift
         )
     }
 
