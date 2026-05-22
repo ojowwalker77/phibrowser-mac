@@ -8,6 +8,11 @@ import Cocoa
 import SwiftUI
 import Auth0
 import WebKit
+
+extension Notification.Name {
+    static let loginStatusRefreshCompleted = Notification.Name("LoginStatusRefreshCompleted")
+}
+
 class LoginController {
     enum Phase: Int {
         case login = 0
@@ -83,15 +88,14 @@ class LoginController {
         AppLogDebug("🔐 [Login] Login window displayed")
     }
 
-
     /// Returns `true` when onboarding still needs to be shown.
     @MainActor
     func orderFrontLoginWindowIfNeeded() -> Bool {
-        guard auth0Manager.hasRecoverableLoginSession() else {
-            return true
-        }
-
-        return phase != .done
+        let hasRecoverableSession = auth0Manager.hasRecoverableLoginSession()
+        return LoginWindowGate.shouldShowLoginWindow(
+            hasRecoverableSession: hasRecoverableSession,
+            accountPhase: hasRecoverableSession ? phase : nil
+        )
     }
     
     func isLoggedin() -> Bool {
@@ -103,11 +107,22 @@ class LoginController {
     }
     
     func refreshLoginStatusOnLaunching() {
-        Task {
+        Task { @MainActor in
             await AuthManager.shared.refreshAuthStatus()
             if let credentials = auth0Manager.currentCredentials {
                 initAccountIfNeeded(credentials)
+            } else if let storedUserInfo = auth0Manager.storedUserInfo() {
+                initAcoountWithUserInfo(storedUserInfo)
             }
+
+            let hasRecoverableSession = auth0Manager.hasRecoverableLoginSession()
+            if !LoginWindowGate.shouldShowLoginWindow(
+                hasRecoverableSession: hasRecoverableSession,
+                accountPhase: hasRecoverableSession ? phase : nil
+            ) {
+                closeLoginWindow()
+            }
+            NotificationCenter.default.post(name: .loginStatusRefreshCompleted, object: nil)
         }
     }
     
@@ -193,6 +208,12 @@ class LoginController {
             return AccountController.shared.account
         }
 
+        if auth0Manager.hasRecoverableLoginSession(),
+           let storedUserInfo = auth0Manager.storedUserInfo() {
+            initAcoountWithUserInfo(storedUserInfo)
+            return AccountController.shared.account
+        }
+
         return nil
     }
 
@@ -212,5 +233,17 @@ class LoginController {
 
         let rawValue = account.userDefaults.integer(forKey: accountPhaseKey)
         return Phase(rawValue: rawValue)
+    }
+}
+
+struct LoginWindowGate {
+    static func shouldShowLoginWindow(
+        hasRecoverableSession: Bool,
+        accountPhase: LoginController.Phase?
+    ) -> Bool {
+        guard hasRecoverableSession else {
+            return true
+        }
+        return accountPhase != .done
     }
 }

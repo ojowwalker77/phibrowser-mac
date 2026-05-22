@@ -183,7 +183,7 @@ extension Tab: ContextMenuRepresentable {
         }
         let state = windowController.browserState
         let pinnedTab = state.pinnedTabs.first(where: { $0.guidInLocalDB == guid })
-        let initialURL = pinnedTab?.url ?? url ?? ""
+        let initialURL = state.pinnedTabEditingURL(for: guid, fallbackURL: url)
         let initialTitle = pinnedTab?.storedTitle ?? pinnedTab?.title ?? ""
         let pinnedGuid = guid
 
@@ -203,6 +203,7 @@ extension Tab: ContextMenuRepresentable {
             }
 
             if let targetTab = state.pinnedTabs.first(where: { $0.guidInLocalDB == pinnedGuid }) {
+                targetTab.pinnedUrl = normalizedString
                 if targetTab.url != normalizedString {
                     targetTab.url = normalizedString
                 }

@@ -35,6 +35,13 @@ import Countly
 
     // MARK: - Auth0 login gating
     private var pendingLaunchAfterLogin: Bool = true
+
+    /// Defer forwarding cold-launch URLs until Chromium session restore registers
+    /// the first tabbed `Browser` (see `OpenUrlsInBrowserWithProfile`).
+    private static let coldOpenURLForwardDelay: TimeInterval = 0.5
+    private var coldOpenURLForwardWorkItem: DispatchWorkItem?
+    private var pendingColdOpenForwardURLs: [URL] = []
+    private var pendingOpenURLsAwaitingLoginStatus: [URL] = []
     
     override init() {
         super.init()
@@ -66,6 +73,14 @@ import Countly
                                                selector: #selector(phiWillTryToTerminateApplicationNotification(_:)),
                                                name: Notification.Name("PhiWillTryToTerminateApplicationNotification"),
                                                object: nil)
+        NotificationCenter.default.addObserver(self,
+                                               selector: #selector(loginStatusRefreshCompleted(_:)),
+                                               name: .loginStatusRefreshCompleted,
+                                               object: nil)
+        NotificationCenter.default.addObserver(self,
+                                               selector: #selector(loginCompleted(_:)),
+                                               name: .loginCompleted,
+                                               object: nil)
         
         if PhiPreferences.AISettings.launchSentinelOnLogin.loadValue() {
             SentinelHelper.register()
@@ -94,6 +109,8 @@ import Countly
     }
     
     func applicationWillTerminate(_ notification: Notification) {
+        coldOpenURLForwardWorkItem?.cancel()
+        coldOpenURLForwardWorkItem = nil
         AppLogInfo("-------applicationWillTerminate----")
         MemoryUsageMonitor.shared.stop()
         ChromiumLauncher.sharedInstance().bridge?.applicationWillTerminate(notification)
@@ -148,13 +165,53 @@ import Countly
         }
 
         if LoginController.shared.orderFrontLoginWindowIfNeeded() {
+            if AuthManager.shared.hasRecoverableLoginSession() {
+                pendingOpenURLsAwaitingLoginStatus.append(contentsOf: urls)
+            }
             LoginController.shared.showLoginWindow()
         } else {
             if let url = urls.first, DeeplinkHandler.handle(url) {
                 return
             }
-            ChromiumLauncher.sharedInstance().bridge?.application(application, open: urls)
+            scheduleForwardOpenURLsToChromium(application: application, urls: urls)
         }
+    }
+
+    /// Forwards `application(_:open:)` URLs to Chromium. Cold launch defers ~600ms so
+    /// `StartupBrowserCreator` / session restore can register a browser before
+    /// `PhiOpenUrlsInBrowser` would otherwise call `Browser::Create` again.
+    private func scheduleForwardOpenURLsToChromium(application: NSApplication, urls: [URL]) {
+        let manager = MainBrowserWindowControllersManager.shared
+        if manager.getFirstAvailableWindowId() != nil {
+            let urlsToForward = pendingColdOpenForwardURLs + urls
+            pendingColdOpenForwardURLs.removeAll()
+            coldOpenURLForwardWorkItem?.cancel()
+            coldOpenURLForwardWorkItem = nil
+            forwardOpenURLsToChromium(application: application, urls: urlsToForward, label: "immediate")
+            return
+        }
+
+        pendingColdOpenForwardURLs.append(contentsOf: urls)
+        guard coldOpenURLForwardWorkItem == nil else {
+            AppLogDebug("[coldopen] urls appended to pending bridge forward queue")
+            return
+        }
+
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.coldOpenURLForwardWorkItem = nil
+            let urlsToForward = self.pendingColdOpenForwardURLs
+            self.pendingColdOpenForwardURLs.removeAll()
+            self.forwardOpenURLsToChromium(application: application, urls: urlsToForward, label: "deferred-600ms")
+        }
+        coldOpenURLForwardWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.coldOpenURLForwardDelay, execute: work)
+        AppLogDebug("[coldopen] urls call bridge scheduled in \(Self.coldOpenURLForwardDelay)s")
+    }
+
+    private func forwardOpenURLsToChromium(application: NSApplication, urls: [URL], label: String) {
+        AppLogDebug("[coldopen] urls call bridge (\(label))")
+        ChromiumLauncher.sharedInstance().bridge?.application(application, open: urls)
     }
     
     func application(_ application: NSApplication, willContinueUserActivityWithType userActivityType: String) -> Bool {
@@ -167,6 +224,41 @@ import Countly
     
     @MainActor
     @objc func phiWillTryToTerminateApplicationNotification(_ notification: Notification) {
+    }
+
+    @objc private func loginStatusRefreshCompleted(_ notification: Notification) {
+        Task { @MainActor in
+            self.flushPendingOpenURLsAwaitingLoginStatus()
+        }
+    }
+
+    @objc private func loginCompleted(_ notification: Notification) {
+        Task { @MainActor in
+            self.flushPendingOpenURLsAwaitingLoginStatus()
+        }
+    }
+
+    @MainActor
+    private func flushPendingOpenURLsAwaitingLoginStatus() {
+        guard !pendingOpenURLsAwaitingLoginStatus.isEmpty else {
+            return
+        }
+
+        guard AuthManager.shared.hasRecoverableLoginSession() else {
+            pendingOpenURLsAwaitingLoginStatus.removeAll()
+            return
+        }
+
+        guard !LoginController.shared.orderFrontLoginWindowIfNeeded() else {
+            return
+        }
+
+        let urls = pendingOpenURLsAwaitingLoginStatus
+        pendingOpenURLsAwaitingLoginStatus.removeAll()
+        if let url = urls.first, DeeplinkHandler.handle(url) {
+            return
+        }
+        scheduleForwardOpenURLsToChromium(application: NSApp, urls: urls)
     }
 }
 

@@ -207,6 +207,46 @@ class BrowserState {
         return tab
     }
     
+    private func syncPinnedTabMetadata(_ existing: Tab, from localTab: Tab) {
+        let persistedURL = localTab.pinnedUrl ?? localTab.url
+        if existing.pinnedUrl != persistedURL {
+            existing.pinnedUrl = persistedURL
+        }
+        
+        if existing.storedTitle != localTab.storedTitle {
+            if let storedTitle = localTab.storedTitle, !storedTitle.isEmpty {
+                existing.applyStoredTitle(storedTitle)
+            } else {
+                existing.storedTitle = nil
+                existing.title = localTab.title
+            }
+        } else if let storedTitle = localTab.storedTitle, !storedTitle.isEmpty, existing.title != storedTitle {
+            existing.title = storedTitle
+        } else if localTab.storedTitle == nil, existing.title != localTab.title {
+            existing.title = localTab.title
+        }
+        
+        if existing.index != localTab.index {
+            existing.setIndex(localTab.index)
+        }
+        existing.profileId = localTab.profileId
+        
+        if !existing.isOpenned {
+            existing.url = persistedURL
+        }
+    }
+    
+    @MainActor
+    func pinnedTabEditingURL(for guid: String, fallbackURL: String?) -> String {
+        if let localTab = localStore.getTab(by: guid) {
+            return localTab.url.absoluteString
+        }
+        guard let pinnedTab = pinnedTabs.first(where: { $0.guidInLocalDB == guid }) else {
+            return fallbackURL ?? ""
+        }
+        return pinnedTab.pinnedUrl ?? pinnedTab.url ?? fallbackURL ?? ""
+    }
+    
     @MainActor func addPinnedTabObserver() {
         loadInitialPinnedTabs()
 
@@ -242,6 +282,7 @@ class BrowserState {
     private func handlePinnedTabsChanged(_ localTabs: [Tab]) {
         pinnedTabs = localTabs.map { localTab in
             if let existing = pinnedTabs.first(where: { $0.guidInLocalDB == localTab.guidInLocalDB }) {
+                syncPinnedTabMetadata(existing, from: localTab)
                 return existing
             }
             return localTab

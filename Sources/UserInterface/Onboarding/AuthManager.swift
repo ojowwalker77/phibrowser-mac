@@ -383,6 +383,10 @@ class AuthManager {
         return await renewCredentialsAsync(operation: "retrieve active credentials")
     }
     
+    func storedUserInfo() -> UserInfo? {
+        credentialManager.user
+    }
+
     func checkLoginStatusOnChromiumLaunch() -> Bool {
         // Hot path: Chromium polls this on every page load / tab change. Once
         // login has finished and we have credentials in memory, the answer is
