@@ -113,9 +113,21 @@ class OnboardingWindowController: NSWindowController {
                     return loginViewController
                 }
                 return viewController(for: loginPhase, credentials: credentials, isFirstPage: true)
-            } else {
-                return loginViewController
             }
+
+            if let storedUserInfo = AuthManager.shared.storedUserInfo() {
+                LoginController.shared.initAcoountWithUserInfo(storedUserInfo)
+                let loginPhase = LoginController.shared.phase
+                guard loginPhase != .done else {
+                    DispatchQueue.main.async { [weak self] in
+                        self?.finish()
+                    }
+                    return loginViewController
+                }
+                return viewController(for: loginPhase, credentials: nil, isFirstPage: true)
+            }
+
+            return loginViewController
         }()
         contentViewController = contentVc
     }
@@ -188,7 +200,7 @@ class OnboardingWindowController: NSWindowController {
         setContent(viewController(for: loginPhase, credentials: credentials, isFirstPage: false))
     }
 
-    private func viewController(for phase: LoginController.Phase, credentials: Credentials, isFirstPage: Bool) -> NSViewController {
+    private func viewController(for phase: LoginController.Phase, credentials: Credentials?, isFirstPage: Bool) -> NSViewController {
         setNameViewController.isFisrtPage = false
         importViewController.isFisrtPage = false
         passwordManagerViewController.isFisrtPage = false
@@ -201,8 +213,12 @@ class OnboardingWindowController: NSWindowController {
             setNameViewController.isFisrtPage = isFirstPage
             return setNameViewController
         case .setTheme:
-            let user = AuthManager.retriveUserInfo(from: credentials)
-            welcomeViewController.userName = user.name
+            if let credentials {
+                let user = AuthManager.retriveUserInfo(from: credentials)
+                welcomeViewController.userName = user.name
+            } else {
+                welcomeViewController.userName = AccountController.shared.account?.userInfo?.name
+            }
             return welcomeViewController
         case .layoutSelection:
             return layoutSelectionViewController
@@ -228,6 +244,7 @@ class OnboardingWindowController: NSWindowController {
         
         if MainBrowserWindowControllersManager.shared.getFirstAvailableWindowId() == nil {
             ChromiumLauncher.sharedInstance().bridge?.applicationShouldHandleReopen(NSApp, hasVisibleWindows: false)
+            NotificationCenter.default.post(name: .loginCompleted, object: nil)
         } else {
             ChromiumLauncher.sharedInstance().bridge?.notifyRebuildMenuAfterLogin()
             NotificationCenter.default.post(name: .loginCompleted, object: nil)

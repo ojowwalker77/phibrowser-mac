@@ -373,6 +373,30 @@ final class PhiBrowserTests: XCTestCase {
         XCTAssertTrue(rendered.contains("Phi  AuthManager.renew"))
     }
 
+    func testLoginWindowGateKeepsOnboardingVisibleUntilAccountPhaseIsDone() {
+        XCTAssertTrue(
+            LoginWindowGate.shouldShowLoginWindow(
+                hasRecoverableSession: true,
+                accountPhase: .setName
+            ),
+            "A recoverable session should not bypass account-scoped onboarding before the phase reaches done."
+        )
+        XCTAssertFalse(
+            LoginWindowGate.shouldShowLoginWindow(
+                hasRecoverableSession: true,
+                accountPhase: .done
+            ),
+            "A completed account-scoped onboarding phase should allow cold-open URLs to continue into Chromium."
+        )
+        XCTAssertTrue(
+            LoginWindowGate.shouldShowLoginWindow(
+                hasRecoverableSession: false,
+                accountPhase: .done
+            ),
+            "Without a recoverable auth session, Phi should still present login."
+        )
+    }
+
     func testOmniBoxSearchCoordinatorSuppressesOnlyTheNextAutomaticSearchAfterPrefill() {
         let coordinator = OmniBoxSearchCoordinator()
 

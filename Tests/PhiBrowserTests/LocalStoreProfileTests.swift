@@ -115,6 +115,80 @@ final class LocalStoreProfileTests: XCTestCase {
         XCTAssertEqual(state.profileId, "Work")
     }
 
+    func testBrowserStateRefreshesPersistedPinnedTabURLWhenLocalStoreChanges() throws {
+        let store = try makeStore()
+        let context = try XCTUnwrap(store.getMainContext())
+        let profile = ProfileModel(profileId: "Default")
+        context.insert(profile)
+
+        let pinnedModel = makeTab(guid: "pinned-guid", title: "Pinned", url: "https://163.com")
+        pinnedModel.dataType = TabDataType.pinnedTab
+        pinnedModel.profile = profile
+        context.insert(pinnedModel)
+        try context.save()
+
+        let state = BrowserState(windowId: 7, localStore: store, profileId: "Default")
+        let pinnedTab = try XCTUnwrap(state.pinnedTabs.first)
+        pinnedTab.isOpenned = true
+        pinnedTab.url = "https://github.com/features/copilot"
+
+        store.updateTabURL("pinned-guid", url: try XCTUnwrap(URL(string: "https://qq.com")))
+        try waitUntil {
+            pinnedTab.pinnedUrl == "https://qq.com"
+        }
+
+        XCTAssertTrue(
+            state.pinnedTabs.first === pinnedTab,
+            "BrowserState should keep the existing pinned tab runtime object so open state and wrapper bindings are preserved."
+        )
+        XCTAssertEqual(
+            pinnedTab.pinnedUrl,
+            "https://qq.com",
+            "Persisted pinned-tab URL changes should refresh the in-memory pinnedUrl used when the tab is closed and reopened."
+        )
+        XCTAssertEqual(
+            pinnedTab.url,
+            "https://github.com/features/copilot",
+            "Refreshing persisted pinned-tab metadata must not overwrite the currently opened page URL."
+        )
+    }
+
+    func testBrowserStatePinnedTabEditingURLPrefersPersistedURLOverRuntimeNavigationURL() throws {
+        let store = try makeStore()
+        let context = try XCTUnwrap(store.getMainContext())
+        let profile = ProfileModel(profileId: "Default")
+        context.insert(profile)
+        let pinnedModel = makeTab(guid: "github-pinned", title: "GitHub", url: "https://github.com")
+        pinnedModel.dataType = TabDataType.pinnedTab
+        pinnedModel.profile = profile
+        context.insert(pinnedModel)
+        try context.save()
+
+        let state = BrowserState(windowId: 7, localStore: store, profileId: "Default")
+        let pinnedTab = Tab(
+            guid: 42,
+            url: "https://github.com/features/copilot",
+            isActive: true,
+            index: 0,
+            title: "GitHub Copilot",
+            customGuid: "github-pinned"
+        )
+        pinnedTab.isPinned = true
+        pinnedTab.pinnedUrl = "https://stale.example"
+        state.pinnedTabs = [pinnedTab]
+
+        let editingURL = state.pinnedTabEditingURL(
+            for: "github-pinned",
+            fallbackURL: "https://github.com/features/copilot"
+        )
+
+        XCTAssertEqual(
+            editingURL,
+            "https://github.com",
+            "Editing a pinned tab should show the persisted URL instead of the currently navigated page URL."
+        )
+    }
+
     func testBrowserDataImporterStoresTargetContext() {
         let importer = BrowserDataImporter(targetProfileId: "Work", targetWindowId: 42)
 
@@ -183,5 +257,16 @@ final class LocalStoreProfileTests: XCTestCase {
 
     private func waitForBackgroundWrite() throws {
         RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+    }
+
+    private func waitUntil(timeout: TimeInterval = 1, condition: () -> Bool) throws {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if condition() {
+                return
+            }
+            RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+        }
+        XCTFail("Condition was not met before timeout.")
     }
 }
