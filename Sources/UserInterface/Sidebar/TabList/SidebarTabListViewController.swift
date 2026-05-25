@@ -1085,7 +1085,7 @@ extension SidebarTabListViewController: NSOutlineViewDelegate {
         }
         
         switch sidebarItem.itemType {
-        case .tab, .newTabButton:
+        case .tab, .newTabButton, .separator:
             return InsetTableRowView(insets: NSEdgeInsets(top: 0, left: 0, bottom: 0, right: 0))
         case .bookmark, .bookmarkFolder:
             return BookmarkRowView(/*insets:  NSEdgeInsets(top: 0, left: 0, bottom: 0, right: 0)*/)

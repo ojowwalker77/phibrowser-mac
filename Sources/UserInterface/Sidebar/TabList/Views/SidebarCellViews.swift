@@ -317,7 +317,7 @@ class SeparatorCellView: SidebarCellView {
         addSubview(separatorView)
         
         separatorView.snp.makeConstraints { make in
-            make.leading.trailing.equalToSuperview()
+            make.leading.trailing.equalToSuperview().inset(WebContentConstant.edgesSpacing)
             make.centerY.equalToSuperview()
             make.height.equalTo(1)
         }
