@@ -11,14 +11,13 @@ struct SideTabView: View {
     var model: TabViewModel
     var onClose: (() -> Void)? = nil
 
-    @State private var isHovered = false
     @Environment(\.phiAppearance) private var appearance
 
     private var backgroundColor: Color {
         if model.isActive {
             return Color(nsColor: NSColor(resource: .sidebarTabSelected))
         }
-        if isHovered {
+        if model.isHovered {
             return Color(nsColor: NSColor(resource: .sidebarTabHovered))
         }
         return .clear
@@ -40,7 +39,7 @@ struct SideTabView: View {
 
             UnifiedTabTitleView(viewModel: model)
 
-            if isHovered {
+            if model.isHovered {
                 UnifiedTabCloseButton { onClose?() }
             }
         }
@@ -62,7 +61,7 @@ struct SideTabView: View {
         .scaleEffect(model.isPressed ? 0.985 : 1.0)
         .animation(.easeOut(duration: 0.1), value: model.isPressed)
         .onHover { hovering in
-            isHovered = hovering
+            model.setHovered(hovering)
         }
     }
 }

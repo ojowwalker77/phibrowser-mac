@@ -19,6 +19,8 @@ final class TabViewModel {
     /// when viewModel is briefly reconfigured with a nil-url tab during layout.
     private(set) var faviconLoadURL: String?
     var isActive: Bool = false
+    var isHovered: Bool = false
+    var isHoverSuppressed: Bool = false
     var isPressed: Bool = false
     var isLoading: Bool = false
     var loadingProgress: Double = 1.0
@@ -61,6 +63,8 @@ final class TabViewModel {
         liveFaviconImage = nil
         liveFaviconRevision = 0
         isActive = false
+        isHovered = false
+        isHoverSuppressed = false
         isPressed = false
         isLoading = false
         loadingProgress = 1.0
@@ -70,6 +74,17 @@ final class TabViewModel {
         faviconRevision &+= 1
         onToggleMute = nil
         onToolTipUpdated = nil
+    }
+
+    func setHovered(_ hovered: Bool) {
+        isHovered = hovered && !isHoverSuppressed
+    }
+
+    func setHoverSuppressed(_ suppressed: Bool) {
+        isHoverSuppressed = suppressed
+        if suppressed {
+            isHovered = false
+        }
     }
 
     private var configuredTabGuid: Int?
@@ -88,6 +103,8 @@ final class TabViewModel {
         self.isCurrentlyAudible = tab.isCurrentlyAudible
         self.isAudioMuted = tab.isAudioMuted
         self.isCapturingMedia = tab.isCapturingAudio || tab.isCapturingVideo || tab.isSharingScreen
+        self.isHovered = false
+        self.isHoverSuppressed = false
         
         cancellables.removeAll()
         let expectedGuid = tab.guid

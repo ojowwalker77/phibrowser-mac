@@ -130,6 +130,8 @@ class SidebarTabCellView: SidebarCellView {
         // overwrites it, avoiding a blank-frame flicker between prepareForReuse
         // and the next SwiftUI render cycle.
         viewModel.cancelSubscriptions()
+        viewModel.setHoverSuppressed(false)
+        viewModel.setHovered(false)
         viewModel.isPressed = false
     }
 
@@ -140,6 +142,14 @@ class SidebarTabCellView: SidebarCellView {
         viewModel.cancelSubscriptions()
         cancellables.forEach { $0.cancel() }
         cancellables.removeAll()
+    }
+
+    func setHoverSuppressed(_ suppressed: Bool) {
+        viewModel.setHoverSuppressed(suppressed)
+    }
+
+    func setHovered(_ hovered: Bool) {
+        viewModel.setHovered(hovered)
     }
     
     private func setupViews() {
@@ -195,6 +205,8 @@ class SidebarTabCellView: SidebarCellView {
 
 // MARK: - New Tab Button Cell View
 class NewTabButtonCellView: SidebarCellView {
+    var clickAction: (() -> Void)?
+
     private lazy var iconView: LottieAnimationNSView = {
         let config = LottieAnimationViewConfig(
             animationName: "new-tab",
@@ -222,6 +234,24 @@ class NewTabButtonCellView: SidebarCellView {
     required init?(coder: NSCoder) {
         super.init(coder: coder)
         setupViews()
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        guard clickAction != nil, bounds.contains(point) else {
+            return super.hitTest(point)
+        }
+        return self
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        guard let clickAction else {
+            super.mouseUp(with: event)
+            return
+        }
+
+        let point = convert(event.locationInWindow, from: nil)
+        guard bounds.contains(point) else { return }
+        clickAction()
     }
     
     private func setupViews() {
