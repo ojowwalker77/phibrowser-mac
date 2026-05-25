@@ -17,11 +17,11 @@ extension WebContentContainerViewController {
 
     var currentFloatingWidth: CGFloat {
         // The floating panel only appears while the sidebar is collapsed (sidebarWidth == 0),
-        // so we always rely on the cached width captured before collapse. `edgesSpacing`
-        // compensates for the hidden splitview divider so the panel visually matches the
-        // real sidebar.
-        let baseWidth = lastKnownSidebarWidth > 0 ? lastKnownSidebarWidth : Self.floatingSidebarDefaultWidth
-        return baseWidth + WebContentConstant.edgesSpacing
+        // so we always rely on the cached width captured before collapse.
+        if lastKnownSidebarWidth > 0 {
+            return lastKnownSidebarWidth
+        }
+        return Self.floatingSidebarDefaultWidth
     }
 
     var floatingSidebarHiddenLeading: CGFloat {

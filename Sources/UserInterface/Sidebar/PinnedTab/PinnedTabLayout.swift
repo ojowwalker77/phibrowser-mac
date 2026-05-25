@@ -29,10 +29,10 @@ class PinnedTabLayout: NSCollectionViewLayout {
 
     private enum Constants {
         static let spacing: CGFloat = 4
-        static let insets = NSEdgeInsets(top: 8, left: 8, bottom: 8, right: 0)
+        static let insets = NSEdgeInsets(top: 8, left: 8, bottom: 8, right: 8)
         static let tabHeight: CGFloat = 45
         static let extensionHeight: CGFloat = 28
-        static let tabMinimumWidth: CGFloat = 54
+        static let tabMinimumWidth: CGFloat = 53
         static let extensionMinimumWidth: CGFloat = 26
     }
 
@@ -166,7 +166,14 @@ private extension PinnedTabLayout {
         contentSize = NSSize(width: width, height: width > 0 ? baseHeight : 0)
     }
 
-    func tabColumnsLimit(for width: CGFloat) -> Int {
+    /// Width used for column-limit breakpoints. Parent width grew by the same
+    /// amount as `insets.right` when the sidebar trailing edge was added.
+    func columnDecisionWidth(for contentWidth: CGFloat) -> CGFloat {
+        max(contentWidth - Constants.insets.right, 0)
+    }
+
+    func tabColumnsLimit(for contentWidth: CGFloat) -> Int {
+        let width = columnDecisionWidth(for: contentWidth)
         if width < 236 {
             return 3
         } else if width < 294 {
@@ -178,7 +185,8 @@ private extension PinnedTabLayout {
         }
     }
 
-    func extensionColumnsLimit(for width: CGFloat) -> Int {
+    func extensionColumnsLimit(for contentWidth: CGFloat) -> Int {
+        let width = columnDecisionWidth(for: contentWidth)
         if width <= 250 {
             return 5
         } else if width <= 350 {

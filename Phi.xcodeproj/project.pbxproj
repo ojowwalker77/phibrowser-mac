@@ -128,7 +128,6 @@
 		37EA23AC2F6C010C00D3C4A9 /* Dependencies in Frameworks */ = {isa = PBXBuildFile; productRef = B02BEB612E3B2D5900E5859A /* Dependencies */; };
 		37EA25EF2F6D5A5A00D3C4A9 /* CommonMessageRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37EA25EE2F6D5A5A00D3C4A9 /* CommonMessageRouter.swift */; };
 		37EECF222F0F623A0022A176 /* EmbeddedChatViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37EECF212F0F623A0022A176 /* EmbeddedChatViewController.swift */; };
-		37EECF372F0F8C7F0022A176 /* SplitViewResizeHandle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37EECF362F0F8C7F0022A176 /* SplitViewResizeHandle.swift */; };
 		37F574482F7A7C5D00879867 /* PhiIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = 37F574472F7A7C5D00879867 /* PhiIcon.icon */; };
 		37FC8C922F335942004675B8 /* WebContentProgressBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37FC8C912F335942004675B8 /* WebContentProgressBarView.swift */; };
 		37FC8DAA2F39B2DE004675B8 /* LayoutModeSettingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37FC8DA92F39B2DE004675B8 /* LayoutModeSettingView.swift */; };
@@ -501,7 +500,6 @@
 		37E6AF3F2EEC30E80078CCD8 /* ChatButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatButton.swift; sourceTree = "<group>"; };
 		37EA25EE2F6D5A5A00D3C4A9 /* CommonMessageRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommonMessageRouter.swift; sourceTree = "<group>"; };
 		37EECF212F0F623A0022A176 /* EmbeddedChatViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmbeddedChatViewController.swift; sourceTree = "<group>"; };
-		37EECF362F0F8C7F0022A176 /* SplitViewResizeHandle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SplitViewResizeHandle.swift; sourceTree = "<group>"; };
 		37F574472F7A7C5D00879867 /* PhiIcon.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = PhiIcon.icon; sourceTree = "<group>"; };
 		37FC8C912F335942004675B8 /* WebContentProgressBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebContentProgressBarView.swift; sourceTree = "<group>"; };
 		37FC8DA92F39B2DE004675B8 /* LayoutModeSettingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LayoutModeSettingView.swift; sourceTree = "<group>"; };
@@ -1643,7 +1641,6 @@
 				377D210E2F51986900A68BE5 /* WebContentContainerViewController+FloatingSidebar.swift */,
 				B0F370B82E430CA5000B51F9 /* WebContentViewController.swift */,
 				37C9E5A12F3EF7CD00353A03 /* AIChatSidebarStateStore.swift */,
-				37EECF362F0F8C7F0022A176 /* SplitViewResizeHandle.swift */,
 				37BA3EA12F866864003A8A53 /* EdgeFogOverlayView.swift */,
 				37BA3EA32F866870003A8A53 /* AgentAnimationManager.swift */,
 			);
@@ -2026,7 +2023,6 @@
 				37289F4D2EFE8A9B0003624E /* EditPinnedTabView.swift in Sources */,
 				CC376D212EC6D5EE00270B93 /* DynamicColor+HSB.swift in Sources */,
 				CC376D222EC6D5EE00270B93 /* Color.swift in Sources */,
-				37EECF372F0F8C7F0022A176 /* SplitViewResizeHandle.swift in Sources */,
 				CC376D232EC6D5EE00270B93 /* DynamicColor+XYZ.swift in Sources */,
 				CC376D242EC6D5EE00270B93 /* HSL+Color.swift in Sources */,
 				3764F7392F1628DA00C1F4E3 /* FaviconProvider.swift in Sources */,

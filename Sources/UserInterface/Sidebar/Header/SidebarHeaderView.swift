@@ -172,7 +172,7 @@ class SidebarHeaderView: NSView, TitlebarAwareHitTestable {
         stackView.snp.makeConstraints { make in
             make.centerY.equalTo(sidebarButton)
             make.height.equalTo(24)
-            make.right.equalToSuperview().inset(2)
+            make.right.equalToSuperview().inset(6)
         }
         
         addSubview(addressView)

@@ -228,8 +228,8 @@ class NewTabButtonCellView: SidebarCellView {
         addSubview(backgoundView)
         backgoundView.shadow = nil
         backgoundView.snp.makeConstraints { make in
-            make.left.equalToSuperview().inset(WebContentConstant.edgesSpacing)
-            make.top.bottom.trailing.equalToSuperview().inset(2)
+            make.leading.trailing.equalToSuperview().inset(WebContentConstant.edgesSpacing)
+            make.top.bottom.equalToSuperview().inset(2)
         }
         backgoundView.enableClickAnimation = false
         backgoundView.layer?.cornerRadius = 8

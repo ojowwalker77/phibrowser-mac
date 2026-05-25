@@ -57,7 +57,7 @@ struct SideTabView: View {
                 .stroke(borderColor, lineWidth: model.isActive ? 1 : 0)
         )
         .shadow(color: model.isActive ? .black.opacity(0.15) : .clear, radius: 1, x: 0, y: 1)
-        .padding(.leading, WebContentConstant.edgesSpacing)
+        .padding(.horizontal, WebContentConstant.edgesSpacing)
         .padding(.vertical, 2)
         .scaleEffect(model.isPressed ? 0.985 : 1.0)
         .animation(.easeOut(duration: 0.1), value: model.isPressed)

@@ -29,7 +29,8 @@
                  └── aiChatWebView       // AI Chat WebView
  
  Layout constraints:
- - splitViewContainer: leading/trailing/bottom inset 8pt from view edges, top is 0
+ - splitViewContainer: trailing/bottom inset 8pt from view edges, top is 0
+ - leading inset is 0 when the sidebar is expanded, 8pt when collapsed or in traditional layout
  - leftContainerView: 4pt inset + border when AI Chat is expanded; no inset/border when collapsed
  - embeddedChatViewController: min width 300, max width 600, collapsible
  
@@ -121,6 +122,7 @@ class WebContentViewController: NSViewController {
     private var bookmarkBarHeightConstraint: Constraint?
     private weak var attachedBookmarkBar: BookmarkBar?
     private var leftContainerInsetConstraint: Constraint?
+    private var splitViewLeadingConstraint: Constraint?
     private var nativeNtpController: NewTabViewController?
 
     // MARK: - Agent Animation Overlay
@@ -375,6 +377,22 @@ class WebContentViewController: NSViewController {
 
         // Observe AI Chat collapse state once the split item exists.
         setupAIChatObserver()
+
+        browserState?.$sidebarCollapsed
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.updateSplitViewLeadingInset()
+            }
+            .store(in: &cancellables)
+    }
+
+    private func updateSplitViewLeadingInset() {
+        let traditionalLayout = PhiPreferences.GeneralSettings.loadLayoutMode().isTraditional
+        let sidebarCollapsed = browserState?.sidebarCollapsed ?? true
+        let leadingInset: CGFloat = (traditionalLayout || sidebarCollapsed)
+            ? WebContentConstant.edgesSpacing
+            : 0
+        splitViewLeadingConstraint?.update(inset: leadingInset)
     }
 
     private func updateTheme() {
@@ -613,9 +631,11 @@ class WebContentViewController: NSViewController {
         splitViewContainer.layer?.masksToBounds = true
         splitViewContainer.phiLayer?.setBackgroundColor(ThemedColor.contentOverlayBackground)
         splitViewContainer.snp.makeConstraints { make in
-            make.leading.trailing.bottom.equalToSuperview().inset(WebContentConstant.edgesSpacing)
+            splitViewLeadingConstraint = make.leading.equalToSuperview().constraint
+            make.trailing.bottom.equalToSuperview().inset(WebContentConstant.edgesSpacing)
             make.top.equalToSuperview()
         }
+        updateSplitViewLeadingInset()
         
         // Use `PhiSplitView` to hide the default divider styling.
         let phiSplitView = PhiSplitView()
@@ -1137,6 +1157,7 @@ class WebContentViewController: NSViewController {
 
         let isDefaultLayout = !navigationAtTop && !traditionalLayout
         updateWebContentProgressBarVisibility(isDefaultLayout: isDefaultLayout)
+        updateSplitViewLeadingInset()
     }
 
     /// Attach a bookmark bar into the stable bookmark slot.

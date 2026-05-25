@@ -137,9 +137,6 @@ class WebContentContainerViewController: NSViewController {
     /// Titlebar aware area for handling double-click on titlebar
     private var titleAwareArea = TitlebarAwareView()
     
-    /// Left resize handle for adjusting sidebar width
-    private lazy var resizeHandle = SplitViewResizeHandle()
-
     /// Left-edge hover trigger for showing floating sidebar when main sidebar is collapsed.
     lazy var floatingSidebarTriggerView = MouseTrackingAreaView()
 
@@ -226,19 +223,8 @@ class WebContentContainerViewController: NSViewController {
             self.outerBorderLayer.strokeColor = ThemedColor.border.resolve(in: self.view).cgColor
         }
         
-        // Add resize handle for sidebar adjustment
-        view.addSubview(resizeHandle)
-        resizeHandle.snp.makeConstraints { make in
-            make.left.equalToSuperview()
-            make.top.bottom.equalToSuperview()
-            make.width.equalTo(10)
-        }
-        resizeHandle.onDragEnded = { [weak self] in
-            self?.updateLayoutForMode()
-        }
-
         // Add left-edge hover trigger for floating sidebar.
-        view.addSubview(floatingSidebarTriggerView, positioned: .above, relativeTo: resizeHandle)
+        view.addSubview(floatingSidebarTriggerView)
         floatingSidebarTriggerView.snp.makeConstraints { make in
             make.leading.top.bottom.equalToSuperview()
             make.width.equalTo(Self.floatingSidebarTriggerWidth)
@@ -824,9 +810,6 @@ class WebContentContainerViewController: NSViewController {
             titleAwareArea.isHidden = false
         }
 
-        // Keep the resize handle visible during an active drag so the user can
-        // re-expand the sidebar without releasing the mouse button.
-        resizeHandle.isHidden = shouldEnableFloatingSidebar() && !resizeHandle.isDragging
         updateFloatingSidebarAvailability()
     }
 

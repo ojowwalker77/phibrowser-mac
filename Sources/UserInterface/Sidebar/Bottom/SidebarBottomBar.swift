@@ -109,7 +109,7 @@ struct SidebarBottomBarSwiftUI: View {
                     .layoutPriority(1)
             }
         }
-        .padding(.leading, WebContentConstant.edgesSpacing)
+        .padding(.horizontal, WebContentConstant.edgesSpacing)
     }
 
     @ViewBuilder

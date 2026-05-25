@@ -156,8 +156,7 @@ class FloatingSidebarViewController: NSViewController {
         mainStackView.addArrangedSubview(headerView)
         headerView.snp.makeConstraints { make in
             headerHeightConstraint = make.height.equalTo(73).constraint
-            make.leading.equalToSuperview()
-            make.trailing.equalToSuperview().inset(WebContentConstant.edgesSpacing)
+            make.leading.trailing.equalToSuperview()
         }
 
         // 2. Header spacer
@@ -170,8 +169,7 @@ class FloatingSidebarViewController: NSViewController {
         }
         mainStackView.addArrangedSubview(pinnedTabsContainerView)
         pinnedTabsContainerView.snp.makeConstraints { make in
-            make.leading.equalToSuperview()
-            make.trailing.equalToSuperview().inset(WebContentConstant.edgesSpacing)
+            make.leading.trailing.equalToSuperview()
             pinnedHeightConstraint = make.height.equalTo(Self.defaultFavoriteHeight).constraint
         }
 
@@ -181,8 +179,7 @@ class FloatingSidebarViewController: NSViewController {
         // 5. Tab list
         mainStackView.addArrangedSubview(tabList.view)
         tabList.view.snp.makeConstraints { make in
-            make.leading.equalToSuperview()
-            make.trailing.equalToSuperview().inset(WebContentConstant.edgesSpacing)
+            make.leading.trailing.equalToSuperview()
         }
         tabList.view.setContentHuggingPriority(.defaultLow, for: .vertical)
         tabList.view.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
@@ -205,8 +202,7 @@ class FloatingSidebarViewController: NSViewController {
         mainStackView.addArrangedSubview(bottomBarSwiftUI)
         bottomBarSwiftUI.snp.makeConstraints { make in
             bottomBarHeightConstraint = make.height.equalTo(SidebarBottomBarState.singleRowHeight).constraint
-            make.leading.equalToSuperview()
-            make.trailing.equalToSuperview().inset(WebContentConstant.edgesSpacing)
+            make.leading.trailing.equalToSuperview()
         }
         bottomBarSwiftUI.onHeightChange = { [weak self] newHeight in
             self?.updateBottomBarHeight(newHeight)
