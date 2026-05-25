@@ -30,7 +30,7 @@
  
  Layout constraints:
  - splitViewContainer: trailing/bottom inset 8pt from view edges, top is 0
- - leading inset is 1pt when the sidebar is expanded, 8pt when collapsed or in traditional layout
+ - leading inset is 0 when the sidebar is expanded, 8pt when collapsed or in traditional layout
  - leftContainerView: 4pt inset + border when AI Chat is expanded; no inset/border when collapsed
  - embeddedChatViewController: min width 300, max width 600, collapsible
  
@@ -48,9 +48,6 @@ import SwiftUI
 
 enum WebContentConstant {
     static let edgesSpacing: CGFloat = 8.0
-    /// Leading inset for splitViewContainer when the sidebar is expanded, so the
-    /// outer border stroke is not clipped at the sidebar seam.
-    static let expandedSidebarLeadingSpacing: CGFloat = 1.0
     static let headerHeight: CGFloat = 40  // WebContentHeader
     static let topBarHeight: CGFloat = TabStripMetrics.Strip.height  // horizontal tab strip
     static let bookmarkBarHeight: CGFloat = 32
@@ -392,12 +389,9 @@ class WebContentViewController: NSViewController {
     private func updateSplitViewLeadingInset() {
         let traditionalLayout = PhiPreferences.GeneralSettings.loadLayoutMode().isTraditional
         let sidebarCollapsed = browserState?.sidebarCollapsed ?? true
-        let leadingInset: CGFloat
-        if traditionalLayout || sidebarCollapsed {
-            leadingInset = WebContentConstant.edgesSpacing
-        } else {
-            leadingInset = WebContentConstant.expandedSidebarLeadingSpacing
-        }
+        let leadingInset: CGFloat = (traditionalLayout || sidebarCollapsed)
+            ? WebContentConstant.edgesSpacing
+            : 0
         splitViewLeadingConstraint?.update(inset: leadingInset)
     }
 
@@ -633,7 +627,7 @@ class WebContentViewController: NSViewController {
         view.addSubview(splitViewContainer)
         splitViewContainer.wantsLayer = true
         splitViewContainer.layer?.cornerCurve = .continuous
-        splitViewContainer.layer?.cornerRadius =  LiquidGlassCompatible.webContentContainerCornerRadius
+        splitViewContainer.layer?.cornerRadius = LiquidGlassCompatible.webContentContainerCornerRadius
         splitViewContainer.layer?.masksToBounds = true
         splitViewContainer.phiLayer?.setBackgroundColor(ThemedColor.contentOverlayBackground)
         splitViewContainer.snp.makeConstraints { make in
@@ -689,6 +683,13 @@ class WebContentViewController: NSViewController {
     /// used by the outer-border coordinator on the parent controller.
     func splitViewContainerFrame(in coordView: NSView) -> CGRect {
         splitViewContainer.convert(splitViewContainer.bounds, to: coordView)
+    }
+
+    func setSplitViewContainerBorderVisible(_ isVisible: Bool) {
+        splitViewContainer.layer?.borderWidth = isVisible ? 1 : 0
+        if isVisible {
+            splitViewContainer.phiLayer?.setBorderColor(.border)
+        }
     }
 
     /// Toggles the AI Chat panel when the associated tab allows it.
