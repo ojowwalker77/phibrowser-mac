@@ -309,7 +309,12 @@ extension AppController {
         )
     }
 
+    private func isActiveWindowIncognito() -> Bool {
+        MainBrowserWindowControllersManager.shared.activeWindowController?.browserState.isIncognito == true
+    }
+
     private func canBookmarkCurrentTab() -> Bool {
+        guard !isActiveWindowIncognito() else { return false }
         guard let tab = MainBrowserWindowControllersManager.shared.activeWindowController?.browserState.focusingTab,
               let url = tab.url,
               !url.isEmpty else {
@@ -320,6 +325,7 @@ extension AppController {
     }
 
     private func canBookmarkAllTabs() -> Bool {
+        guard !isActiveWindowIncognito() else { return false }
         let bookmarkableTabsCount = MainBrowserWindowControllersManager.shared.activeWindowController?.browserState.normalTabs.filter { !$0.isLocalPage }.count ?? 0
         return bookmarkableTabsCount > 1
     }

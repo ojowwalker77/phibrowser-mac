@@ -1196,6 +1196,14 @@ class WebContentViewController: NSViewController {
 
     /// Update bookmark bar visibility and the slot height for the current layout mode.
     func updateBookmarkBarVisibility(bookmarkCount: Int) {
+        if browserState?.isIncognito == true {
+            attachedBookmarkBar?.setActive(false)
+            bookmarkBarSlotView.isHidden = true
+            bookmarkBarHeightConstraint?.update(offset: 0)
+            attachedBookmarkBar?.isHidden = true
+            return
+        }
+
         let layoutMode = PhiPreferences.GeneralSettings.loadLayoutMode()
         let traditionalLayout = layoutMode.isTraditional
         let alwaysShowBookmarkBar = PhiPreferences.GeneralSettings.alwaysShowBookmarkBar.loadValue()

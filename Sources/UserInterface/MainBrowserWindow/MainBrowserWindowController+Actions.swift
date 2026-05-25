@@ -104,6 +104,9 @@ extension MainBrowserWindowController {
     
     @IBAction func toggleBookmark(_ sender: Any?) {
         let state = browserState
+        
+        guard state.isIncognito == false else { return }
+        
         guard let tab = state.focusingTab,
               let url = tab.url, !url.isEmpty else { return }
 

@@ -188,6 +188,7 @@ class BookmarkManager: ObservableObject {
     init(with browseState: BrowserState) {
         self.browserState = browseState
         self.rootFolder = Bookmark(folderTitle: "Bookmarks")
+        guard !browseState.isIncognito else { return }
         browseState.localStore.createDefaultRootDir(profileId: browseState.profileId)
         Task { @MainActor in
             browseState.localStore.bookmarksPublisher(profileId: browseState.profileId)

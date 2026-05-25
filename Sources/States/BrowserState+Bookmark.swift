@@ -136,6 +136,7 @@ extension BrowserState {
     
     /// Recomputes open-state flags for all bookmarks from the current tab list.
     func syncAllBookmarksOpenedState() {
+        guard !isIncognito else { return }
         let allBookmarks = bookmarkManager.getAllBookmarks()
         let focusingTabGuid = focusingTab?.guid
         
