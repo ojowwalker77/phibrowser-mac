@@ -34,7 +34,7 @@ protocol OmniBoxTextFieldDelegate: AnyObject {
     func omniBoxTextFieldDidEndEditing(_ textField: OmniBoxTextField)
     func omniBoxTextFieldDidReceiveMoveDownEvent(_ textField: OmniBoxTextField) -> Bool
     func omniBoxTextFieldDidReceiveMoveUpEvent(_ textField: OmniBoxTextField) -> Bool
-    func omniBoxTextFieldDidReceiveEnterEvent(_ textField: OmniBoxTextField) -> Bool
+    func omniBoxTextFieldDidReceiveEnterEvent(_ textField: OmniBoxTextField, commandKeyPressed: Bool) -> Bool
 }
 
 class OmniBoxTextField: NSView {
@@ -302,8 +302,12 @@ extension OmniBoxTextField: NSTextFieldDelegate {
             return omniBoxDelegate?.omniBoxTextFieldDidReceiveMoveUpEvent(self) ?? false
         } else if commandSelector == #selector(NSTextView.moveDown(_:)) {
             return omniBoxDelegate?.omniBoxTextFieldDidReceiveMoveDownEvent(self) ?? false
-        } else if commandSelector == #selector(NSTextView.insertNewline(_:)) {
-            return omniBoxDelegate?.omniBoxTextFieldDidReceiveEnterEvent(self) ?? false
+        } else if commandSelector == #selector(NSTextView.insertNewline(_:)) ||
+                    commandSelector == #selector(NSTextView.insertNewlineIgnoringFieldEditor(_:)) {
+            let commandKeyPressed = NSEvent.modifierFlags
+                .intersection(.deviceIndependentFlagsMask)
+                .contains(.command)
+            return omniBoxDelegate?.omniBoxTextFieldDidReceiveEnterEvent(self, commandKeyPressed: commandKeyPressed) ?? false
         }
         
         if hasInlineCompletion {

@@ -575,7 +575,16 @@ final class OmniBoxContainerViewController: NSViewController {
             return nil
         }
         
-        if event.modifierFlags.contains(.command) && event.charactersIgnoringModifiers == "w" {
+        let isCommandKeyPressed = event.modifierFlags
+            .intersection(.deviceIndependentFlagsMask)
+            .contains(.command)
+        let isReturnKey = event.keyCode == 36 || event.keyCode == 76
+        if isCommandKeyPressed && isReturnKey {
+            omniBoxController?.confirmSelection(commandKeyPressed: true)
+            return nil
+        }
+
+        if isCommandKeyPressed && event.charactersIgnoringModifiers == "w" {
             hideOmniBox()
             return nil
         }

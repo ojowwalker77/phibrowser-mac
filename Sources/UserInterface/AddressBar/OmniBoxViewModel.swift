@@ -5,6 +5,7 @@
 
 import Foundation
 import Combine
+import AppKit
 class OmniBoxViewModel: ObservableObject {
     @Published private(set) var state = OmniBoxState()
     
@@ -114,7 +115,7 @@ class OmniBoxViewModel: ObservableObject {
     func clickSuggestionAtIndex(_ index: Int) {
         if index >= 0, index < state.suggestions.count {
             let suggestion = state.suggestions[index]
-            handleNavigationAction(for: suggestion)
+            handleNavigationAction(for: suggestion, commandKeyPressed: isCommandKeyPressed)
         }
     }
     
@@ -128,28 +129,32 @@ class OmniBoxViewModel: ObservableObject {
         state.selectPreviousSuggestion()
     }
     
-    func handleEnterPressed() {
+    func handleEnterPressed(commandKeyPressed: Bool = false) {
         if let selected = state.selectedSuggestion {
-            handleNavigationAction(for: selected)
+            handleNavigationAction(for: selected, commandKeyPressed: commandKeyPressed)
         } else if !state.inputText.isEmpty {
             let url = URLProcessor.processUserInput(state.inputText)
             openURL(url)
         }
     }
     
-    private func handleNavigationAction(for suggeston: OmniBoxSuggestion) {
+    private func handleNavigationAction(for suggeston: OmniBoxSuggestion, commandKeyPressed: Bool = false) {
         AppLogDebug("omni: handleNavigationAction suggeston: \(suggeston)")
         if !suggeston.url.isEmpty {
-            openURL(suggeston.url, switchToTab: suggeston.hasTabMatch)
+            openURL(suggeston.url, switchToTab: suggeston.hasTabMatch, commandKeyPressed: commandKeyPressed)
         }
     }
     
-    private func openURL(_ url: String, switchToTab: Bool = false) {
+    private func openURL(_ url: String, switchToTab: Bool = false, commandKeyPressed: Bool = false) {
         AppLogDebug("omni: open url: \(url)")
-        if opennedFromCurrentTab, let tab = currentTab, !tab.isPinnedOrInDB {
+        if switchToTab {
+            if commandKeyPressed {
+                browserState.openTab(url)
+            } else {
+                browserState.createTab(url)
+            }
+        } else if opennedFromCurrentTab, let tab = currentTab, !tab.isPinnedOrInDB {
             tab.webContentWrapper?.navigate(toURL: url)
-        } else if switchToTab {
-            browserState.openTab(url)
         } else {
             browserState.createTab(url)
         }
@@ -160,6 +165,12 @@ class OmniBoxViewModel: ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
             self.state.reset()
         }
+    }
+
+    private var isCommandKeyPressed: Bool {
+        NSEvent.modifierFlags
+            .intersection(.deviceIndependentFlagsMask)
+            .contains(.command)
     }
     
     func reset() {

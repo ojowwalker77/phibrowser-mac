@@ -273,6 +273,10 @@ class OmniBoxViewController: NSViewController {
     func updateStatus(with tab: Tab, suppressAutomaticSearch: Bool) {
         viewModel.updateStatus(with: tab, suppressAutomaticSearch: suppressAutomaticSearch)
     }
+
+    func confirmSelection(commandKeyPressed: Bool = false) {
+        viewModel.handleEnterPressed(commandKeyPressed: commandKeyPressed)
+    }
     
     // MARK: - Private Methods
     
@@ -353,8 +357,8 @@ extension OmniBoxViewController: OmniBoxTextFieldDelegate {
         return true
     }
     
-    func omniBoxTextFieldDidReceiveEnterEvent(_ textField: OmniBoxTextField) -> Bool {
-        viewModel.handleEnterPressed()
+    func omniBoxTextFieldDidReceiveEnterEvent(_ textField: OmniBoxTextField, commandKeyPressed: Bool) -> Bool {
+        viewModel.handleEnterPressed(commandKeyPressed: commandKeyPressed)
         return true
     }
     

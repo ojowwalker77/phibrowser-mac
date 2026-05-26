@@ -278,6 +278,9 @@ typedef NS_ENUM(NSUInteger, DownloadEventType) {
 // Autocomplete
 - (void)requestAutoCompleteSuggestionsForText:(NSString *)text preventInlineAutoComplete:(BOOL)preventInlineAutoComplete windowId:(int64_t)windowId;
 - (void)stopAutoCompleteSuggestions:(int64_t)windowId;
+- (void)selectSuggestionAtLine:(size_t)line
+                       windowId:(int64_t)windowId
+                   openInNewTab:(BOOL)openInNewTab;
 - (void)deleteSuggestionAtLine:(size_t)line windowId:(int64_t)windowId;
 
 // ==========================================================================

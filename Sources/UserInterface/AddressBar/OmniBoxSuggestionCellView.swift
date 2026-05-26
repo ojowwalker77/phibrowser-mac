@@ -152,7 +152,7 @@ class OmniBoxSuggestionCellView: NSTableCellView {
             self.switchTabTrailingConstraintToCloseButton = make.trailing.equalTo(deleteButton.snp.leading).offset(-5).constraint
             self.switchTabTrailingConstraintToSuperView = make.trailing.equalToSuperview().offset(-5).constraint
             make.height.equalTo(26)
-            make.width.equalTo(55)
+            make.width.equalTo(128)
         }
         
         subtitleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
@@ -296,7 +296,7 @@ class SwitchToTabView: NSView {
         l.textColor = .tertiaryLabelColor
         l.lineBreakMode = .byTruncatingTail
         l.usesSingleLineMode = true
-        l.stringValue = NSLocalizedString("Tab ⇥", comment: "Tab")
+        l.stringValue = NSLocalizedString("Hold ⌘ to switch →", comment: "Omnibox suggestion - Hint shown for suggestions that can switch to an open tab")
         l.alignment = .center
         return l
     }()
@@ -316,33 +316,25 @@ class SwitchToTabView: NSView {
         layer?.cornerRadius = 6
         layer?.masksToBounds = true
         layer?.backgroundColor = NSColor.clear.cgColor
-        layer?.borderWidth = 1
-        phiLayer?.setBorderColor(.textTertiary)
 
         addSubview(label)
 
-        // Layout with SnapKit
         label.snp.makeConstraints { make in
-            make.leading.equalToSuperview().offset(8)
+            make.leading.trailing.equalToSuperview()
             make.centerY.equalToSuperview()
         }
 
-        // Hugging/Compression for tidy intrinsic sizing
         label.setContentHuggingPriority(.required, for: .horizontal)
         label.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
     }
 
-    // Optional: a simple highlight to use when the row is selected/hovered
     func setEmphasized(_ emphasized: Bool) {
         let isLightMode = (currentAppearance == .light)
         if isLightMode && emphasized {
             label.textColor = NSColor.white.withAlphaComponent(0.85)
-            phiLayer?.borderColor = NSColor.white.withAlphaComponent(0.85).cgColor <> nil
         } else if emphasized {
-            phiLayer?.setBorderColor(.textTertiary)
             label.textColor = .labelColor
         } else {
-            phiLayer?.setBorderColor(.textTertiary)
             label.textColor = .secondaryLabelColor
         }
     }

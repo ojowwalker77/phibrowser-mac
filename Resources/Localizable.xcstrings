@@ -543,6 +543,9 @@
     "Hide" : {
       "comment" : "Phi Link - Hide token plaintext button"
     },
+    "Hold ⌘ to switch →" : {
+      "comment" : "Omnibox suggestion - Hint shown for suggestions that can switch to an open tab"
+    },
     "https://example.com" : {
       "comment" : "Editor - Placeholder example URL in text field"
     },
@@ -1004,9 +1007,6 @@
     },
     "System" : {
       "comment" : "Appearance choice: follow system setting"
-    },
-    "Tab ⇥" : {
-      "comment" : "Tab"
     },
     "Tab Name" : {
       "comment" : "Pinned tab editor - Placeholder for pinned tab name input"
