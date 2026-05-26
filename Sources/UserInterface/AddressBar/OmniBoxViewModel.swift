@@ -68,6 +68,15 @@ class OmniBoxViewModel: ObservableObject {
             return
         }
         currentTab = tab
+        if tab.isNTP {
+            logOpenTrace(
+                stage: "prefill-current-tab",
+                details: "suppressAutomaticSearch=\(suppressAutomaticSearch) urlLength=0 isNTP=true"
+            )
+            state.inputText = ""
+            opennedFromCurrentTab = false
+            return
+        }
         let prefilledText = URLProcessor.phiBrandEnsuredUrlString(tab.url ?? "")
         if suppressAutomaticSearch {
             searchCoordinator.prepareForPrefilledOpen(
@@ -85,7 +94,12 @@ class OmniBoxViewModel: ObservableObject {
 
     func setCurrentTab(_ tab: Tab?) {
         currentTab = tab
-        opennedFromCurrentTab = true
+        if tab?.isNTP == true {
+            state.inputText = ""
+            opennedFromCurrentTab = false
+        } else {
+            opennedFromCurrentTab = true
+        }
     }
     
     func updateInputText(_ text: String, suppressAutoComplete: Bool = false) {

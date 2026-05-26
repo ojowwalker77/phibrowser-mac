@@ -54,6 +54,9 @@ final class WebContentAddressBarViewModel: ObservableObject {
         guard !urlString.isEmpty else {
             return ""
         }
+        guard !urlString.isNTPUrlString else {
+            return ""
+        }
         if alwaysShowURLPath {
             return removingTrailingSlashIfNeeded(from: displayURLWithoutScheme(urlString))
         }

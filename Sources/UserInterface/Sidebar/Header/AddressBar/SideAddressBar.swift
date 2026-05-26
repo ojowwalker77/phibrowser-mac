@@ -105,7 +105,11 @@ class SideAddressBar: NSView {
             .removeDuplicates()
             .debounce(for: .milliseconds(100), scheduler: DispatchQueue.main)
             .sink { [weak self] url in
-                self?.textField.stringValue = URLProcessor.displayName(for: url ?? "")
+                guard let url, !url.isNTPUrlString else {
+                    self?.textField.stringValue = ""
+                    return
+                }
+                self?.textField.stringValue = URLProcessor.displayName(for: url)
             }
             .store(in: &cancellables)
 
