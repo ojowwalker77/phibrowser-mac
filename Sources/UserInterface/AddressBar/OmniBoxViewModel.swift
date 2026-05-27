@@ -140,9 +140,33 @@ class OmniBoxViewModel: ObservableObject {
     
     private func handleNavigationAction(for suggeston: OmniBoxSuggestion, commandKeyPressed: Bool = false) {
         AppLogDebug("omni: handleNavigationAction suggeston: \(suggeston)")
-        if !suggeston.url.isEmpty {
+        if suggeston.index >= 0 {
+            selectSuggestion(suggeston, commandKeyPressed: commandKeyPressed)
+        } else if !suggeston.url.isEmpty {
             openURL(suggeston.url, switchToTab: suggeston.hasTabMatch, commandKeyPressed: commandKeyPressed)
         }
+    }
+
+    private func selectSuggestion(_ suggestion: OmniBoxSuggestion, commandKeyPressed: Bool) {
+        let disposition = suggestionDisposition(for: suggestion, commandKeyPressed: commandKeyPressed)
+        AppLogDebug("omni: select suggestion line: \(suggestion.index), disposition: \(disposition.rawValue)")
+        chromiumBridge?.selectSuggestion(atLine: suggestion.index,
+                                         windowId: browserState.windowId.int64Value,
+                                         disposition: disposition)
+        finishNavigationAction()
+    }
+
+    private func suggestionDisposition(
+        for suggestion: OmniBoxSuggestion,
+        commandKeyPressed: Bool
+    ) -> PhiOmniboxSuggestionDisposition {
+//        if opennedFromCurrentTab {
+//            return .currentTab
+//        }
+        if suggestion.hasTabMatch && commandKeyPressed {
+            return .switchToTab
+        }
+        return .currentTab
     }
     
     private func openURL(_ url: String, switchToTab: Bool = false, commandKeyPressed: Bool = false) {
@@ -158,6 +182,10 @@ class OmniBoxViewModel: ObservableObject {
         } else {
             browserState.createTab(url)
         }
+        finishNavigationAction()
+    }
+
+    private func finishNavigationAction() {
         opennedFromCurrentTab = false
         delegate?.omniBoxDidClear()
         
