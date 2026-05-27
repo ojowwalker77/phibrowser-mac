@@ -23,9 +23,26 @@ private struct GroupOverviewCardLayout {
     let columns: [GridItem]
 }
 
+/// One item in the overview grid. Non-pinned splits whose both panes
+/// are members of this group and adjacent in the strip collapse into a
+/// `.splitPair`; everything else is `.tab`. The mirror of the sidebar's
+/// `SplitPairSidebarItem`.
+enum GroupOverviewItem: Identifiable {
+    case tab(Tab)
+    case splitPair(left: Tab, right: Tab, splitId: String)
+
+    var id: String {
+        switch self {
+        case .tab(let tab): return "tab:\(tab.guid)"
+        case .splitPair(_, _, let splitId): return "split:\(splitId)"
+        }
+    }
+}
+
 @MainActor
 final class GroupOverviewViewModel: ObservableObject {
     @Published private(set) var members: [Tab] = []
+    @Published private(set) var items: [GroupOverviewItem] = []
     @Published private(set) var title: String = ""
     @Published private(set) var rawTitle: String = ""
     @Published private(set) var color: GroupColor = .grey
@@ -60,11 +77,20 @@ final class GroupOverviewViewModel: ObservableObject {
                 self.refresh()
             }
             .store(in: &cancellables)
+
+        // A split forming / dissolving among adjacent group members can
+        // happen without `normalTabs` reordering, so subscribe to splits
+        // directly to fold pairs into combined cards.
+        browserState.$splits
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.refresh() }
+            .store(in: &cancellables)
     }
 
     private func refresh() {
         guard let browserState else {
             members = []
+            items = []
             title = NSLocalizedString("Tab Group", comment: "Fallback title shown in the group overview header when group metadata is unavailable")
             rawTitle = ""
             color = .grey
@@ -77,10 +103,40 @@ final class GroupOverviewViewModel: ObservableObject {
         reconcileTabSubscriptions(for: currentMembers)
         rebuildSnapshotImages(for: currentMembers)
         members = currentMembers
+        items = Self.composeItems(members: currentMembers, browserState: browserState)
         color = group?.color ?? .grey
         rawTitle = group?.title ?? ""
         title = group?.displayTitle(memberCount: currentMembers.count)
             ?? NSLocalizedString("Tab Group", comment: "Fallback title shown in the group overview header when group metadata is unavailable")
+    }
+
+    /// Fold adjacent non-pinned split pairs whose both panes are members
+    /// of this group into a single `.splitPair` item. Other tabs surface
+    /// as `.tab`. Mirrors `TabSectionController.buildItems` for the
+    /// outer list and `TabGroupCellView.applyMembers` for the in-group
+    /// inner table.
+    private static func composeItems(members: [Tab], browserState: BrowserState) -> [GroupOverviewItem] {
+        var result: [GroupOverviewItem] = []
+        var consumed = Set<Int>()
+        for (idx, tab) in members.enumerated() {
+            if consumed.contains(tab.guid) { continue }
+            if let group = browserState.splitGroup(forTabId: tab.guid),
+               !group.isPinned,
+               let partnerId = group.partnerTabId(of: tab.guid),
+               let partnerIdx = members.firstIndex(where: { $0.guid == partnerId }),
+               abs(idx - partnerIdx) == 1 {
+                let partner = members[partnerIdx]
+                let leftTab = idx < partnerIdx ? tab : partner
+                let rightTab = idx < partnerIdx ? partner : tab
+                result.append(.splitPair(left: leftTab, right: rightTab, splitId: group.id))
+                consumed.insert(tab.guid)
+                consumed.insert(partnerId)
+                continue
+            }
+            result.append(.tab(tab))
+            consumed.insert(tab.guid)
+        }
+        return result
     }
 
     func snapshotImage(for tab: Tab) -> NSImage? {
@@ -131,8 +187,9 @@ final class GroupOverviewViewModel: ObservableObject {
            let image = NSImage(data: jpegData) {
             return image
         }
-        if tab.isActive, let browserState {
-            return browserState.tabDraggingSession.pageSnapshotImage(for: tab)
+        if tab.isActive, let browserState,
+           let live = browserState.tabDraggingSession.singleTabSnapshotImage(for: tab) {
+            return live
         }
         return placeholderSnapshot(for: tab)
     }
@@ -208,15 +265,31 @@ struct GroupOverviewView: View {
                 let layout = cardLayout(for: proxy.size.width)
                 ScrollView {
                     LazyVGrid(columns: layout.columns, spacing: GroupOverviewCardMetrics.rowSpacing) {
-                        ForEach(viewModel.members, id: \.guid) { tab in
-                            GroupOverviewTabCard(
-                                tab: tab,
-                                groupColor: viewModel.color,
-                                snapshotImage: viewModel.snapshotImage(for: tab),
-                                cardWidth: layout.width,
-                                selectTab: { selectTab(tab) },
-                                closeTab: { closeTab(tab) }
-                            )
+                        ForEach(viewModel.items) { item in
+                            switch item {
+                            case .tab(let tab):
+                                GroupOverviewTabCard(
+                                    tab: tab,
+                                    groupColor: viewModel.color,
+                                    snapshotImage: viewModel.snapshotImage(for: tab),
+                                    cardWidth: layout.width,
+                                    selectTab: { selectTab(tab) },
+                                    closeTab: { closeTab(tab) }
+                                )
+                            case .splitPair(let leftTab, let rightTab, _):
+                                GroupOverviewSplitPairCard(
+                                    leftTab: leftTab,
+                                    rightTab: rightTab,
+                                    groupColor: viewModel.color,
+                                    leftSnapshot: viewModel.snapshotImage(for: leftTab),
+                                    rightSnapshot: viewModel.snapshotImage(for: rightTab),
+                                    cardWidth: layout.width,
+                                    selectLeft: { selectTab(leftTab) },
+                                    selectRight: { selectTab(rightTab) },
+                                    closeLeft: { closeTab(leftTab) },
+                                    closeRight: { closeTab(rightTab) }
+                                )
+                            }
                         }
                         GroupOverviewNewTabCard(
                             groupColor: viewModel.color,
@@ -335,6 +408,116 @@ private struct GroupOverviewTabCard: View {
         } else {
             Image(systemName: "globe")
                 .frame(width: 16, height: 16)
+        }
+    }
+}
+
+/// Two-pane card that represents a non-pinned split as one combined
+/// tile in the group overview. Preview area shows both panes' snapshots
+/// side-by-side divided by a vertical separator; each half acts as its
+/// own click target (mirrors the sidebar merged cell).
+private struct GroupOverviewSplitPairCard: View {
+    let leftTab: Tab
+    let rightTab: Tab
+    let groupColor: GroupColor
+    let leftSnapshot: NSImage?
+    let rightSnapshot: NSImage?
+    let cardWidth: CGFloat
+    let selectLeft: () -> Void
+    let selectRight: () -> Void
+    let closeLeft: () -> Void
+    let closeRight: () -> Void
+
+    @State private var isHovered = false
+
+    var body: some View {
+        let previewHeight = cardWidth / GroupOverviewCardMetrics.previewAspectRatio
+        let halfWidth = (cardWidth - 1) / 2
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 0) {
+                Button(action: selectLeft) {
+                    GroupOverviewSnapshotView(tab: leftTab, groupColor: groupColor, snapshotImage: leftSnapshot)
+                        .frame(width: halfWidth, height: previewHeight)
+                        .clipped()
+                }
+                .buttonStyle(.plain)
+
+                Rectangle()
+                    .fill(Color(nsColor: .separatorColor).opacity(0.65))
+                    .frame(width: 1, height: previewHeight)
+
+                Button(action: selectRight) {
+                    GroupOverviewSnapshotView(tab: rightTab, groupColor: groupColor, snapshotImage: rightSnapshot)
+                        .frame(width: halfWidth, height: previewHeight)
+                        .clipped()
+                }
+                .buttonStyle(.plain)
+            }
+            .frame(width: cardWidth, height: previewHeight)
+            .clipped()
+
+            HStack(spacing: 0) {
+                splitFooterHalf(
+                    tab: leftTab,
+                    select: selectLeft,
+                    close: closeLeft
+                )
+                Rectangle()
+                    .fill(Color(nsColor: .separatorColor).opacity(0.65))
+                    .frame(width: 1, height: GroupOverviewCardMetrics.footerHeight - 12)
+                splitFooterHalf(
+                    tab: rightTab,
+                    select: selectRight,
+                    close: closeRight
+                )
+            }
+            .frame(height: GroupOverviewCardMetrics.footerHeight)
+            .background(Color(nsColor: .controlBackgroundColor))
+        }
+        .frame(width: cardWidth)
+        .groupOverviewCardChrome(isHovered: isHovered, groupColor: groupColor)
+        .onHover { hovering in
+            withAnimation(.easeOut(duration: 0.14)) {
+                isHovered = hovering
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func splitFooterHalf(tab: Tab, select: @escaping () -> Void, close: @escaping () -> Void) -> some View {
+        Button(action: select) {
+            HStack(spacing: 6) {
+                favicon(for: tab)
+                Text(tab.title.isEmpty ? (tab.url ?? "") : tab.title)
+                    .font(.system(size: 12, weight: .medium))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                Spacer(minLength: 4)
+                GroupOverviewHoverIconButton(
+                    systemName: "xmark",
+                    accessibilityLabel: NSLocalizedString("Close Tab", comment: "Tab group overview - Accessibility label for the button that closes one tab card"),
+                    size: 20,
+                    iconSize: 10,
+                    action: close
+                )
+            }
+            .padding(.horizontal, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+    }
+
+    @ViewBuilder
+    private func favicon(for tab: Tab) -> some View {
+        if let data = tab.cachedFaviconData ?? tab.liveFaviconData,
+           let image = NSImage(data: data) {
+            Image(nsImage: image)
+                .resizable()
+                .frame(width: 14, height: 14)
+        } else {
+            Image(systemName: "globe")
+                .frame(width: 14, height: 14)
         }
     }
 }

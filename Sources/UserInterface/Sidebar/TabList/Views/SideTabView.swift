@@ -29,7 +29,20 @@ struct SideTabView: View {
     }
 
     private var borderColor: Color {
-        (model.isActive && appearance == .dark) ? .white.opacity(0.2) : .clear
+        if model.isActive && appearance == .dark {
+            return .white.opacity(0.2)
+        }
+        return .clear
+    }
+
+    private var borderWidth: CGFloat {
+        model.isActive ? 1 : 0
+    }
+
+    private var cornerRadius: CGFloat { 8 }
+
+    private var dropShadowOpacity: Double {
+        model.isActive ? 0.15 : 0
     }
 
     var body: some View {
@@ -53,15 +66,14 @@ struct SideTabView: View {
         .padding(.trailing, 8)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
+            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                 .fill(backgroundColor)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(borderColor, lineWidth: model.isActive ? 1 : 0)
+            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                .stroke(borderColor, lineWidth: borderWidth)
         )
-//        .debugBorder()
-        .shadow(color: model.isActive ? .black.opacity(0.15) : .clear, radius: 1, x: 0, y: 1)
+        .shadow(color: .black.opacity(dropShadowOpacity), radius: 1, x: 0, y: 1)
         .padding(.leading, WebContentConstant.edgesSpacing)
         .padding(.trailing, model.isInGroup ? 2 : WebContentConstant.edgesSpacing)
         .padding(.vertical, 2)

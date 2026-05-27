@@ -128,6 +128,19 @@ class TabSectionController: NSObject {
                 self?.delegate?.focusingTabChanged(focusingTab)
             }
             .store(in: &cancellables)
+
+        // Splits collapse two normal-tab rows into a single
+        // `SplitPairSidebarItem`. The tab list itself doesn't change on
+        // split create/disband, so rebuild the section so the item
+        // count adjusts when a pair forms or splits.
+        browserState.$splits
+            .dropFirst()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                guard let self else { return }
+                self.refreshTabItems(self.browserState?.normalTabs ?? [], isInitial: false)
+            }
+            .store(in: &cancellables)
     }
 
     /// (Re)subscribes to every current `WebContentGroupInfo`'s
@@ -181,8 +194,46 @@ class TabSectionController: NSObject {
 
         var items: [SidebarItem] = [newTabButton]
         var emittedGroupTokens = Set<String>()
+        // Tab ids consumed by an emitted SplitPairSidebarItem. When we
+        // iterate to the second pane of a split we skip it so the pair
+        // collapses into one row in the sidebar.
+        var consumedSplitTabIds = Set<Int>()
 
         for tab in tabs {
+            if consumedSplitTabIds.contains(tab.guid) {
+                continue
+            }
+            // Collapse non-pinned splits (when not inside a tab group) into
+            // a single merged row. Pinned splits are surfaced by the
+            // pinned-tab section; in-group splits stay under their group
+            // wrapper for now.
+            if tab.groupToken == nil,
+               let group = state.splitGroup(forTabId: tab.guid),
+               !group.isPinned,
+               let partnerId = group.partnerTabId(of: tab.guid),
+               let partner = tabs.first(where: { $0.guid == partnerId }),
+               partner.groupToken == nil {
+                let leftTab: Tab
+                let rightTab: Tab
+                if let myIdx = tabs.firstIndex(where: { $0.guid == tab.guid }),
+                   let partnerIdx = tabs.firstIndex(where: { $0.guid == partnerId }),
+                   myIdx < partnerIdx {
+                    leftTab = tab
+                    rightTab = partner
+                } else {
+                    leftTab = partner
+                    rightTab = tab
+                }
+                items.append(SplitPairSidebarItem(
+                    groupId: group.id,
+                    leftTab: leftTab,
+                    rightTab: rightTab,
+                    browserState: state
+                ))
+                consumedSplitTabIds.insert(tab.guid)
+                consumedSplitTabIds.insert(partnerId)
+                continue
+            }
             guard let token = tab.groupToken else {
                 items.append(tab)
                 continue

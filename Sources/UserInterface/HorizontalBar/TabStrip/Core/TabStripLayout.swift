@@ -38,6 +38,13 @@ struct TabStripLayoutInput {
     /// caller leaves its visible frame at the drag-start value and
     /// drives cursor follow via a `layer.transform` translation.
     let excludedGroupRange: ClosedRange<Int>?
+    /// Indices excluded from layout for split-pair drags: the dragged tab
+    /// and its partner so both lift together.
+    let excludedTabIndices: Set<Int>
+    /// Indices that should render 1.5x the normally-allocated width. Used
+    /// by split-merged cells in the normal zone (the first pane carries
+    /// both favicons; the second pane sits in `excludedTabIndices`).
+    let wideTabIndices: Set<Int>
     /// Gap insertion index.
     let gapAtIndex: Int?
     /// Gap width.
@@ -71,6 +78,8 @@ struct TabStripLayoutInput {
          tabHeight: CGFloat,
          excludedTabIndex: Int? = nil,
          excludedGroupRange: ClosedRange<Int>? = nil,
+         excludedTabIndices: Set<Int> = [],
+         wideTabIndices: Set<Int> = [],
          gapAtIndex: Int? = nil,
          gapWidth: CGFloat? = nil,
          groupRuns: [GroupRun] = [],
@@ -86,6 +95,8 @@ struct TabStripLayoutInput {
         self.tabHeight = tabHeight
         self.excludedTabIndex = excludedTabIndex
         self.excludedGroupRange = excludedGroupRange
+        self.excludedTabIndices = excludedTabIndices
+        self.wideTabIndices = wideTabIndices
         self.gapAtIndex = gapAtIndex
         self.gapWidth = gapWidth
         self.groupRuns = groupRuns
@@ -138,7 +149,8 @@ struct TabStripLayoutOutput {
 enum TabStripLayoutEngine {
     static func layoutPinned(
         tabCount: Int,
-        excludedTabIndex: Int? = nil,
+        excludedTabIndices: Set<Int> = [],
+        wideTabIndices: Set<Int> = [],
         gapAtIndex: Int? = nil
     ) -> TabStripLayoutOutput {
         var frames: [CGRect] = []
@@ -149,6 +161,11 @@ enum TabStripLayoutEngine {
         // Center pinned tabs vertically in the 32pt strip.
         let containerHeight = TabStripMetrics.Strip.tabHeight // 32
         let y = (containerHeight - itemHeight) / 2.0
+
+        // Wide cells (pinned splits) span two normal slots plus the spacing
+        // that would have sat between them, so the cell visually "absorbs"
+        // its collapsed partner's slot.
+        let wideWidth = itemWidth * 2 + spacing
 
         var currentX: CGFloat = 0
 
@@ -161,15 +178,16 @@ enum TabStripLayoutEngine {
                     currentX += spacing
                 }
             }
-            if let excluded = excludedTabIndex, i == excluded {
+            if excludedTabIndices.contains(i) {
                 // Keep indices aligned by inserting a placeholder frame.
                 frames.append(.zero)
                 continue
             }
 
-            let frame = CGRect(x: currentX, y: y, width: itemWidth, height: itemHeight)
+            let width = wideTabIndices.contains(i) ? wideWidth : itemWidth
+            let frame = CGRect(x: currentX, y: y, width: width, height: itemHeight)
             frames.append(frame)
-            currentX += itemWidth + spacing
+            currentX += width + spacing
         }
 
         if let gapIndex = gapAtIndex {
@@ -204,10 +222,11 @@ enum TabStripLayoutEngine {
         let btnSize = TabStripMetrics.NewTabButton.size
         let buttonOverhead = btnSize.width + TabStripMetrics.NewTabButton.insets.right
         // Excluding the dragged tab(s) changes the available width
-        // calculation. excludedTabIndex (single-tab drag) and
-        // excludedGroupRange (whole-group drag) are mutually exclusive
-        // in practice but we subtract both defensively.
-        var effectiveTabCount = input.tabCount
+        // calculation. excludedTabIndex (single-tab drag),
+        // excludedGroupRange (whole-group drag), and excludedTabIndices
+        // (split-pair drag) are mutually exclusive in practice but we
+        // subtract all three defensively.
+        var effectiveTabCount = input.tabCount - input.excludedTabIndices.count
         if input.excludedTabIndex != nil {
             effectiveTabCount -= 1
         }
@@ -242,7 +261,7 @@ enum TabStripLayoutEngine {
                 inactiveW = baseWidth
             } else {
                 // Tight space: protect the active tab.
-                let isActiveExcluded = (input.excludedTabIndex != nil && input.excludedTabIndex == input.activeTabIndex)
+                let isActiveExcluded = (input.activeTabIndex.map { input.excludedTabIndices.contains($0) } ?? false)
                 if input.activeTabIndex != nil && !isActiveExcluded {
                     activeW = input.activeTabWidth
                     let remainingForInactive = availableForTabs - activeW
@@ -273,7 +292,7 @@ enum TabStripLayoutEngine {
                     currentX += gapW
                 }
             }
-            if let excluded = input.excludedTabIndex, i == excluded {
+            if input.excludedTabIndices.contains(i) {
                 // Keep indices aligned by inserting a placeholder frame.
                 tabFrames.append(.zero)
                 separatorXs.append(-1000)
@@ -288,6 +307,10 @@ enum TabStripLayoutEngine {
             currentX += input.spacing
             let isActive = (input.activeTabIndex != nil && i == input.activeTabIndex!)
             let width = isActive ? activeW : inactiveW
+            // Split-merged cells occupy a single normal-tab slot (no
+            // widening). Fitting both panes inside the same width as one
+            // tab keeps the right-half hit region from spilling into the
+            // next cell.
             let frame = CGRect(
                 x: currentX,
                 y: TabStripMetrics.Strip.bottomSpacing, // 4
@@ -363,6 +386,17 @@ enum TabStripLayoutEngine {
             let netExcluded = groupRange.filter { !collapsedMemberSet.contains($0) }.count
             effectiveTabCount -= netExcluded
         }
+        // Split-secondary panes (carried in `excludedTabIndices` from
+        // `normalSplitCollapseInfo`) collapse to zero-width so the
+        // merged cell renders as a single slot. Without this, an
+        // in-group split's right pane stays at normal width and
+        // appears as a stray standalone chip beside the merged left
+        // pane — symmetric with `layoutNormalUngrouped` (~line 229).
+        // Already-collapsed group members aren't double-counted.
+        let netSplitExcluded = input.excludedTabIndices.filter {
+            !collapsedMemberSet.contains($0)
+        }.count
+        effectiveTabCount -= netSplitExcluded
         effectiveTabCount = max(0, effectiveTabCount)
 
         // ── Per-chip slot width = chip width + spacing-after-chip.
@@ -534,6 +568,18 @@ enum TabStripLayoutEngine {
                 continue
             }
 
+            // Split-secondary pane (from `normalSplitCollapseInfo` via
+            // the merged `excludedTabIndices` set on the layout input):
+            // the merged cell occupies one slot in the primary's
+            // position, so the secondary collapses to zero-width and
+            // its TabItemView is hidden by `applyLayout`. Mirrors the
+            // ungrouped path's check at ~line 295.
+            if input.excludedTabIndices.contains(i) {
+                tabFrames.append(.zero)
+                separatorXs.append(-1000)
+                continue
+            }
+
             // Whole-group drag: members are lifted out of flow.
             if let groupRange = input.excludedGroupRange, groupRange.contains(i) {
                 tabFrames.append(.zero)
@@ -544,6 +590,10 @@ enum TabStripLayoutEngine {
             currentX += input.spacing
             let isActive = (input.activeTabIndex == i)
             let width = isActive ? activeW : inactiveW
+            // Split-merged cells occupy a single normal-tab slot (no
+            // widening). Fitting both panes inside the same width as one
+            // tab keeps the right-half hit region from spilling into the
+            // next cell.
             let frame = CGRect(x: currentX, y: TabStripMetrics.Strip.bottomSpacing,
                                 width: width, height: input.tabHeight)
             tabFrames.append(frame)

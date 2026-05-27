@@ -44,7 +44,7 @@ final class TabViewModel {
     /// flag is the authoritative signal for layout decisions like
     /// indentation that should not flicker on color settling.
     var isInGroup: Bool = false
-    
+
     var onToggleMute: (() -> Void)?
     var onToolTipUpdated: (() -> Void)?
     

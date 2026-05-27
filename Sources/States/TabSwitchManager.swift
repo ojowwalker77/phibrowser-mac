@@ -351,8 +351,9 @@ final class TabSwitchManager {
 
         let image: NSImage?
 
-        if tab.isActive, let state = browserState {
-            image = state.tabDraggingSession.pageSnapshotImage(for: tab)
+        if tab.isActive, let state = browserState,
+           let live = state.tabDraggingSession.singleTabSnapshotImage(for: tab) {
+            image = live
         } else if let jpegData = ChromiumLauncher.sharedInstance().bridge?.thumbnail(forTab: Int64(tab.guid)),
                   let thumb = NSImage(data: jpegData) {
             image = thumb

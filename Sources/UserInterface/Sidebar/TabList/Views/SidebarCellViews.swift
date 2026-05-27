@@ -203,7 +203,8 @@ class SidebarTabCellView: SidebarCellView {
     private weak var configuredTab: Tab?
     private var activeSuppressed = false
     weak var delegate: TabCellDelegate?
-    
+
+
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         setupViews()
@@ -321,6 +322,492 @@ class SidebarTabCellView: SidebarCellView {
         viewModel.onToggleMute = { [weak tab] in
             guard let tab else { return }
             tab.setAudioMuted(!tab.isAudioMuted)
+        }
+    }
+}
+
+// MARK: - Split Pair Cell View
+/// Sidebar row representing a non-pinned split as a single merged cell.
+/// Two halves stand side-by-side inside one rounded background; each
+/// half shows its favicon, title, and an x close button that appears on
+/// cell hover. The pane whose tab is focused gets a solid white pill,
+/// the other half stays at the cell-level hover tint. A swap arrow
+/// appears between the two halves on hover and reverses the split.
+class SidebarSplitPairCellView: SidebarCellView {
+    private let outerBackground = HoverableView()
+    private let leftPane = HoverableView()
+    private let rightPane = HoverableView()
+    private let leftIconView = NSImageView()
+    private let rightIconView = NSImageView()
+    private let leftTitleLabel = NSTextField(labelWithString: "")
+    private let rightTitleLabel = NSTextField(labelWithString: "")
+    private var leftCloseHost: ZeroSafeAreaHostingView<AnyView>!
+    private var rightCloseHost: ZeroSafeAreaHostingView<AnyView>!
+    private var leftMuteHost: ZeroSafeAreaHostingView<AnyView>!
+    private var rightMuteHost: ZeroSafeAreaHostingView<AnyView>!
+    private var leftMuteWidth: Constraint?
+    private var rightMuteWidth: Constraint?
+    private var swapIconHost: ZeroSafeAreaHostingView<AnyView>!
+    private let dividerView = NSView()
+    private var leftFaviconHandle: ProfileScopedFaviconLoadHandle?
+    private var rightFaviconHandle: ProfileScopedFaviconLoadHandle?
+    private weak var configuredLeftTab: Tab?
+    private weak var configuredRightTab: Tab?
+    private var configuredSplitId: String?
+    /// Owning window's BrowserState. Lets the cell re-resolve which pane
+    /// is "left" after Chromium reorders the strip (e.g. via the swap
+    /// button) — the `SplitPairSidebarItem.id` is keyed on the SplitGroup
+    /// alone so the diff path treats a strip swap as a no-op, but the
+    /// underlying `normalTabs` adjacency tells us which guid is now first.
+    weak var browserState: BrowserState?
+    private var hoverTrackingArea: NSTrackingArea?
+    private var isCellHovered = false {
+        didSet {
+            guard oldValue != isCellHovered else { return }
+            updateHoverChrome()
+        }
+    }
+    /// Controller that owns the outline view. Routed through so a click
+    /// on either half triggers the same selection flow as a normal tab
+    /// click (clears group overview, updates lastSelectedItem, etc.).
+    weak var owner: SidebarTabListItemOwner?
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setupViews()
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        setupViews()
+    }
+
+    override func prepareForReuse() {
+        super.prepareForReuse()
+        leftFaviconHandle?.cancel()
+        leftFaviconHandle = nil
+        rightFaviconHandle?.cancel()
+        rightFaviconHandle = nil
+        leftIconView.image = nil
+        rightIconView.image = nil
+        leftTitleLabel.stringValue = ""
+        rightTitleLabel.stringValue = ""
+        configuredLeftTab = nil
+        configuredRightTab = nil
+        configuredSplitId = nil
+        outerBackground.isSelected = false
+        isCellHovered = false
+        leftMuteHost.isHidden = true
+        rightMuteHost.isHidden = true
+        leftMuteWidth?.update(offset: 0)
+        rightMuteWidth?.update(offset: 0)
+    }
+
+    private func setupViews() {
+        outerBackground.backgroundColor = .clear
+        outerBackground.hoveredColor = NSColor(resource: .sidebarTabHovered)
+        outerBackground.selectedColor = NSColor(resource: .sidebarTabSelected)
+        outerBackground.enableClickAnimation = false
+        outerBackground.responseToClickAction = false
+        outerBackground.layer?.cornerRadius = 8
+        outerBackground.layer?.cornerCurve = .continuous
+        addSubview(outerBackground)
+        outerBackground.snp.makeConstraints { make in
+            make.edges.equalToSuperview().inset(NSEdgeInsets(
+                top: 2, left: WebContentConstant.edgesSpacing, bottom: 2, right: WebContentConstant.edgesSpacing))
+        }
+
+        // Match normal-tab close buttons (24x24 with rounded hover fill) by
+        // reusing `UnifiedTabCloseButton`. Hosted inside each pane so the
+        // SwiftUI button receives its own hover events independently.
+        leftCloseHost = ZeroSafeAreaHostingView(rootView: AnyView(
+            UnifiedTabCloseButton { [weak self] in self?.leftCloseTapped() }
+        ))
+        rightCloseHost = ZeroSafeAreaHostingView(rootView: AnyView(
+            UnifiedTabCloseButton { [weak self] in self?.rightCloseTapped() }
+        ))
+        leftCloseHost.isHidden = true
+        rightCloseHost.isHidden = true
+
+        // Per-pane mute toggles. Hidden + zero width by default so the
+        // title fills the same space as before when no audio is present;
+        // shown with 20pt width when the pane's tab is audible or muted.
+        leftMuteHost = ZeroSafeAreaHostingView(rootView: AnyView(EmptyView()))
+        rightMuteHost = ZeroSafeAreaHostingView(rootView: AnyView(EmptyView()))
+        leftMuteHost.isHidden = true
+        rightMuteHost.isHidden = true
+
+        leftMuteWidth = configurePane(leftPane,
+                                       icon: leftIconView,
+                                       title: leftTitleLabel,
+                                       mute: leftMuteHost,
+                                       close: leftCloseHost)
+        rightMuteWidth = configurePane(rightPane,
+                                        icon: rightIconView,
+                                        title: rightTitleLabel,
+                                        mute: rightMuteHost,
+                                        close: rightCloseHost)
+        outerBackground.addSubview(leftPane)
+        outerBackground.addSubview(rightPane)
+
+        leftPane.snp.makeConstraints { make in
+            make.top.bottom.leading.equalToSuperview().inset(2)
+            make.width.equalTo(rightPane)
+        }
+        rightPane.snp.makeConstraints { make in
+            make.top.bottom.trailing.equalToSuperview().inset(2)
+            make.leading.equalTo(leftPane.snp.trailing).offset(2)
+        }
+        // Long titles must defer to the pane's geometric width — without
+        // lowering compression resistance, NSTextField's intrinsic width
+        // pulls the pane past `centerX` and the right pane shifts out
+        // of the cell entirely.
+        leftTitleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        rightTitleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        leftTitleLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        rightTitleLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        leftPane.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        rightPane.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        leftPane.clickAction = { [weak self] in
+            guard let self, let tab = self.configuredLeftTab else { return }
+            tab.performAction(with: self.owner)
+        }
+        rightPane.clickAction = { [weak self] in
+            guard let self, let tab = self.configuredRightTab else { return }
+            tab.performAction(with: self.owner)
+        }
+
+        // Reuse the horizontal strip's `SplitSwapIcon` so both layouts share
+        // the same glyph weight, foreground opacity, and circle hover-fill.
+        swapIconHost = ZeroSafeAreaHostingView(rootView: AnyView(
+            SplitSwapIcon { [weak self] in self?.swapTapped() }
+        ))
+        swapIconHost.isHidden = true
+        outerBackground.addSubview(swapIconHost)
+        swapIconHost.snp.makeConstraints { make in
+            make.centerX.equalTo(outerBackground.snp.centerX)
+            make.centerY.equalToSuperview()
+            make.size.equalTo(CGSize(width: 16, height: 16))
+        }
+
+        // Vertical seam in the gap between the two panes. Sits where the
+        // swap glyph appears on hover, so the pair always reads as two
+        // grouped tabs. Mirrors `splitDividerView` in the horizontal strip.
+        dividerView.wantsLayer = true
+        dividerView.phiLayer?.setBackgroundColor(ThemedColor.separator)
+        outerBackground.addSubview(dividerView)
+        dividerView.snp.makeConstraints { make in
+            make.centerX.equalTo(outerBackground.snp.centerX)
+            make.centerY.equalToSuperview()
+            make.width.equalTo(1)
+            make.height.equalTo(16)
+        }
+    }
+
+    @discardableResult
+    private func configurePane(_ pane: HoverableView,
+                               icon: NSImageView,
+                               title: NSTextField,
+                               mute: NSView,
+                               close: NSView) -> Constraint? {
+        // Selection is owned by the outer background — the whole cell
+        // becomes the white pill when either pane is active, not just
+        // the active half. Leave the pane's own background tints clear
+        // so the outer chrome shows through.
+        pane.backgroundColor = .clear
+        pane.hoveredColor = .clear
+        pane.selectedColor = .clear
+        pane.enableClickAnimation = false
+        pane.responseToClickAction = true
+        pane.layer?.cornerRadius = 6
+        pane.layer?.cornerCurve = .continuous
+
+        icon.imageScaling = .scaleProportionallyUpOrDown
+        icon.wantsLayer = true
+        icon.layer?.cornerRadius = 3
+        icon.layer?.masksToBounds = true
+        pane.addSubview(icon)
+        icon.snp.makeConstraints { make in
+            make.centerY.equalToSuperview()
+            make.leading.equalToSuperview().offset(8)
+            make.size.equalTo(CGSize(width: 16, height: 16))
+        }
+
+        title.font = NSFont.systemFont(ofSize: 13)
+        title.phi.setTextColor(.textPrimary)
+        title.lineBreakMode = .byTruncatingTail
+        title.maximumNumberOfLines = 1
+        title.cell?.truncatesLastVisibleLine = true
+        pane.addSubview(title)
+
+        pane.addSubview(close)
+        close.snp.makeConstraints { make in
+            make.centerY.equalToSuperview()
+            make.trailing.equalToSuperview().offset(-2)
+            make.size.equalTo(CGSize(width: 24, height: 24))
+        }
+
+        // Mute sits between favicon and title. Width is driven dynamically
+        // by the cell so it collapses to 0 when the pane is silent; the
+        // 2 / 4 offsets sum to the original 6pt icon→title gap, keeping
+        // the silent layout pixel-identical to before.
+        pane.addSubview(mute)
+        var muteWidthConstraint: Constraint?
+        mute.snp.makeConstraints { make in
+            make.centerY.equalToSuperview()
+            make.leading.equalTo(icon.snp.trailing).offset(2)
+            make.height.equalTo(20)
+            muteWidthConstraint = make.width.equalTo(0).constraint
+        }
+
+        title.snp.makeConstraints { make in
+            make.centerY.equalToSuperview()
+            make.leading.equalTo(mute.snp.trailing).offset(4)
+            make.trailing.lessThanOrEqualTo(close.snp.leading).offset(-2)
+        }
+
+        return muteWidthConstraint
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let area = hoverTrackingArea {
+            removeTrackingArea(area)
+        }
+        let area = NSTrackingArea(rect: bounds,
+                                  options: [.mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect],
+                                  owner: self)
+        addTrackingArea(area)
+        hoverTrackingArea = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        isCellHovered = true
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        isCellHovered = false
+    }
+
+    private func leftCloseTapped() {
+        configuredLeftTab?.close()
+    }
+
+    private func rightCloseTapped() {
+        configuredRightTab?.close()
+    }
+
+    private func swapTapped() {
+        guard let splitId = configuredSplitId,
+              let state = (configuredLeftTab?.windowId).flatMap({
+                  MainBrowserWindowControllersManager.shared.getBrowserState(for: $0)
+              }) else { return }
+        state.reverseTabsInSplit(splitId)
+    }
+
+    private func updateHoverChrome() {
+        leftCloseHost.isHidden = !isCellHovered
+        rightCloseHost.isHidden = !isCellHovered
+        swapIconHost.isHidden = !isCellHovered
+        dividerView.isHidden = isCellHovered
+    }
+
+    override func configureAppearance() {
+        guard let pair = item as? SplitPairSidebarItem else { return }
+        cancellables.forEach { $0.cancel() }
+        cancellables.removeAll()
+        configuredLeftTab = pair.leftTab
+        configuredRightTab = pair.rightTab
+        configuredSplitId = pair.groupId
+
+        refreshFavicon(into: leftIconView, for: pair.leftTab, handle: &leftFaviconHandle)
+        refreshFavicon(into: rightIconView, for: pair.rightTab, handle: &rightFaviconHandle)
+        leftTitleLabel.stringValue = pair.leftTab.title
+        rightTitleLabel.stringValue = pair.rightTab.title
+        toolTip = pair.title
+        updateSelected()
+        updateHoverChrome()
+        updateMute(isLeft: true,
+                   audible: pair.leftTab.isCurrentlyAudible,
+                   muted: pair.leftTab.isAudioMuted)
+        updateMute(isLeft: false,
+                   audible: pair.rightTab.isCurrentlyAudible,
+                   muted: pair.rightTab.isAudioMuted)
+
+        // Subscribe to each tab's audio state and route by tab identity so a
+        // post-swap event lands in the correct pane — the configured left/right
+        // mapping changes via `reresolvePairOrderIfNeeded` without re-creating
+        // these subscriptions. Same pattern as the title binding above.
+        for tab in [pair.leftTab, pair.rightTab] {
+            tab.$isCurrentlyAudible
+                .combineLatest(tab.$isAudioMuted)
+                .removeDuplicates { $0 == $1 }
+                .receive(on: DispatchQueue.main)
+                .sink { [weak self, weak tab] audible, muted in
+                    guard let self, let tab else { return }
+                    if tab === self.configuredLeftTab {
+                        self.updateMute(isLeft: true, audible: audible, muted: muted)
+                    } else if tab === self.configuredRightTab {
+                        self.updateMute(isLeft: false, audible: audible, muted: muted)
+                    }
+                }
+                .store(in: &cancellables)
+        }
+
+        Publishers.CombineLatest(pair.leftTab.$isActive, pair.rightTab.$isActive)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _, _ in self?.updateSelected() }
+            .store(in: &cancellables)
+
+        // Re-resolve left/right when the strip order changes (swap button,
+        // drag-to-reorder, etc). The SplitPairSidebarItem keeps the same id
+        // across a swap so the outline-view diff skips this row; we rebind
+        // ourselves instead of waiting for an item-level reload.
+        if let state = browserState {
+            state.$normalTabs
+                .dropFirst()
+                .receive(on: DispatchQueue.main)
+                .sink { [weak self] _ in
+                    self?.reresolvePairOrderIfNeeded()
+                }
+                .store(in: &cancellables)
+        }
+
+        for tab in [pair.leftTab, pair.rightTab] {
+            tab.$liveFaviconData
+                .receive(on: DispatchQueue.main)
+                .sink { [weak self, weak tab] _ in
+                    guard let self, let tab else { return }
+                    self.refreshFaviconForTab(tab)
+                }
+                .store(in: &cancellables)
+            tab.$cachedFaviconData
+                .receive(on: DispatchQueue.main)
+                .sink { [weak self, weak tab] _ in
+                    guard let self, let tab else { return }
+                    self.refreshFaviconForTab(tab)
+                }
+                .store(in: &cancellables)
+            tab.$url
+                .removeDuplicates()
+                .receive(on: DispatchQueue.main)
+                .sink { [weak self, weak tab] _ in
+                    guard let self, let tab else { return }
+                    self.refreshFaviconForTab(tab)
+                }
+                .store(in: &cancellables)
+            tab.$title
+                .receive(on: DispatchQueue.main)
+                .sink { [weak self, weak tab] newTitle in
+                    guard let self, let tab else { return }
+                    if tab === self.configuredLeftTab {
+                        self.leftTitleLabel.stringValue = newTitle
+                    } else if tab === self.configuredRightTab {
+                        self.rightTitleLabel.stringValue = newTitle
+                    }
+                }
+                .store(in: &cancellables)
+            tab.$url
+                .receive(on: DispatchQueue.main)
+                .sink { [weak self] _ in
+                    guard let self, let pair = self.item as? SplitPairSidebarItem else { return }
+                    self.toolTip = pair.title
+                }
+                .store(in: &cancellables)
+        }
+    }
+
+    private func refreshFaviconForTab(_ tab: Tab) {
+        if tab === configuredLeftTab {
+            refreshFavicon(into: leftIconView, for: tab, handle: &leftFaviconHandle)
+        } else if tab === configuredRightTab {
+            refreshFavicon(into: rightIconView, for: tab, handle: &rightFaviconHandle)
+        }
+    }
+
+    private func refreshFavicon(into imageView: NSImageView,
+                                for tab: Tab,
+                                handle: inout ProfileScopedFaviconLoadHandle?) {
+        handle?.cancel()
+        handle = nil
+        if let live = tab.liveFaviconData, let image = NSImage(data: live) {
+            imageView.image = image
+            return
+        }
+        let pageURLString = tab.isOpenned ? (tab.url ?? tab.pinnedUrl) : (tab.pinnedUrl ?? tab.url)
+        let request = ProfileScopedFaviconRequest(
+            profileId: tab.profileId,
+            pageURLString: pageURLString,
+            snapshotData: tab.cachedFaviconData
+        )
+        handle = ProfileScopedFaviconRepository.shared.loadFavicon(for: request) { [weak imageView, weak tab] result in
+            imageView?.image = result.image
+            if result.source == .chromium, let data = result.data {
+                tab?.updateCachedFaviconData(data)
+            }
+        }
+    }
+
+    /// Show or hide a pane's mute toggle based on its tab's audio state.
+    /// Mirrors the audible-or-muted condition `SideTabView` uses for the
+    /// regular sidebar row so split panes match unsplit panes visually.
+    private func updateMute(isLeft: Bool, audible: Bool, muted: Bool) {
+        let hasAudio = audible || muted
+        let host = isLeft ? leftMuteHost : rightMuteHost
+        let widthConstraint = isLeft ? leftMuteWidth : rightMuteWidth
+        host?.isHidden = !hasAudio
+        widthConstraint?.update(offset: hasAudio ? 20 : 0)
+        guard hasAudio else { return }
+        host?.rootView = AnyView(
+            SplitPaneMuteButton(isMuted: muted) { [weak self] in
+                guard let self else { return }
+                let tab = isLeft ? self.configuredLeftTab : self.configuredRightTab
+                guard let tab else { return }
+                tab.setAudioMuted(!tab.isAudioMuted)
+            }
+        )
+    }
+
+    private func updateSelected() {
+        guard let pair = item as? SplitPairSidebarItem else { return }
+        // Whole cell flips to the selected pill when *either* pane is the
+        // focusing tab. The HoverableView prioritizes its `selectedColor`
+        // over its hover tint, so the cell-level NSTrackingArea-driven
+        // hover background underneath cleanly yields to the active fill.
+        outerBackground.isSelected = pair.leftTab.isActive || pair.rightTab.isActive
+    }
+
+    /// If Chromium reordered the pair (swap button / drag), reflect the new
+    /// order in the cell. The SplitGroup's primary/secondary updates first;
+    /// the strip's `normalTabs` then re-sequences. We compare the cell's
+    /// current left/right against the live `normalTabs` order and swap if
+    /// the visible mapping is stale.
+    private func reresolvePairOrderIfNeeded() {
+        guard let pair = item as? SplitPairSidebarItem,
+              let state = browserState,
+              let leftIdx = state.normalTabs.firstIndex(where: { $0.guid == pair.leftTab.guid }),
+              let rightIdx = state.normalTabs.firstIndex(where: { $0.guid == pair.rightTab.guid }) else {
+            return
+        }
+        if leftIdx > rightIdx {
+            let oldLeft = pair.leftTab
+            pair.leftTab = pair.rightTab
+            pair.rightTab = oldLeft
+            configuredLeftTab = pair.leftTab
+            configuredRightTab = pair.rightTab
+            leftTitleLabel.stringValue = pair.leftTab.title
+            rightTitleLabel.stringValue = pair.rightTab.title
+            refreshFavicon(into: leftIconView, for: pair.leftTab, handle: &leftFaviconHandle)
+            refreshFavicon(into: rightIconView, for: pair.rightTab, handle: &rightFaviconHandle)
+            toolTip = pair.title
+            updateSelected()
+            updateMute(isLeft: true,
+                       audible: pair.leftTab.isCurrentlyAudible,
+                       muted: pair.leftTab.isAudioMuted)
+            updateMute(isLeft: false,
+                       audible: pair.rightTab.isCurrentlyAudible,
+                       muted: pair.rightTab.isAudioMuted)
         }
     }
 }
