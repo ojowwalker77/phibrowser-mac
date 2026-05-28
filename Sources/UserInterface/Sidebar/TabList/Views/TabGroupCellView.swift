@@ -646,6 +646,34 @@ final class TabGroupCellView: SidebarCellView {
         isHovered = hovered
         applyHighlightVisuals()
     }
+
+    /// Resolves the context-menu owner for a right-click at `point` in
+    /// this cell's coordinate space. Header hits use the group item;
+    /// inner-table row hits use the member `Tab`.
+    func contextMenuTarget(at pointInCell: NSPoint) -> ContextMenuRepresentable? {
+        guard let groupItem = item as? TabGroupSidebarItem else {
+            return nil
+        }
+
+        if effectiveIsCollapsed {
+            return groupItem
+        }
+
+        let pointInContainer = containerView.convert(pointInCell, from: self)
+        if hostingView.frame.contains(pointInContainer) {
+            return groupItem
+        }
+
+        let pointInTable = innerTable.convert(pointInCell, from: self)
+        let row = innerTable.row(at: pointInTable)
+        if row >= 0,
+           currentMemberOrder.indices.contains(row),
+           let tab = tabsByGuid[currentMemberOrder[row]] {
+            return tab
+        }
+
+        return groupItem
+    }
 }
 
 // MARK: - Click activation

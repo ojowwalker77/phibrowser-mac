@@ -25,6 +25,9 @@ class SideBarOutlineView: NSOutlineView {
     }
 
     private(set) var rightClickedRow: Int?
+    /// Click location in outline-view coordinates, set together with
+    /// `rightClickedRow` when the context menu is requested.
+    private(set) var rightClickedLocation: NSPoint?
     private var isUpdatingDocumentHeight = false
     
     /// Delegate for handling middle mouse button click events
@@ -61,10 +64,9 @@ class SideBarOutlineView: NSOutlineView {
     }
     
     override func menu(for event: NSEvent) -> NSMenu? {
-        let index = row(at: convert(event.locationInWindow, from: nil))
-//        willChangeValue(for: \.rightClickedRow)
-        self.rightClickedRow = index
-//        didChangeValue(for: \.rightClickedRow)
+        let location = convert(event.locationInWindow, from: nil)
+        rightClickedLocation = location
+        rightClickedRow = row(at: location)
         return self.menu
     }
     

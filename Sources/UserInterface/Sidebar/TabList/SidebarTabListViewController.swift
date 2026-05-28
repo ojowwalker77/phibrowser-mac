@@ -2894,12 +2894,29 @@ extension SidebarTabListViewController: NSMenuDelegate {
             return
         }
         
-        guard let clickedRow = outlineView.rightClickedRow,
-              let item = outlineView.item(atRow: clickedRow) as? ContextMenuRepresentable else {
-                  defultMenu(on: menu)
-                  return
-              }
-       
+        guard let clickedRow = outlineView.rightClickedRow else {
+            defultMenu(on: menu)
+            return
+        }
+
+        let menuTarget: ContextMenuRepresentable? = {
+            if let groupItem = outlineView.item(atRow: clickedRow) as? TabGroupSidebarItem,
+               let location = outlineView.rightClickedLocation,
+               let cell = outlineView.view(
+                atColumn: 0,
+                row: clickedRow,
+                makeIfNecessary: false) as? TabGroupCellView {
+                let pointInCell = cell.convert(location, from: outlineView)
+                return cell.contextMenuTarget(at: pointInCell) ?? groupItem
+            }
+            return outlineView.item(atRow: clickedRow) as? ContextMenuRepresentable
+        }()
+
+        guard let item = menuTarget else {
+            defultMenu(on: menu)
+            return
+        }
+
         if let bookmark = item as? Bookmark {
             bookmark.makeContextMenu(on: menu, source: .sidebar)
         } else {
