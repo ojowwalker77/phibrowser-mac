@@ -75,6 +75,23 @@ final class GroupTabsTableView: NSTableView {
                                     with: mouseDownEvent)
     }
 
+    override func otherMouseDown(with event: NSEvent) {
+        guard event.buttonNumber == 2 else {
+            super.otherMouseDown(with: event)
+            return
+        }
+
+        let clickLocation = convert(event.locationInWindow, from: nil)
+        let clickedRow = row(at: clickLocation)
+        guard clickedRow >= 0 else { return }
+
+        pendingDragRow = nil
+        pendingInteractionTarget = nil
+        pendingMouseDownEvent = nil
+        manualDragInProgress = false
+        phiTableDelegate?.tableView(self, didMiddleClickRow: clickedRow)
+    }
+
     override func mouseUp(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
         let upRow = row(at: point)
@@ -145,6 +162,8 @@ protocol GroupTabsTableViewDelegate: AnyObject {
                    with event: NSEvent)
     func tableView(_ tableView: GroupTabsTableView,
                    didClickRow row: Int)
+    func tableView(_ tableView: GroupTabsTableView,
+                   didMiddleClickRow row: Int)
     func tableView(_ tableView: GroupTabsTableView,
                    didRequest target: GroupTabsTableInteractionTarget,
                    row: Int)

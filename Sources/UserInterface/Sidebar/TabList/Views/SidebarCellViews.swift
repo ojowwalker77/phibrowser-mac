@@ -110,12 +110,17 @@ extension NSView {
 // MARK: - Tab Hover Region
 
 /// Transparent overlay that owns hover tracking for sidebar tabs.
-/// NSHostingView sits underneath and does not reliably deliver parent tracking-area events.
+/// NSHostingView sits underneath and does not reliably deliver parent tracking-area events,
+/// so this view drives hover via its own tracking area while staying transparent to hit-testing
+/// — clicks fall through to the SwiftUI buttons (close / mute) inside the hosting view.
 private final class SidebarTabHoverRegionView: NSView {
     var onHoverChanged: ((Bool) -> Void)?
-    weak var mouseEventForwardTarget: NSView?
 
     private var trackingArea: NSTrackingArea?
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        return nil
+    }
 
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
@@ -143,37 +148,6 @@ private final class SidebarTabHoverRegionView: NSView {
         onHoverChanged?(false)
     }
 
-    override func mouseDown(with event: NSEvent) {
-        forwardMouseEvent(event)
-    }
-
-    override func mouseUp(with event: NSEvent) {
-        forwardMouseEvent(event)
-    }
-
-    override func rightMouseDown(with event: NSEvent) {
-        forwardMouseEvent(event)
-    }
-
-    private func forwardMouseEvent(_ event: NSEvent) {
-        guard let mouseEventForwardTarget,
-              let window = mouseEventForwardTarget.window else {
-            return
-        }
-        let point = mouseEventForwardTarget.convert(event.locationInWindow, from: nil)
-        guard mouseEventForwardTarget.bounds.contains(point) else { return }
-        switch event.type {
-        case .leftMouseDown:
-            mouseEventForwardTarget.mouseDown(with: event)
-        case .leftMouseUp:
-            mouseEventForwardTarget.mouseUp(with: event)
-        case .rightMouseDown:
-            mouseEventForwardTarget.rightMouseDown(with: event)
-        default:
-            break
-        }
-    }
-
     private func syncHoverStateForCurrentMouseLocation() {
         guard let window else {
             onHoverChanged?(false)
@@ -188,11 +162,15 @@ private final class SidebarTabHoverRegionView: NSView {
 }
 
 /// Clears tab hover when the cursor is in the trailing strip beside the split divider.
+/// Transparent to hit-testing for the same reason as the hover region above.
 private final class SidebarTabHoverDeadZoneView: NSView {
     var onEntered: (() -> Void)?
-    weak var mouseEventForwardTarget: NSView?
 
     private var trackingArea: NSTrackingArea?
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        return nil
+    }
 
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
@@ -212,37 +190,6 @@ private final class SidebarTabHoverDeadZoneView: NSView {
     override func mouseEntered(with event: NSEvent) {
         super.mouseEntered(with: event)
         onEntered?()
-    }
-
-    override func mouseDown(with event: NSEvent) {
-        forwardMouseEvent(event)
-    }
-
-    override func mouseUp(with event: NSEvent) {
-        forwardMouseEvent(event)
-    }
-
-    override func rightMouseDown(with event: NSEvent) {
-        forwardMouseEvent(event)
-    }
-
-    private func forwardMouseEvent(_ event: NSEvent) {
-        guard let mouseEventForwardTarget,
-              let window = mouseEventForwardTarget.window else {
-            return
-        }
-        let point = mouseEventForwardTarget.convert(event.locationInWindow, from: nil)
-        guard mouseEventForwardTarget.bounds.contains(point) else { return }
-        switch event.type {
-        case .leftMouseDown:
-            mouseEventForwardTarget.mouseDown(with: event)
-        case .leftMouseUp:
-            mouseEventForwardTarget.mouseUp(with: event)
-        case .rightMouseDown:
-            mouseEventForwardTarget.rightMouseDown(with: event)
-        default:
-            break
-        }
     }
 }
 
@@ -302,7 +249,6 @@ class SidebarTabCellView: SidebarCellView {
             make.edges.equalToSuperview()
         }
 
-        hoverRegionView.mouseEventForwardTarget = hostingView
         hoverRegionView.onHoverChanged = { [weak self] isHovered in
             self?.viewModel.isHovered = isHovered
         }
@@ -312,7 +258,6 @@ class SidebarTabCellView: SidebarCellView {
             make.trailing.equalToSuperview().inset(SideTabView.trailingHoverDeadZoneWidth)
         }
 
-        hoverDeadZoneView.mouseEventForwardTarget = hostingView
         hoverDeadZoneView.onEntered = { [weak self] in
             self?.viewModel.isHovered = false
         }

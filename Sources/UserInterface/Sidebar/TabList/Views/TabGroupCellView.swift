@@ -644,8 +644,8 @@ extension TabGroupCellView {
     /// the same way `outlineViewClicked` does for ungrouped rows —
     /// inner table's `selectionHighlightStyle = .none` skips the row
     /// highlight, and `Tab.performAction` simply swaps the active web
-    /// content. Middle/right clicks do not flow through this hook;
-    /// they're handled by the inner table's default behavior.
+    /// content. Middle-click close and right-click menus are handled
+    /// by `GroupTabsTableView` instead of this action hook.
     @objc fileprivate func innerTableClicked(_ sender: NSTableView) {
         let row = sender.clickedRow
         guard row >= 0,
@@ -731,6 +731,16 @@ extension TabGroupCellView: GroupTabsTableViewDelegate {
             return
         }
         tab.performAction(with: nil)
+    }
+
+    func tableView(_ tableView: GroupTabsTableView,
+                   didMiddleClickRow row: Int) {
+        guard currentMemberOrder.indices.contains(row),
+              let tab = tabsByGuid[currentMemberOrder[row]],
+              !tab.isPinned else {
+            return
+        }
+        groupCellDelegate?.tabGroupCell(self, tabDidRequestClose: tab)
     }
 
     func tableView(_ tableView: GroupTabsTableView,
