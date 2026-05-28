@@ -410,20 +410,31 @@ final class PhiBrowserTests: XCTestCase {
         )
     }
 
-    func testOmniBoxSearchCoordinatorAcceptsOnlyTheLatestRequest() {
+    func testOmniBoxSearchCoordinatorAcceptsResponsesMatchingTheLatestQuery() {
         let coordinator = OmniBoxSearchCoordinator()
 
-        let first = coordinator.beginRequest(query: "phi", source: .inputChange)
-        let second = coordinator.beginRequest(query: "phibrowser", source: .openPrefill)
+        _ = coordinator.beginRequest(query: "phi", source: .inputChange)
+        _ = coordinator.beginRequest(query: "phibrowser", source: .openPrefill)
 
         XCTAssertFalse(
-            coordinator.shouldApplyResponse(for: first),
-            "Stale suggestion responses should be ignored once a newer request has been issued."
+            coordinator.shouldAcceptResponse(forQuery: "phi"),
+            "Stale suggestion responses should be ignored once a newer query has been issued."
         )
         XCTAssertTrue(
-            coordinator.shouldApplyResponse(for: second),
-            "The most recent request should be the only one allowed to update the UI."
+            coordinator.shouldAcceptResponse(forQuery: "phibrowser"),
+            "Responses matching the latest query should be applied to the UI."
         )
+    }
+
+    func testOmniBoxSearchCoordinatorAcceptsStreamedResponsesForTheSameQuery() {
+        let coordinator = OmniBoxSearchCoordinator()
+
+        _ = coordinator.beginRequest(query: "phi", source: .inputChange)
+
+        XCTAssertTrue(coordinator.shouldAcceptResponse(forQuery: "phi"))
+        // Chromium streams multiple updates per request as providers respond, every
+        // subsequent emission for the same query must still be applied.
+        XCTAssertTrue(coordinator.shouldAcceptResponse(forQuery: "phi"))
     }
 
     func testOmniBoxSearchCoordinatorDoesNotArmSuppressionForEmptyPrefill() {

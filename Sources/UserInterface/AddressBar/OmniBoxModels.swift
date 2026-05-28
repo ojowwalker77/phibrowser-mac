@@ -163,7 +163,7 @@ struct OmniBoxSearchRequestToken: Equatable {
 
 final class OmniBoxSearchCoordinator {
     private var nextRequestID: Int = 0
-    private var latestRequestID: Int = 0
+    private var latestQuery: String?
     private var suppressNextAutomaticSearch = false
 
     func prepareForPrefilledOpen(text: String, minInputLength: Int) {
@@ -188,18 +188,23 @@ final class OmniBoxSearchCoordinator {
 
     func beginRequest(query: String, source: OmniBoxSearchRequestSource) -> OmniBoxSearchRequestToken {
         nextRequestID += 1
-        latestRequestID = nextRequestID
+        latestQuery = query
         return OmniBoxSearchRequestToken(id: nextRequestID, query: query, source: source)
     }
 
-    func shouldApplyResponse(for token: OmniBoxSearchRequestToken) -> Bool {
-        token.id == latestRequestID
+    /// Chromium streams suggestions as providers respond, so we may receive multiple updates
+    /// per request. Accept every response whose original query still matches the latest one
+    /// the user requested; older responses (from stale queries) are dropped.
+    func shouldAcceptResponse(forQuery query: String) -> Bool {
+        latestQuery == query
     }
+
+    var currentQuery: String? { latestQuery }
 
     func reset() {
         nextRequestID = 0
         suppressNextAutomaticSearch = false
-        latestRequestID = 0
+        latestQuery = nil
     }
 }
 

@@ -16,7 +16,6 @@ class OmniBoxViewModel: ObservableObject {
     private let chromiumBridge = ChromiumLauncher.sharedInstance().bridge
     private let browserState: BrowserState
     private let searchCoordinator = OmniBoxSearchCoordinator()
-    private var currentSearchTask: Task<Void, Never>?
     private(set) var preventInlineCompletion: Bool = false
     
     @Published private(set) var canUseTemporaryText = false
@@ -44,6 +43,27 @@ class OmniBoxViewModel: ObservableObject {
                 self?.handleInputChanged(text)
             }
             .store(in: &cancellables)
+
+        // Persistent subscription so every Chromium suggestion update for the current query
+        // is applied. Chromium emits multiple `OnResultChanged` callbacks per request as
+        // providers respond at different speeds; the previous per-request `await` model only
+        // consumed the first one, which made the on-screen suggestions diverge from
+        // AutocompleteController state and caused selectSuggestion line mismatches.
+        browserState.searchSuggestionChanged
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] suggestions, originalString in
+                self?.handleIncomingSuggestions(suggestions, for: originalString)
+            }
+            .store(in: &cancellables)
+    }
+
+    private func handleIncomingSuggestions(_ results: [[String: Any]], for query: String) {
+        guard searchCoordinator.shouldAcceptResponse(forQuery: query) else {
+            logOpenTrace(stage: "response-ignored", details: "query=\(query) reason=stale")
+            return
+        }
+        logOpenTrace(stage: "response-received", details: "query=\(query) resultCount=\(results.count)")
+        handleSearchResults(results: results)
     }
     
     func beginOpenTrace(trigger: String, addressViewPresent: Bool) {
@@ -69,13 +89,16 @@ class OmniBoxViewModel: ObservableObject {
             return
         }
         currentTab = tab
+        // Opening the omnibox via the address bar (sidebar or webcontent) always represents
+        // the current tab as the navigation target, including NTP — typing a URL should
+        // replace the blank NTP rather than spawn a new tab.
+        opennedFromCurrentTab = true
         if tab.isNTP {
             logOpenTrace(
                 stage: "prefill-current-tab",
                 details: "suppressAutomaticSearch=\(suppressAutomaticSearch) urlLength=0 isNTP=true"
             )
             state.inputText = ""
-            opennedFromCurrentTab = false
             return
         }
         let prefilledText = URLProcessor.phiBrandEnsuredUrlString(tab.url ?? "")
@@ -90,7 +113,6 @@ class OmniBoxViewModel: ObservableObject {
             details: "suppressAutomaticSearch=\(suppressAutomaticSearch) urlLength=\(prefilledText.count)"
         )
         state.inputText = prefilledText
-        opennedFromCurrentTab = true
     }
 
     func setCurrentTab(_ tab: Tab?) {
@@ -160,13 +182,13 @@ class OmniBoxViewModel: ObservableObject {
         for suggestion: OmniBoxSuggestion,
         commandKeyPressed: Bool
     ) -> PhiOmniboxSuggestionDisposition {
-//        if opennedFromCurrentTab {
-//            return .currentTab
-//        }
         if suggestion.hasTabMatch && commandKeyPressed {
             return .switchToTab
         }
-        return .currentTab
+        if opennedFromCurrentTab {
+            return .currentTab
+        }
+        return .newForegroundTab
     }
     
     private func openURL(_ url: String, switchToTab: Bool = false, commandKeyPressed: Bool = false) {
@@ -202,8 +224,6 @@ class OmniBoxViewModel: ObservableObject {
     }
     
     func reset() {
-        currentSearchTask?.cancel()
-        currentSearchTask = nil
         opennedFromCurrentTab = false
         searchCoordinator.reset()
         openTraceSession = nil
@@ -213,10 +233,11 @@ class OmniBoxViewModel: ObservableObject {
     func deleteSuggestion(at index: Int) {
         guard index >= 0 && index < state.suggestions.count else { return }
         let suggestion = state.suggestions[index]
-        Task { @MainActor in
-            let result = await deleteSuggestion(at: suggestion.index, searchText: state.inputText, on: browserState)
-            handleSearchResults(results: result ?? [])
-        }
+        AppLogDebug("omni: delete suggestion at index: \(suggestion.index) original text:\(state.inputText)")
+        // Chromium will emit a refreshed `searchSuggestionChanged` event for the same query
+        // after the entry is removed; the persistent subscription in `setupBindings`
+        // will pick it up.
+        chromiumBridge?.deleteSuggestion(atLine: suggestion.index, windowId: browserState.windowId.int64Value)
     }
     
     // MARK: - Private Methods
@@ -247,7 +268,6 @@ class OmniBoxViewModel: ObservableObject {
             return
         }
 
-        currentSearchTask?.cancel()
         browserState.stopAutoCompletion()
 
         let request = searchCoordinator.beginRequest(query: trimmedQuery, source: source)
@@ -256,128 +276,42 @@ class OmniBoxViewModel: ObservableObject {
             details: "request=\(request.id) source=\(request.source.rawValue) queryLength=\(trimmedQuery.count)"
         )
 
-        currentSearchTask = Task { @MainActor in
-            let result = await requestSuggestions(
-                for: trimmedQuery,
-                on: browserState,
-                _preventInlineComplete: self.preventInlineCompletion
-            )
-
-            guard !Task.isCancelled else { return }
-
-            let resultCount = result?.count ?? 0
-            logOpenTrace(stage: "response-received", details: "request=\(request.id) resultCount=\(resultCount)")
-
-            guard searchCoordinator.shouldApplyResponse(for: request) else {
-                logOpenTrace(stage: "response-ignored", details: "request=\(request.id) reason=stale")
-                return
-            }
-
-            handleSearchResults(results: result ?? [], request: request)
-        }
+        canUseTemporaryText = false
+        chromiumBridge?.requestAutoCompleteSuggestions(
+            forText: trimmedQuery,
+            preventInlineAutoComplete: preventInlineCompletion,
+            windowId: browserState.windowId.int64Value
+        )
+        AppLogDebug("omni: requestSuggestions for text:\(trimmedQuery), inlineCompletion: \(!preventInlineCompletion)")
     }
     
-    private func handleSearchResults(results: [[String: Any]], request: OmniBoxSearchRequestToken? = nil) {
+    private func handleSearchResults(results: [[String: Any]]) {
         let suggestions = results.compactMap { OmniBoxSuggestion(chromiumDic: $0) }
             .filter { !$0.isEmpty && $0.isSupportedType }
-            .sorted {
-                $0.relevanceScore > $1.relevanceScore
-            }
         
-        // Promote the first default-eligible suggestion while preserving the rest of the order.
-        if let firstDefaultIdx = suggestions.firstIndex(where: { $0.allowedToBeDefault }) {
-            var r = suggestions
-            let firstDefault = r.remove(at: firstDefaultIdx)
-            r.insert(firstDefault, at: 0)
-            state.suggestions = r
-            state.selectedIndex = 0
+        let finalSuggestions: [OmniBoxSuggestion] = suggestions
+
+        // Preserve the user's manual selection (arrow-key navigation) across streamed
+        // updates for the same query, otherwise late provider responses would yank the
+        // highlight back to the default row.
+        let preserveManualSelection = canUseTemporaryText
+            && state.selectedIndex >= 0
+            && state.selectedIndex < finalSuggestions.count
+        let newSelectedIndex: Int
+        if preserveManualSelection {
+            newSelectedIndex = state.selectedIndex
+        } else if finalSuggestions.first?.allowedToBeDefault == true {
+            newSelectedIndex = 0
         } else {
-            state.suggestions = suggestions
-            state.selectedIndex = -1
+            newSelectedIndex = -1
         }
-        
-        let requestDescription = request.map { "request=\($0.id) source=\($0.source.rawValue)" } ?? "request=delete-or-reset"
+
+        state.suggestions = finalSuggestions
+        state.selectedIndex = newSelectedIndex
+
         logOpenTrace(
             stage: "results-applied",
-            details: "\(requestDescription) suggestionCount=\(suggestions.count) selectedIndex=\(state.selectedIndex)"
+            details: "query=\(searchCoordinator.currentQuery ?? "") suggestionCount=\(finalSuggestions.count) selectedIndex=\(state.selectedIndex)"
         )
-    }
-    
-    @MainActor
-    private func requestSuggestions(for searchText: String,
-                                    on state: BrowserState,
-                                    _preventInlineComplete: Bool = false,
-                                    timeout: Duration = .seconds(1)) async -> [[String: Any]]? {
-        canUseTemporaryText = false
-        return await withTaskGroup(of: [[String: Any]]?.self) { group in
-            // Subscribe first so the Chromium response cannot race past the observer.
-            group.addTask { @MainActor in
-                await withCheckedContinuation { continuation in
-                    var cancellable: AnyCancellable?
-                    cancellable = state.searchSuggestionChanged
-                        .sink { suggestions, originalString in
-                            if originalString == searchText {
-                                AppLogDebug("searchSuggestionChanged for text: \(searchText)")
-                                AppLogDebug("result: \(suggestions)")
-                                continuation.resume(returning: suggestions)
-                                cancellable?.cancel()
-                                cancellable = nil
-                            }
-                        }
-                    
-                    self.chromiumBridge?.requestAutoCompleteSuggestions(
-                        forText: searchText,
-                        preventInlineAutoComplete: _preventInlineComplete,
-                        windowId: state.windowId.int64Value
-                    )
-                    AppLogDebug("requestSuggestions for text:\(searchText), inlineCompletion: \(!_preventInlineComplete)")
-                }
-            }
-            
-            group.addTask {
-                try? await Task.sleep(for: timeout)
-                return nil
-            }
-            
-            let result = await group.next() ?? nil
-            group.cancelAll()
-            return result
-        }
-    }
-    
-    @MainActor
-    private func deleteSuggestion(at index: Int,
-                                  searchText: String,
-                                  on state: BrowserState,
-                                  timeout: Duration = .seconds(1)) async -> [[String: Any]]? {
-        return await withTaskGroup(of: [[String: Any]]?.self) { group in
-            group.addTask { @MainActor in
-                await withCheckedContinuation { continuation in
-                    var cancellable: AnyCancellable?
-                    cancellable = state.searchSuggestionChanged
-                        .sink { suggestions, originalString in
-                            if originalString == searchText {
-                                AppLogDebug("searchSuggestionChanged for text: \(searchText)")
-                                AppLogDebug("result: \(suggestions)")
-                                continuation.resume(returning: suggestions)
-                                cancellable?.cancel()
-                                cancellable = nil
-                            }
-                        }
-                    
-                    self.chromiumBridge?.deleteSuggestion(atLine: index, windowId: state.windowId.int64Value)
-                    AppLogDebug("delete suggestion at index: \(index) original text:\(searchText)")
-                }
-            }
-            
-            group.addTask {
-                try? await Task.sleep(for: timeout)
-                return nil
-            }
-            
-            let result = await group.next() ?? nil
-            group.cancelAll()
-            return result
-        }
     }
 }
