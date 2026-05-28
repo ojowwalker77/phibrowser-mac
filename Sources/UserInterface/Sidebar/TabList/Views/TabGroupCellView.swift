@@ -161,6 +161,10 @@ private protocol TabGroupHeaderHostingViewDelegate: AnyObject {
 }
 
 private final class TabGroupHeaderHostingView: NSHostingView<TabGroupHeaderView> {
+    /// Slop matches `TabItemView` / `BookmarkItemView` so a click that
+    /// drifts a couple of points doesn't get promoted to a drag.
+    private static let dragThreshold: CGFloat = 5
+
     weak var dragDelegate: TabGroupHeaderHostingViewDelegate?
 
     private var pendingMouseDownEvent: NSEvent?
@@ -184,7 +188,14 @@ private final class TabGroupHeaderHostingView: NSHostingView<TabGroupHeaderView>
     override func mouseDragged(with event: NSEvent) {
         guard !manualDragInProgress,
               pendingHitTarget == nil,
-              let mouseDownEvent = pendingMouseDownEvent else {
+              let mouseDownEvent = pendingMouseDownEvent,
+              let startPoint = pendingMouseDownPoint else {
+            return
+        }
+        let currentPoint = convert(event.locationInWindow, from: nil)
+        let dx = abs(currentPoint.x - startPoint.x)
+        let dy = abs(currentPoint.y - startPoint.y)
+        guard dx > Self.dragThreshold || dy > Self.dragThreshold else {
             return
         }
         manualDragInProgress = true
