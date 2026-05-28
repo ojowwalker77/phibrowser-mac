@@ -75,7 +75,8 @@ extension TabGroupSidebarItem: ContextMenuRepresentable {
                 "New Tab in Group",
                 comment: "Tab group context menu - Open a new tab inside this group"),
             action: #selector(newTabInGroup),
-            keyEquivalent: "")
+            keyEquivalent: "c")
+        newTabItem.keyEquivalentModifierMask = [.command, .control]
         newTabItem.target = self
         menu.addItem(newTabItem)
 
@@ -142,7 +143,8 @@ extension TabGroupSidebarItem: ContextMenuRepresentable {
                 "Close Group",
                 comment: "Tab group context menu - Close the group and all its tabs"),
             action: #selector(closeGroup),
-            keyEquivalent: "")
+            keyEquivalent: "w")
+        closeItem.keyEquivalentModifierMask = [.command, .control]
         closeItem.target = self
         menu.addItem(closeItem)
     }
