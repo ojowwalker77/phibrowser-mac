@@ -38,6 +38,11 @@ extension Tab: SidebarItem {
     }
     
     func performAction(with owner: SidebarTabListItemOwner?) {
+        Task { @MainActor [windowId] in
+            MainBrowserWindowControllersManager.shared
+                .getBrowserState(for: windowId)?
+                .clearGroupOverview()
+        }
         webContentWrapper?.setAsActiveTab()
     }
     

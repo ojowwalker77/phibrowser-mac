@@ -258,6 +258,10 @@ class OmniBoxViewController: NSViewController {
         viewModel.updateStatus(with: tab)
     }
 
+    func updateStatusForGroupOverview() {
+        viewModel.updateStatusForGroupOverview()
+    }
+
     func setCurrentTabForNavigation(_ tab: Tab?) {
         viewModel.setCurrentTab(tab)
     }

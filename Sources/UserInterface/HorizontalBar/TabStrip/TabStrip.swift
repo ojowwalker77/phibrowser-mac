@@ -173,6 +173,7 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
     /// separators on both sides of the chip while hovered (mirrors the
     /// tab hover rule).
     private var hoveredChipToken: String?
+    private var selectedGroupTokenForOverviewPlaceholder: String?
 
     // MARK: - Layout Lock
     /// Whether layout is temporarily locked after a tab closes.
@@ -315,7 +316,7 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
 
         let pinnedTabs = browserState.pinnedTabs
         let normalTabs = browserState.normalTabs
-        let activeTab = browserState.focusingTab
+        let activeTab = visibleActiveTabForChrome()
 
         let context = dragController.context
         let groupContext = groupDragController.context
@@ -996,7 +997,7 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
     private func rebindData() {
         let pinnedTabs = browserState.pinnedTabs
         let normalTabs = browserState.normalTabs
-        let activeTab = browserState.focusingTab
+        let activeTab = visibleActiveTabForChrome()
 
         updateContainer(
             container: pinnedContainer,
@@ -1018,6 +1019,10 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
         // going through layout(); fire the same notification so the content
         // outer border tracks the active tab's new x.
         onLayoutChanged?()
+    }
+
+    private func visibleActiveTabForChrome() -> Tab? {
+        browserState.groupOverviewState == nil ? browserState.focusingTab : nil
     }
 
     // MARK: - Data Binding
@@ -1050,7 +1055,7 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
     private func syncVisibleState() {
         let pinnedTabs = browserState.pinnedTabs
         let normalTabs = browserState.normalTabs
-        let activeTab = browserState.focusingTab
+        let activeTab = visibleActiveTabForChrome()
 
         pinnedContainer.layer?.backgroundColor = pinnedTabs.isEmpty
             ? NSColor.clear.cgColor
@@ -1138,6 +1143,16 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
                         self.scrollToMakeTabVisible(activeTab)
                     }
                 }
+                self.needsLayout = true
+            }
+            .store(in: &cancellables)
+
+        browserState.$groupOverviewState
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] state in
+                guard let self, self.isActive else { return }
+                self.selectedGroupTokenForOverviewPlaceholder = state?.groupToken
+                self.performLayout(context: .dataChanged)
                 self.needsLayout = true
             }
             .store(in: &cancellables)
@@ -1545,7 +1560,7 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
                     let output = self.calculateLayout(
                         containerWidth: self.normalContainer.bounds.width,
                         tabs: self.browserState.normalTabs,
-                        activeTab: self.browserState.focusingTab,
+                        activeTab: self.visibleActiveTabForChrome(),
                         isPinned: false
                     )
                     // Re-render separators because hover state affects visibility.
@@ -1553,13 +1568,13 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
                         in: self.normalContainer,
                         xPositions: output.separatorXPositions,
                         tabs: self.browserState.normalTabs,
-                        activeTab: self.browserState.focusingTab
+                        activeTab: self.visibleActiveTabForChrome()
                     )
                     self.updateChipRightSeparators(
                         in: self.normalContainer,
                         chipFrames: output.chipFrames,
                         tabs: self.browserState.normalTabs,
-                        activeTab: self.browserState.focusingTab
+                        activeTab: self.visibleActiveTabForChrome()
                     )
                 }
             }
@@ -1701,6 +1716,9 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
                 chip.onClick = { [weak self] tappedToken in
                     self?.handleChipClick(token: tappedToken)
                 }
+                chip.onCollapseToggle = { [weak self] tappedToken in
+                    self?.handleChipCollapseToggle(token: tappedToken)
+                }
                 chip.onHoverChanged = { [weak self] hoveredToken, hovered in
                     guard let self else { return }
                     self.hoveredChipToken = hovered ? hoveredToken : nil
@@ -1710,20 +1728,20 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
                     let output = self.calculateLayout(
                         containerWidth: self.normalContainer.bounds.width,
                         tabs: self.browserState.normalTabs,
-                        activeTab: self.browserState.focusingTab,
+                        activeTab: self.visibleActiveTabForChrome(),
                         isPinned: false
                     )
                     self.updateSeparators(
                         in: self.normalContainer,
                         xPositions: output.separatorXPositions,
                         tabs: self.browserState.normalTabs,
-                        activeTab: self.browserState.focusingTab
+                        activeTab: self.visibleActiveTabForChrome()
                     )
                     self.updateChipRightSeparators(
                         in: self.normalContainer,
                         chipFrames: output.chipFrames,
                         tabs: self.browserState.normalTabs,
-                        activeTab: self.browserState.focusingTab
+                        activeTab: self.visibleActiveTabForChrome()
                     )
                 }
                 chip.onMenuRequest = { [weak self] tappedToken in
@@ -1894,12 +1912,16 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
             view.removeFromSuperview()
             chipViews.removeValue(forKey: token)
             if hoveredChipToken == token { hoveredChipToken = nil }
+            if selectedGroupTokenForOverviewPlaceholder == token {
+                selectedGroupTokenForOverviewPlaceholder = nil
+            }
         }
         // Mirror teardown for chip-right separators.
         for (token, view) in chipRightSeparatorViews where chipFrames[token] == nil {
             view.removeFromSuperview()
             chipRightSeparatorViews.removeValue(forKey: token)
         }
+        updateGroupChipSelectionState()
     }
 
     /// Renders the chip→right-neighbor separator for each visible chip.
@@ -1958,17 +1980,32 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
     }
 
     private func handleChipClick(token: String) {
+        guard browserState.groups[token] != nil else { return }
+        browserState.showGroupOverview(token: token)
+        AppLogDebug(
+            "[TAB_GROUPS][STRIP] chip overview windowId=\(browserState.windowId) " +
+            "token=\(token)"
+        )
+    }
+
+    private func handleChipCollapseToggle(token: String) {
         guard let group = browserState.groups[token] else { return }
         let next = !group.isCollapsed
         AppLogDebug(
-            "[TAB_GROUPS][STRIP] chip click windowId=\(browserState.windowId) " +
-            "token=\(token) collapsed=\(group.isCollapsed)→\(next)"
+            "[TAB_GROUPS][STRIP] chip collapse windowId=\(browserState.windowId) " +
+            "token=\(token) collapsed=\(group.isCollapsed)->\(next)"
         )
         ChromiumLauncher.sharedInstance().bridge?.updateTabGroupCollapsed(
             withWindowId: Int64(browserState.windowId),
             tokenHex: token,
             isCollapsed: next
         )
+    }
+
+    private func updateGroupChipSelectionState() {
+        for (token, chip) in chipViews {
+            chip.setOverviewSelected(token == selectedGroupTokenForOverviewPlaceholder)
+        }
     }
 
     @MainActor
@@ -2251,6 +2288,7 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
 
     private func handleTabSelection(tab: Tab?) {
         guard let tab = tab else { return }
+        browserState.clearGroupOverview()
         if tab.isPinned {
             self.browserState.openOrFocusPinnedTab(tab)
         } else {

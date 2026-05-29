@@ -105,11 +105,14 @@ class SideAddressBar: NSView {
             .removeDuplicates()
             .debounce(for: .milliseconds(100), scheduler: DispatchQueue.main)
             .sink { [weak self] url in
-                guard let url, !url.isNTPUrlString else {
-                    self?.textField.stringValue = ""
-                    return
-                }
-                self?.textField.stringValue = URLProcessor.displayName(for: url)
+                self?.updateDisplayedURL(url)
+            }
+            .store(in: &cancellables)
+
+        browserState.$groupOverviewState
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.updateDisplayedURL(self?.currentTab?.url)
             }
             .store(in: &cancellables)
 
@@ -162,6 +165,16 @@ class SideAddressBar: NSView {
             let button = createExtensionButton(for: ext)
             extensionIconsStackView.addArrangedSubview(button)
         }
+    }
+
+    private func updateDisplayedURL(_ url: String?) {
+        guard unsafeBrowserState?.groupOverviewState == nil,
+              let url,
+              !url.isNTPUrlString else {
+            textField.stringValue = ""
+            return
+        }
+        textField.stringValue = URLProcessor.displayName(for: url)
     }
 
     private func shouldDisplayPinnedExtensionsWithinSidebar(

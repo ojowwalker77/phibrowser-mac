@@ -5,6 +5,12 @@
 
 import AppKit
 
+private final class TabGroupChipImageView: NSImageView {
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        nil
+    }
+}
+
 /// Chip rendered to the left of each visible group's first member tab
 /// on the horizontal strip.
 ///
@@ -36,6 +42,8 @@ final class TabGroupChipView: NSView {
     static let countHorizontalPadding: CGFloat = 6
     static let countVerticalPadding: CGFloat = 1
     static let countToLabelGap: CGFloat = 6
+    static let collapseControlSize: CGFloat = 16
+    static let collapseControlGap: CGFloat = 4
     static let maxFullWidth: CGFloat = 180
     /// Extra slack added to the measured label width when computing
     /// the chip's overall width. NSTextField (TextKit) renders text
@@ -50,9 +58,10 @@ final class TabGroupChipView: NSView {
     // MARK: - Callbacks (set by TabStrip)
 
     /// Called when the chip is clicked (mouseUp inside bounds, no drag,
-    /// not a right-click). `TabStrip` uses this to fire
-    /// `bridge.updateTabGroupCollapsed(...)`.
+    /// not a right-click). `TabStrip` uses this for local selection
+    /// placeholder state.
     var onClick: ((String) -> Void)?
+    var onCollapseToggle: ((String) -> Void)?
 
     /// Called to populate the right-click menu. `TabStrip` reuses
     /// `TabGroupSidebarItem.makeContextMenu` here. Returns nil → no menu.
@@ -98,7 +107,14 @@ final class TabGroupChipView: NSView {
         case click
         case drag
     }
+
+    private enum PendingClickTarget {
+        case overview
+        case collapse
+    }
+
     private var pendingAction: PendingChipAction = .idle
+    private var pendingClickTarget: PendingClickTarget = .overview
     private var mouseDownLocation: CGPoint = .zero
 
     /// Horizontal pixel threshold to promote click → drag. Matches
@@ -114,6 +130,7 @@ final class TabGroupChipView: NSView {
     private(set) var hasUserSetTitle: Bool = false
     private(set) var isCollapsed: Bool = false
     private(set) var memberFavicons: [Data?] = []
+    private var isOverviewSelected = false
 
     // MARK: - Subviews / sublayers
 
@@ -147,6 +164,13 @@ final class TabGroupChipView: NSView {
     }()
     private let countBackgroundLayer = CALayer()
     private let mosaicView = TabGroupChipMosaicView()
+    private let collapseImageView: NSImageView = {
+        let view = TabGroupChipImageView()
+        view.imageScaling = .scaleProportionallyDown
+        view.symbolConfiguration = .init(pointSize: 10, weight: .semibold)
+        view.contentTintColor = .secondaryLabelColor
+        return view
+    }()
 
     // MARK: - Init
 
@@ -173,11 +197,12 @@ final class TabGroupChipView: NSView {
         addSubview(labelField)
         addSubview(countField)
         addSubview(mosaicView)
+        addSubview(collapseImageView)
         mosaicView.isHidden = true
 
         toolTip = NSLocalizedString(
-            "Click to collapse or expand group",
-            comment: "Tab Groups - cursor tooltip for horizontal-strip group chip")
+            "Click the title to open the group overview. Click the chevron to collapse or expand the group.",
+            comment: "Tab Groups - tooltip for horizontal-strip group chip interactions")
     }
 
     required init?(coder: NSCoder) {
@@ -208,6 +233,7 @@ final class TabGroupChipView: NSView {
         labelField.stringValue = displayTitle
         countField.stringValue = "\(memberCount)"
         mosaicView.configure(memberFavicons: memberFavicons, memberCount: memberCount)
+        updateCollapseImage()
 
         applyAppearance()
         needsLayout = true
@@ -227,6 +253,12 @@ final class TabGroupChipView: NSView {
     func updateMosaic(memberFavicons: [Data?]) {
         self.memberFavicons = memberFavicons
         mosaicView.configure(memberFavicons: memberFavicons, memberCount: memberCount)
+    }
+
+    func setOverviewSelected(_ selected: Bool) {
+        guard isOverviewSelected != selected else { return }
+        isOverviewSelected = selected
+        applyOverviewSelectionAppearance()
     }
 
     // MARK: - Appearance
@@ -252,6 +284,8 @@ final class TabGroupChipView: NSView {
         }
         countBackgroundLayer.cornerRadius = (TabGroupChipView.countFont.pointSize +
                                               Self.countVerticalPadding * 2) / 2.0
+        collapseImageView.contentTintColor = .secondaryLabelColor
+        applyOverviewSelectionAppearance()
 
         // Count badge: only when expanded + user-named. When the mosaic
         // shows (collapsed), the count is suppressed because the mosaic
@@ -260,6 +294,22 @@ final class TabGroupChipView: NSView {
         countField.isHidden = !showCount
         countBackgroundLayer.isHidden = !showCount
         mosaicView.isHidden = !isCollapsed
+    }
+
+    private func updateCollapseImage() {
+        let name = isCollapsed ? "chevron.right" : "chevron.down"
+        collapseImageView.image = NSImage(systemSymbolName: name, accessibilityDescription: nil)
+    }
+
+    private func applyOverviewSelectionAppearance() {
+        layer?.borderWidth = isOverviewSelected ? 1 : 0
+        guard isOverviewSelected else {
+            layer?.borderColor = nil
+            return
+        }
+        effectiveAppearance.performAsCurrentDrawingAppearance { [self] in
+            layer?.borderColor = color.nsColor.cgColor
+        }
     }
 
     override func viewDidChangeEffectiveAppearance() {
@@ -283,7 +333,13 @@ final class TabGroupChipView: NSView {
 
         let labelX = Self.leadingPadding + Self.dotSize + Self.dotToLabelGap
         let labelHeight = ceil(Self.labelFont.ascender - Self.labelFont.descender + Self.labelFont.leading)
-        let trailingX = bounds.width - Self.labelRightPadding
+        let collapseX = bounds.width - Self.labelRightPadding - Self.collapseControlSize
+        let collapseY = (bounds.height - Self.collapseControlSize) / 2
+        collapseImageView.frame = CGRect(x: collapseX,
+                                         y: collapseY,
+                                         width: Self.collapseControlSize,
+                                         height: Self.collapseControlSize)
+        let trailingX = collapseX - Self.collapseControlGap
 
         if isCollapsed {
             // Mosaic anchored to the trailing edge.
@@ -361,8 +417,13 @@ final class TabGroupChipView: NSView {
             let countWidth = ceil(countTextWidth) + countHorizontalPadding * 2
             width += countToLabelGap + countWidth
         }
+        width += collapseControlGap + collapseControlSize
 
         return min(width, maxFullWidth)
+    }
+
+    private func collapseControlRect() -> CGRect {
+        collapseImageView.frame.insetBy(dx: -4, dy: -6)
     }
 
     // MARK: - Mouse handling
@@ -398,6 +459,11 @@ final class TabGroupChipView: NSView {
         addCursorRect(bounds, cursor: .pointingHand)
     }
 
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        guard !isHidden, alphaValue > 0, bounds.contains(point) else { return nil }
+        return self
+    }
+
     /// Prevent AppKit from treating chip-area mouseDown as a
     /// window-drag handle. The main window has
     /// `isMovableByWindowBackground = true`
@@ -413,6 +479,8 @@ final class TabGroupChipView: NSView {
     override func mouseDown(with event: NSEvent) {
         mouseDownInside = true
         mouseDownLocation = event.locationInWindow
+        let localPoint = convert(event.locationInWindow, from: nil)
+        pendingClickTarget = collapseControlRect().contains(localPoint) ? .collapse : .overview
         pendingAction = .click
     }
 
@@ -421,6 +489,7 @@ final class TabGroupChipView: NSView {
         let dx = event.locationInWindow.x - mouseDownLocation.x
         switch pendingAction {
         case .click:
+            guard pendingClickTarget == .overview else { return }
             if abs(dx) >= Self.dragActivationThreshold {
                 pendingAction = .drag
                 onDragStart?(token, event.locationInWindow)
@@ -436,13 +505,19 @@ final class TabGroupChipView: NSView {
         defer {
             mouseDownInside = false
             pendingAction = .idle
+            pendingClickTarget = .overview
         }
         guard mouseDownInside else { return }
         switch pendingAction {
         case .click:
             let p = convert(event.locationInWindow, from: nil)
             guard bounds.contains(p) else { return }
-            onClick?(token)
+            if pendingClickTarget == .collapse {
+                guard collapseControlRect().contains(p) else { return }
+                onCollapseToggle?(token)
+            } else {
+                onClick?(token)
+            }
         case .drag:
             onDragEnd?(token, event.locationInWindow)
         case .idle:

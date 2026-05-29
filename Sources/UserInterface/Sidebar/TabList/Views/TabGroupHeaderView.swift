@@ -29,6 +29,7 @@ final class TabGroupHeaderViewModel {
     /// Mirrors `WebContentGroupInfo.isCollapsed` so the inline chevron
     /// in `TabGroupHeaderView` can rotate without driving the state.
     var isCollapsed: Bool = false
+    var isOverviewSelected: Bool = false
 
     private var configuredToken: String?
     private var cancellables = Set<AnyCancellable>()
@@ -149,6 +150,19 @@ struct TabGroupHeaderView: View {
         .padding(.leading, 4)
         .padding(.trailing, 6)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(viewModel.isOverviewSelected
+                      ? Color(nsColor: NSColor(resource: .sidebarTabSelected))
+                      : Color.clear)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(viewModel.isOverviewSelected
+                        ? Color(nsColor: viewModel.color.nsColor).opacity(0.45)
+                        : Color.clear,
+                        lineWidth: 1)
+        )
         // `contentShape` makes the empty horizontal space between the
         // chevron / title / close button hit-testable so `.onHover`
         // fires across the entire header strip, not just on the
@@ -183,13 +197,12 @@ private struct TabGroupHeaderColorIndicator: View {
 }
 
 enum TabGroupHeaderHitTarget {
+    case toggleCollapse
     case closeGroup
 }
 
-/// Resolves the close-button hit zone on the header. The rest of the
-/// header strip (chevron, color dot, title, empty space) is treated as
-/// a single "toggle / drag" surface by `TabGroupHeaderHostingView` —
-/// click toggles collapse, drag starts a whole-group drag.
+/// Resolves explicit control zones on the header. The title/body zone
+/// stays nil so it can request overview on click and start a group drag.
 struct TabGroupHeaderHitTargetResolver {
     static let controlSize: CGFloat = 24
     static let horizontalInset: CGFloat = 6
@@ -202,6 +215,20 @@ struct TabGroupHeaderHitTargetResolver {
             width: controlSize,
             height: controlSize
         )
-        return closeRect.contains(point) ? .closeGroup : nil
+        if closeRect.contains(point) {
+            return .closeGroup
+        }
+
+        let collapseRect = CGRect(
+            x: 0,
+            y: originY,
+            width: controlSize,
+            height: controlSize
+        )
+        if collapseRect.contains(point) {
+            return .toggleCollapse
+        }
+
+        return nil
     }
 }

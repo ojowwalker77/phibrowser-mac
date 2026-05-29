@@ -298,6 +298,14 @@ typedef NS_ENUM(NSUInteger, PhiOmniboxSuggestionDisposition) {
 - (void)createTabInGroupWithWindowId:(int64_t)windowId
                             tokenHex:(NSString *)tokenHex;
 
+/// Atomically create a tab inside `tokenHex`, loading `url` at `groupIndex`
+/// relative to the group's current range.
+- (void)createTabInGroupWithWindowId:(int64_t)windowId
+                            tokenHex:(NSString *)tokenHex
+                                  url:(NSString *)url
+                           groupIndex:(NSInteger)groupIndex
+                     focusAfterCreate:(BOOL)focusAfterCreate;
+
 /// Close the group identified by `tokenHex` (closes all of its tabs).
 - (void)closeGroupWithWindowId:(int64_t)windowId
                       tokenHex:(NSString *)tokenHex;

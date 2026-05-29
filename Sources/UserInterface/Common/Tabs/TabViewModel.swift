@@ -19,6 +19,7 @@ final class TabViewModel {
     /// when viewModel is briefly reconfigured with a nil-url tab during layout.
     private(set) var faviconLoadURL: String?
     var isActive: Bool = false
+    var isActiveSuppressed: Bool = false
     var isHovered: Bool = false
     var isHoverSuppressed: Bool = false
     var isPressed: Bool = false
@@ -75,6 +76,7 @@ final class TabViewModel {
         liveFaviconImage = nil
         liveFaviconRevision = 0
         isActive = false
+        isActiveSuppressed = false
         isHovered = false
         isHoverSuppressed = false
         isPressed = false
@@ -100,6 +102,11 @@ final class TabViewModel {
         }
     }
 
+    func setActiveSuppressed(_ suppressed: Bool, activeValue: Bool? = nil) {
+        isActiveSuppressed = suppressed
+        isActive = (activeValue ?? isActive) && !suppressed
+    }
+
     private var configuredTabGuid: Int?
 
     func configure(with tab: Tab, in browserState: BrowserState? = nil) {
@@ -110,7 +117,7 @@ final class TabViewModel {
         self.faviconLoadURL = (tab.url?.isEmpty == false) ? tab.url : nil
         self.faviconUrl = tab.faviconUrl
         updateLiveFavicon(data: tab.liveFaviconData, revision: tab.liveFaviconRevision)
-        self.isActive = tab.isActive
+        self.isActive = tab.isActive && !isActiveSuppressed
         self.isLoading = tab.isLoading
         self.loadingProgress = Double(tab.loadingProgress)
         self.isCurrentlyAudible = tab.isCurrentlyAudible
@@ -185,7 +192,7 @@ final class TabViewModel {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] in
                 guard let self, self.configuredTabGuid == expectedGuid else { return }
-                self.isActive = $0
+                self.isActive = $0 && !self.isActiveSuppressed
             }
             .store(in: &cancellables)
             

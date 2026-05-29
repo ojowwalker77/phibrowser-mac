@@ -217,6 +217,13 @@ class WebContentHeader: NSView {
             }
             .store(in: &cancellables)
 
+        unsafeBrowserState?.$groupOverviewState
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.updateLayoutVisibility()
+            }
+            .store(in: &cancellables)
+
         state.loadingProgress = 0
         state.isLoading = false
         state.isProgressVisible = false
@@ -263,7 +270,8 @@ class WebContentHeader: NSView {
         let traditionalLayout = layoutMode.isTraditional
         let isCollapsed = unsafeBrowserState?.sidebarCollapsed ?? false
         let isIncognito = unsafeBrowserState?.isIncognito ?? false
-        let aiChatEnabled = currentTab?.aiChatEnabled ?? false
+        let overviewActive = unsafeBrowserState?.groupOverviewState != nil
+        let aiChatEnabled = overviewActive || (currentTab?.aiChatEnabled ?? false)
         let phiAIEnabled = UserDefaults.standard.bool(forKey: PhiPreferences.AISettings.phiAIEnabled.rawValue)
 
         DispatchQueue.main.async { [weak self] in

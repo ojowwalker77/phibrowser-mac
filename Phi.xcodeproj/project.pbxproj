@@ -164,6 +164,10 @@
 		8E762CC62F16531A00631087 /* TabStripAnimation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E762CC52F16531A00631087 /* TabStripAnimation.swift */; };
 		8E8008D72FA1A59800EB24C5 /* GroupColor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E8008D42FA1A59800EB24C5 /* GroupColor.swift */; };
 		8E8008D82FA1A59800EB24C5 /* WebContentGroupInfo.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E8008D52FA1A59800EB24C5 /* WebContentGroupInfo.swift */; };
+		8E0B00012FC0000000000001 /* GroupOverviewState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E0B00032FC0000000000001 /* GroupOverviewState.swift */; };
+		8E0B00022FC0000000000001 /* BrowserState+GroupOverview.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E0B00042FC0000000000001 /* BrowserState+GroupOverview.swift */; };
+		8E0B00052FC0000000000001 /* GroupOverviewViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E0B00072FC0000000000001 /* GroupOverviewViewController.swift */; };
+		8E0B00062FC0000000000001 /* GroupOverviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E0B00082FC0000000000001 /* GroupOverviewView.swift */; };
 		8E8008DA2FA1A69600EB24C5 /* GroupColor+NSColor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E8008D92FA1A69600EB24C5 /* GroupColor+NSColor.swift */; };
 		8E8008F52FA1A72E00EB24C5 /* TabGroupHeaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E8008F42FA1A72E00EB24C5 /* TabGroupHeaderView.swift */; };
 		8E8008F82FA1A73A00EB24C5 /* TabGroupSidebarItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E8008F72FA1A73A00EB24C5 /* TabGroupSidebarItem.swift */; };
@@ -545,6 +549,10 @@
 		8E762CC52F16531A00631087 /* TabStripAnimation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TabStripAnimation.swift; sourceTree = "<group>"; };
 		8E8008D42FA1A59800EB24C5 /* GroupColor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GroupColor.swift; sourceTree = "<group>"; };
 		8E8008D52FA1A59800EB24C5 /* WebContentGroupInfo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebContentGroupInfo.swift; sourceTree = "<group>"; };
+		8E0B00032FC0000000000001 /* GroupOverviewState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GroupOverviewState.swift; sourceTree = "<group>"; };
+		8E0B00042FC0000000000001 /* BrowserState+GroupOverview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "BrowserState+GroupOverview.swift"; sourceTree = "<group>"; };
+		8E0B00072FC0000000000001 /* GroupOverviewViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GroupOverviewViewController.swift; sourceTree = "<group>"; };
+		8E0B00082FC0000000000001 /* GroupOverviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GroupOverviewView.swift; sourceTree = "<group>"; };
 		8E8008D92FA1A69600EB24C5 /* GroupColor+NSColor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "GroupColor+NSColor.swift"; sourceTree = "<group>"; };
 		8E8008F42FA1A72E00EB24C5 /* TabGroupHeaderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TabGroupHeaderView.swift; sourceTree = "<group>"; };
 		8E8008F72FA1A73A00EB24C5 /* TabGroupSidebarItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TabGroupSidebarItem.swift; sourceTree = "<group>"; };
@@ -843,6 +851,15 @@
 			path = NativeNTP;
 			sourceTree = "<group>";
 		};
+		8E0B00092FC0000000000001 /* GroupOverview */ = {
+			isa = PBXGroup;
+			children = (
+				8E0B00072FC0000000000001 /* GroupOverviewViewController.swift */,
+				8E0B00082FC0000000000001 /* GroupOverviewView.swift */,
+			);
+			path = GroupOverview;
+			sourceTree = "<group>";
+		};
 		376CE3FE2F2891670093D937 /* MessageCard */ = {
 			isa = PBXGroup;
 			children = (
@@ -1106,6 +1123,8 @@
 			isa = PBXGroup;
 			children = (
 				8E8008D42FA1A59800EB24C5 /* GroupColor.swift */,
+				8E0B00032FC0000000000001 /* GroupOverviewState.swift */,
+				8E0B00042FC0000000000001 /* BrowserState+GroupOverview.swift */,
 				8E8008D52FA1A59800EB24C5 /* WebContentGroupInfo.swift */,
 			);
 			path = TabGroup;
@@ -1688,6 +1707,7 @@
 			isa = PBXGroup;
 			children = (
 				376CE2F12F2722480093D937 /* NativeNTP */,
+				8E0B00092FC0000000000001 /* GroupOverview */,
 				376195BE2F518DCF0094A78E /* FloatingSidebar */,
 				376195472F5152A30094A78E /* Header */,
 				8E486A762F3EEF8A00078DEC /* StatusURLViewModel.swift */,
@@ -1994,8 +2014,12 @@
 				8E8008F82FA1A73A00EB24C5 /* TabGroupSidebarItem.swift in Sources */,
 				8E4C949C2F10DA5800B09A80 /* NewTabButton.swift in Sources */,
 				8E8008D72FA1A59800EB24C5 /* GroupColor.swift in Sources */,
+				8E0B00012FC0000000000001 /* GroupOverviewState.swift in Sources */,
+				8E0B00022FC0000000000001 /* BrowserState+GroupOverview.swift in Sources */,
 				8E8008D82FA1A59800EB24C5 /* WebContentGroupInfo.swift in Sources */,
 				376CE2F32F27226A0093D937 /* NewTabViewController.swift in Sources */,
+				8E0B00052FC0000000000001 /* GroupOverviewViewController.swift in Sources */,
+				8E0B00062FC0000000000001 /* GroupOverviewView.swift in Sources */,
 				B02586F52E42FD97001B08FC /* ChromiumLauncher.m in Sources */,
 				37686A9C2F10D61E00DC3990 /* UserDefaultsRegistration.swift in Sources */,
 				3769C6B32EFA540300A94DE0 /* GradientColorLabel.swift in Sources */,

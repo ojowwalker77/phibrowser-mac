@@ -29,6 +29,9 @@ protocol TabGroupCellViewDelegate: AnyObject {
     func tabGroupCellDidRequestCloseGroup(_ cell: TabGroupCellView,
                                           group: WebContentGroupInfo)
 
+    func tabGroupCellDidRequestOverview(_ cell: TabGroupCellView,
+                                        group: WebContentGroupInfo)
+
     func tabGroupCell(_ cell: TabGroupCellView,
                       beginDraggingGroup group: WebContentGroupInfo,
                       from headerView: NSView,
@@ -169,6 +172,7 @@ protocol GroupTabsDragSource: AnyObject {
 private protocol TabGroupHeaderHostingViewDelegate: AnyObject {
     func tabGroupHeaderHostingViewDidToggleCollapse(_ view: TabGroupHeaderHostingView)
     func tabGroupHeaderHostingViewDidRequestCloseGroup(_ view: TabGroupHeaderHostingView)
+    func tabGroupHeaderHostingViewDidRequestOverview(_ view: TabGroupHeaderHostingView)
     func tabGroupHeaderHostingView(_ view: TabGroupHeaderHostingView,
                                    beginDraggingWith mouseDownEvent: NSEvent)
 }
@@ -238,8 +242,16 @@ private final class TabGroupHeaderHostingView: NSHostingView<TabGroupHeaderView>
             return
         }
 
-        // Any other mouseUp on the header strip toggles collapse.
-        dragDelegate?.tabGroupHeaderHostingViewDidToggleCollapse(self)
+        if pendingHitTarget == .toggleCollapse {
+            let upPoint = convert(event.locationInWindow, from: nil)
+            let upTarget = TabGroupHeaderHitTargetResolver.target(at: upPoint, in: bounds)
+            if upTarget == .toggleCollapse {
+                dragDelegate?.tabGroupHeaderHostingViewDidToggleCollapse(self)
+            }
+            return
+        }
+
+        dragDelegate?.tabGroupHeaderHostingViewDidRequestOverview(self)
     }
 }
 
@@ -297,10 +309,12 @@ final class TabGroupCellView: SidebarCellView {
 
     private var isDropTargetHighlighted = false
     private var isHovered = false
+    private var isOverviewSelected = false
     private var lastGroupColor: GroupColor = .grey
     private let hoverRegionView = SidebarTabHoverRegionView()
 
     private var collapseSubscription: AnyCancellable?
+    private var colorSubscription: AnyCancellable?
     private weak var configuredGroup: WebContentGroupInfo?
     private weak var configuredBrowserState: BrowserState?
     private var isTemporarilyCollapsedForDrag = false
@@ -326,12 +340,16 @@ final class TabGroupCellView: SidebarCellView {
         viewModel.cancelSubscriptions()
         collapseSubscription?.cancel()
         collapseSubscription = nil
+        colorSubscription?.cancel()
+        colorSubscription = nil
         tabsByGuid = [:]
         currentMemberOrder = []
         activeDragTabGuid = nil
         isDropTargetHighlighted = false
         isHovered = false
+        isOverviewSelected = false
         viewModel.isHeaderHovered = false
+        viewModel.isOverviewSelected = false
         isTemporarilyCollapsedForDrag = false
         configuredGroup = nil
         configuredBrowserState = nil
@@ -476,6 +494,7 @@ final class TabGroupCellView: SidebarCellView {
             }
             cell.delegate = self
             cell.configure(with: tab)
+            cell.setActiveSuppressed(isOverviewSelected)
             return cell
         }
         dataSource.dragSource = self
@@ -518,6 +537,16 @@ final class TabGroupCellView: SidebarCellView {
                 self.applyEffectiveCollapseState()
                 self.groupCellDelegate?.tabGroupCellNeedsHeightUpdate(
                     self, for: captureToken)
+            }
+
+        colorSubscription?.cancel()
+        colorSubscription = groupItem.group.$color
+            .removeDuplicates()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] color in
+                guard let self, self.token == captureToken else { return }
+                self.lastGroupColor = color
+                self.applyHighlightVisuals()
             }
     }
 
@@ -602,6 +631,27 @@ final class TabGroupCellView: SidebarCellView {
         applyHighlightVisuals()
     }
 
+    func setOverviewSelected(_ selected: Bool) {
+        guard isOverviewSelected != selected else { return }
+        isOverviewSelected = selected
+        viewModel.isOverviewSelected = selected
+        updateVisibleMemberActiveSuppression()
+        applyHighlightVisuals()
+    }
+
+    private func updateVisibleMemberActiveSuppression() {
+        for row in 0..<innerTable.numberOfRows {
+            guard let cell = innerTable.view(
+                atColumn: 0,
+                row: row,
+                makeIfNecessary: false
+            ) as? SidebarTabCellView else {
+                continue
+            }
+            cell.setActiveSuppressed(isOverviewSelected)
+        }
+    }
+
     private func applyHighlightVisuals() {
         containerView.wantsLayer = true
         containerView.layer?.cornerRadius = 8
@@ -619,6 +669,12 @@ final class TabGroupCellView: SidebarCellView {
                 groupColor.chipTintColor.cgColor
             containerBorderOverlayView.layer?.borderColor =
                 tint.withAlphaComponent(0.36).cgColor
+        } else if isOverviewSelected {
+            let groupColor = configuredGroup?.color ?? lastGroupColor
+            containerBorderOverlayView.isHidden = false
+            containerBorderOverlayView.layer?.backgroundColor = NSColor.clear.cgColor
+            containerBorderOverlayView.layer?.borderColor =
+                groupColor.nsColor.withAlphaComponent(0.45).cgColor
         } else if isHovered {
             containerBorderOverlayView.isHidden = false
             containerBorderOverlayView.layer?.backgroundColor = NSColor.clear.cgColor
@@ -701,6 +757,11 @@ extension TabGroupCellView: TabGroupHeaderHostingViewDelegate {
     fileprivate func tabGroupHeaderHostingViewDidRequestCloseGroup(_ view: TabGroupHeaderHostingView) {
         guard let group = configuredGroup else { return }
         groupCellDelegate?.tabGroupCellDidRequestCloseGroup(self, group: group)
+    }
+
+    fileprivate func tabGroupHeaderHostingViewDidRequestOverview(_ view: TabGroupHeaderHostingView) {
+        guard let group = configuredGroup else { return }
+        groupCellDelegate?.tabGroupCellDidRequestOverview(self, group: group)
     }
 
     fileprivate func tabGroupHeaderHostingView(_ view: TabGroupHeaderHostingView,

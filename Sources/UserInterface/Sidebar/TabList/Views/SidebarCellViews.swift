@@ -200,6 +200,8 @@ class SidebarTabCellView: SidebarCellView {
     private let hoverRegionView = SidebarTabHoverRegionView()
     private let hoverDeadZoneView = SidebarTabHoverDeadZoneView()
     private let viewModel = TabViewModel()
+    private weak var configuredTab: Tab?
+    private var activeSuppressed = false
     weak var delegate: TabCellDelegate?
     
     override init(frame frameRect: NSRect) {
@@ -220,8 +222,11 @@ class SidebarTabCellView: SidebarCellView {
         // and the next SwiftUI render cycle.
         viewModel.cancelSubscriptions()
         viewModel.setHoverSuppressed(false)
+        viewModel.setActiveSuppressed(false, activeValue: false)
         viewModel.setHovered(false)
         viewModel.isPressed = false
+        configuredTab = nil
+        activeSuppressed = false
     }
 
     /// Cancel Combine subscriptions without resetting visual state.
@@ -239,6 +244,11 @@ class SidebarTabCellView: SidebarCellView {
 
     func setHovered(_ hovered: Bool) {
         viewModel.setHovered(hovered)
+    }
+
+    func setActiveSuppressed(_ suppressed: Bool) {
+        activeSuppressed = suppressed
+        viewModel.setActiveSuppressed(suppressed, activeValue: configuredTab?.isActive ?? false)
     }
     
     private func setupViews() {
@@ -300,12 +310,14 @@ class SidebarTabCellView: SidebarCellView {
 
     override func configureAppearance() {
         guard let tab = item as? Tab else { return }
+        configuredTab = tab
         cancellables.forEach { $0.cancel() }
         cancellables.removeAll()
 
         let state = MainBrowserWindowControllersManager.shared
             .controller(for: tab.windowId)?.browserState
         viewModel.configure(with: tab, in: state)
+        viewModel.setActiveSuppressed(activeSuppressed, activeValue: tab.isActive)
         viewModel.onToggleMute = { [weak tab] in
             guard let tab else { return }
             tab.setAudioMuted(!tab.isAudioMuted)

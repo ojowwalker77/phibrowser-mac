@@ -74,11 +74,16 @@ extension MainBrowserWindowController {
                     }
                 }
             }
-            if fromAddressBar, let tab = browserState.focusingTab {
-                omniBoxContainerViewController?.omniBoxController?.updateStatus(
-                    with: tab,
-                    suppressAutomaticSearch: true
-                )
+            if fromAddressBar {
+                if browserState.groupOverviewState != nil {
+                    omniBoxContainerViewController?.omniBoxController?
+                        .updateStatusForGroupOverview()
+                } else if let tab = browserState.focusingTab {
+                    omniBoxContainerViewController?.omniBoxController?.updateStatus(
+                        with: tab,
+                        suppressAutomaticSearch: true
+                    )
+                }
             }
             omniBoxContainerViewController?.showOmniBox(fromAddressBar: fromAddressBar, addressView: addressView)
         } else if omniBoxContainerViewController?.omniBoxController?.openningFromCurrenTab == false,
@@ -89,7 +94,11 @@ extension MainBrowserWindowController {
                 trigger: "address-bar-refill",
                 addressViewPresent: false
             )
-            if let tab = browserState.focusingTab {
+            if browserState.groupOverviewState != nil {
+                omniBoxContainerViewController?.omniBoxController?
+                    .updateStatusForGroupOverview()
+                omniBoxContainerViewController?.omniBoxController?.requestAtonce(source: .manualRefresh)
+            } else if let tab = browserState.focusingTab {
                 omniBoxContainerViewController?.omniBoxController?.updateStatus(
                     with: tab,
                     suppressAutomaticSearch: true

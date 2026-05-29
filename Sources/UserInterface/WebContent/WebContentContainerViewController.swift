@@ -410,6 +410,13 @@ class WebContentContainerViewController: NSViewController {
                 self.updateContentOuterBorder()
             }
             .store(in: &cancellables)
+
+        browserState?.$groupOverviewState
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.updateContentOuterBorder()
+            }
+            .store(in: &cancellables)
     }
 
     private func rebuildGroupChangeSubscriptions(groups: [String: WebContentGroupInfo]) {
@@ -473,7 +480,9 @@ class WebContentContainerViewController: NSViewController {
         // path, focusingTab updates before currentWebContentController is
         // promoted; using the visible tab keeps the outline attached to the
         // tab whose page is actually onscreen.
-        let activeFrame = tabStripBarController?.tabFrame(for: controller.associatedTab, in: view)
+        let overviewActive = browserState?.groupOverviewState != nil
+        let activeTabForBorder = overviewActive ? nil : controller.associatedTab
+        let activeFrame = tabStripBarController?.tabFrame(for: activeTabForBorder, in: view)
 
         let path = CGMutablePath()
 
@@ -559,7 +568,7 @@ class WebContentContainerViewController: NSViewController {
         outerBorderLayer.path = path
         outerBorderLayer.strokeColor = ThemedColor.border.resolve(in: view).cgColor
 
-        updateGroupBoundaryLayers(apexY: topY, invR: invR)
+        updateGroupBoundaryLayers(apexY: topY, invR: invR, activeTab: activeTabForBorder)
 
         CATransaction.commit()
     }
@@ -574,9 +583,8 @@ class WebContentContainerViewController: NSViewController {
     ///
     /// Single path means the seam at the inverse-curve apex no longer
     /// exists by construction — stroke is one continuous shape.
-    private func updateGroupBoundaryLayers(apexY: CGFloat, invR: CGFloat) {
+    private func updateGroupBoundaryLayers(apexY: CGFloat, invR: CGFloat, activeTab: Tab?) {
         let traditionalLayout = PhiPreferences.GeneralSettings.loadLayoutMode().isTraditional
-        let activeTab = currentWebContentController?.associatedTab
         guard traditionalLayout,
               let geometries = tabStripBarController?.groupGeometries(in: view,
                                                                        activeTab: activeTab) else {

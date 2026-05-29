@@ -153,7 +153,8 @@ class SidebarViewController: NSViewController {
     /// Update chat button visibility based on configuration and current tab's aiChatEnabled
     private func updateChatButtonVisibility() {
         let navigationAtTop = PhiPreferences.GeneralSettings.loadLayoutMode().showsNavigationAtTop
-        let aiChatEnabled = state.focusingTab?.aiChatEnabled ?? false
+        let overviewActive = state.groupOverviewState != nil
+        let aiChatEnabled = overviewActive || (state.focusingTab?.aiChatEnabled ?? false)
         let phiAIEnabled = UserDefaults.standard.bool(forKey: PhiPreferences.AISettings.phiAIEnabled.rawValue)
         let shouldHideChat = state.isIncognito || navigationAtTop || !aiChatEnabled || !phiAIEnabled
         bottomBarSwiftUI.setChatHidden(shouldHideChat)
@@ -299,6 +300,13 @@ class SidebarViewController: NSViewController {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] tab in
                 self?.observeFocusingTabAIChatEnabled(tab)
+                self?.updateChatButtonVisibility()
+            }
+            .store(in: &cancellables)
+
+        state.$groupOverviewState
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
                 self?.updateChatButtonVisibility()
             }
             .store(in: &cancellables)

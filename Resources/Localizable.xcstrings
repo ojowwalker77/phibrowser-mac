@@ -345,8 +345,8 @@
     "Click " : {
       "comment" : "Phi Link - Custom bot guide prefix"
     },
-    "Click to collapse or expand group" : {
-      "comment" : "Tab Groups - cursor tooltip for horizontal-strip group chip"
+    "Click the title to open the group overview. Click the chevron to collapse or expand the group." : {
+      "comment" : "Tab Groups - tooltip for horizontal-strip group chip interactions"
     },
     "Click to install update" : {
       "comment" : "Phi menu - Menu item text when update is ready to install"
@@ -357,8 +357,14 @@
     "Close Group" : {
       "comment" : "Tab group context menu - Close the group and all its tabs"
     },
+    "Close Group Overview" : {
+      "comment" : "Tab group overview - Accessibility label for the button that closes the overview"
+    },
     "Close Other Tabs" : {
       "comment" : "Tab context menu - Menu item to close all tabs except the selected one"
+    },
+    "Close Tab" : {
+      "comment" : "Tab group overview - Accessibility label for the button that closes one tab card"
     },
     "Code Examples" : {
 
@@ -771,6 +777,9 @@
     "Name cannot exceed %d characters" : {
       "comment" : "Account settings - Error message when user name is too long"
     },
+    "Name group" : {
+      "comment" : "Tab group overview editor - Placeholder for the editable group title field"
+    },
     "Name is too long (maximum 100 characters)" : {
       "comment" : "Set name page - Error message when user name exceeds 100 characters"
     },
@@ -784,7 +793,7 @@
       "comment" : "Bookmark New Folder menu item"
     },
     "New Tab" : {
-      "comment" : "Sidebar tab list - Button title to create a new browser tab\nTab area context menu - Open a new browser tab\nside bar new tab button text"
+      "comment" : "Sidebar tab list - Button title to create a new browser tab\nTab area context menu - Open a new browser tab\nTitle for the group overview card that creates a new tab in the selected group\nside bar new tab button text"
     },
     "New tab behavior" : {
       "comment" : "General settings - Row title for configuring new tab behavior"
@@ -1108,7 +1117,7 @@
       "comment" : "Appearance choice: follow system setting"
     },
     "Tab Group" : {
-      "comment" : "Tab Groups - Fallback bookmark folder title when converting a tab group"
+      "comment" : "Fallback title shown in the group overview header when group metadata is unavailable\nTab Groups - Fallback bookmark folder title when converting a tab group"
     },
     "Tab Name" : {
       "comment" : "Pinned tab editor - Placeholder for pinned tab name input"

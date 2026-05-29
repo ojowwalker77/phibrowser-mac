@@ -259,6 +259,13 @@ class SidebarTabListViewController: NSViewController {
             self?.updateFloatingNewTabVisibility()
         }
         .store(in: &cancellables)
+
+        browserState.$groupOverviewState
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.updateVisibleGroupOverviewSelection()
+            }
+            .store(in: &cancellables)
     }
 
     func setActive(_ active: Bool) {
@@ -1584,6 +1591,22 @@ extension SidebarTabListViewController: NSOutlineViewDataSource {
         ) as? TabGroupCellView
     }
 
+    private func updateVisibleGroupOverviewSelection() {
+        let selectedToken = browserState.activeGroupOverviewToken
+        for row in 0..<outlineView.numberOfRows {
+            let view = outlineView.view(
+                atColumn: 0,
+                row: row,
+                makeIfNecessary: false
+            )
+            if let groupCell = view as? TabGroupCellView {
+                groupCell.setOverviewSelected(!groupCell.token.isEmpty && groupCell.token == selectedToken)
+            } else if let tabCell = view as? SidebarTabCellView {
+                tabCell.setActiveSuppressed(selectedToken != nil)
+            }
+        }
+    }
+
     private func noteTabGroupRowHeightChanged(for groupItem: TabGroupSidebarItem,
                                               animated: Bool) {
         let row = outlineView.row(forItem: groupItem)
@@ -1828,6 +1851,9 @@ extension SidebarTabListViewController: NSOutlineViewDelegate {
         if sidebarItem.itemType == .newTabButton {
             updateOriginalNewTabCellVisibility(cellView)
         }
+        if let tabCell = cellView as? SidebarTabCellView {
+            tabCell.setActiveSuppressed(browserState.groupOverviewState != nil)
+        }
         if let bookmarkCell = cellView as? BookmarkCellView,
            let bookmark = sidebarItem as? Bookmark {
             bookmarkCell.setDropTargetHighlighted(bookmark.isFolder && dropFeedbackTarget == .bookmarkFolder(guid: bookmark.guid))
@@ -1838,6 +1864,8 @@ extension SidebarTabListViewController: NSOutlineViewDelegate {
                 temporarilyCollapsedGroupTokenForDrag == groupItem.group.token)
             groupCell.setDropTargetHighlighted(
                 dropFeedbackTarget == .tabGroup(token: groupItem.group.token))
+            groupCell.setOverviewSelected(
+                browserState.isShowingGroupOverview(for: groupItem.group.token))
         }
         return cellView
     }
@@ -2969,6 +2997,11 @@ extension SidebarTabListViewController: TabGroupCellViewDelegate {
     func tabGroupCellDidRequestCloseGroup(_ cell: TabGroupCellView,
                                           group: WebContentGroupInfo) {
         requestTabGroupClose(group: group)
+    }
+
+    func tabGroupCellDidRequestOverview(_ cell: TabGroupCellView,
+                                        group: WebContentGroupInfo) {
+        browserState.showGroupOverview(token: group.token)
     }
 
     func tabGroupCell(_ cell: TabGroupCellView,

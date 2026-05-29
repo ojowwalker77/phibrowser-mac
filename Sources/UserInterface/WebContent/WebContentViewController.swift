@@ -69,9 +69,10 @@ class WebContentViewController: NSViewController {
     private var progressObserverCancellables = Set<AnyCancellable>()
     private var lastProgressLogBucket: Int?
     private var isSubscriptionsSetup = false
-    private enum ContentMode {
+    private enum ContentMode: Equatable {
         case nativeNtp
         case webContent
+        case groupOverview(token: String)
     }
     private var contentMode: ContentMode? {
         didSet {
@@ -124,6 +125,7 @@ class WebContentViewController: NSViewController {
     private var leftContainerInsetConstraint: Constraint?
     private var splitViewLeadingConstraint: Constraint?
     private var nativeNtpController: NewTabViewController?
+    private var groupOverviewController: GroupOverviewViewController?
 
     // MARK: - Agent Animation Overlay
     private lazy var agentAnimationOverlay: EdgeFogOverlayView = {
@@ -382,6 +384,13 @@ class WebContentViewController: NSViewController {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
                 self?.updateSplitViewLeadingInset()
+            }
+            .store(in: &cancellables)
+
+        browserState?.$groupOverviewState
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] state in
+                self?.updateGroupOverviewState(state)
             }
             .store(in: &cancellables)
     }
@@ -770,6 +779,9 @@ class WebContentViewController: NSViewController {
 
     private func updateContentForTab(_ tab: Tab?) {
         guard let tab else { return }
+        if browserState?.groupOverviewState != nil {
+            return
+        }
         if shouldShowNativeNtp(for: tab) {
             showNativeNtp(for: tab)
         } else if let webView = tab.webContentView {
@@ -846,6 +858,47 @@ class WebContentViewController: NSViewController {
                 AppLogInfo("[DevTools] clearing stale isFrameSyncPaused on plain webContent install (tabId=\(tabId))")
                 hostView.isFrameSyncPaused = false
             }
+        }
+    }
+
+    private func updateGroupOverviewState(_ state: GroupOverviewState?) {
+        guard let browserState else { return }
+        guard let state else {
+            hideGroupOverviewIfNeeded()
+            updateContentForTab(associatedTab)
+            return
+        }
+        showGroupOverview(token: state.groupToken, browserState: browserState)
+    }
+
+    private func showGroupOverview(token: String, browserState: BrowserState) {
+        if case .groupOverview(let currentToken) = contentMode,
+           currentToken == token {
+            return
+        }
+
+        hostView.subviews.forEach { $0.removeFromSuperview() }
+        groupOverviewController?.view.removeFromSuperview()
+        groupOverviewController?.removeFromParent()
+
+        let controller = GroupOverviewViewController(browserState: browserState,
+                                                     groupToken: token)
+        addChild(controller)
+        hostView.addSubview(controller.view)
+        controller.view.snp.makeConstraints { make in
+            make.edges.equalToSuperview()
+        }
+        groupOverviewController = controller
+        contentMode = .groupOverview(token: token)
+    }
+
+    private func hideGroupOverviewIfNeeded() {
+        guard groupOverviewController != nil else { return }
+        groupOverviewController?.view.removeFromSuperview()
+        groupOverviewController?.removeFromParent()
+        groupOverviewController = nil
+        if case .groupOverview = contentMode {
+            contentMode = nil
         }
     }
 

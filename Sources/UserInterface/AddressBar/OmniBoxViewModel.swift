@@ -22,7 +22,12 @@ class OmniBoxViewModel: ObservableObject {
     
     var opennedFromCurrentTab = false
     var currentTab: Tab?
+    private var openedFromGroupOverview = false
     private(set) var openTraceSession: OmniBoxTraceSession?
+
+    private var shouldCreateInGroupOverview: Bool {
+        openedFromGroupOverview || browserState.groupOverviewState != nil
+    }
     
     // MARK: - Initialization
     
@@ -85,6 +90,11 @@ class OmniBoxViewModel: ObservableObject {
     }
 
     func updateStatus(with tab: Tab?, suppressAutomaticSearch: Bool = false) {
+        if browserState.groupOverviewState != nil {
+            updateStatusForGroupOverview()
+            return
+        }
+        openedFromGroupOverview = false
         guard let tab else {
             return
         }
@@ -115,8 +125,24 @@ class OmniBoxViewModel: ObservableObject {
         state.inputText = prefilledText
     }
 
+    func updateStatusForGroupOverview() {
+        currentTab = nil
+        opennedFromCurrentTab = false
+        openedFromGroupOverview = true
+        searchCoordinator.prepareForPrefilledOpen(
+            text: "",
+            minInputLength: configuration.minInputLength
+        )
+        state.inputText = ""
+    }
+
     func setCurrentTab(_ tab: Tab?) {
+        if browserState.groupOverviewState != nil {
+            updateStatusForGroupOverview()
+            return
+        }
         currentTab = tab
+        openedFromGroupOverview = false
         if tab?.isNTP == true {
             state.inputText = ""
             opennedFromCurrentTab = false
@@ -162,6 +188,11 @@ class OmniBoxViewModel: ObservableObject {
     
     private func handleNavigationAction(for suggeston: OmniBoxSuggestion, commandKeyPressed: Bool = false) {
         AppLogDebug("omni: handleNavigationAction suggeston: \(suggeston)")
+        if shouldCreateInGroupOverview {
+            let url = suggeston.url.isEmpty ? URLProcessor.processUserInput(state.inputText) : suggeston.url
+            openURL(url, commandKeyPressed: commandKeyPressed)
+            return
+        }
         if suggeston.index >= 0 {
             selectSuggestion(suggeston, commandKeyPressed: commandKeyPressed)
         } else if !suggeston.url.isEmpty {
@@ -193,7 +224,11 @@ class OmniBoxViewModel: ObservableObject {
     
     private func openURL(_ url: String, switchToTab: Bool = false, commandKeyPressed: Bool = false) {
         AppLogDebug("omni: open url: \(url)")
-        if switchToTab {
+        if shouldCreateInGroupOverview {
+            Task { @MainActor [browserState] in
+                browserState.createTabInCurrentOverviewGroup(url: url)
+            }
+        } else if switchToTab {
             if commandKeyPressed {
                 browserState.openTab(url)
             } else {
@@ -209,6 +244,7 @@ class OmniBoxViewModel: ObservableObject {
 
     private func finishNavigationAction() {
         opennedFromCurrentTab = false
+        openedFromGroupOverview = false
         delegate?.omniBoxDidClear()
         
         // Leave time for the hide animation to finish before resetting state.
@@ -225,6 +261,7 @@ class OmniBoxViewModel: ObservableObject {
     
     func reset() {
         opennedFromCurrentTab = false
+        openedFromGroupOverview = false
         searchCoordinator.reset()
         openTraceSession = nil
         state.reset()

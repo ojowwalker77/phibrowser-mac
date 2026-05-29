@@ -268,6 +268,13 @@ class PinnedTabViewController: NSViewController {
             }
             .store(in: &cancellables)
 
+        browserState.$groupOverviewState
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self, weak browserState] _ in
+                self?.updateAllItemsSelectionState(browserState?.focusingTab)
+            }
+            .store(in: &cancellables)
+
         browserState.$isDraggingTab
             .receive(on: DispatchQueue.main)
             .sink { [weak self] dragging in
@@ -399,6 +406,12 @@ class PinnedTabViewController: NSViewController {
     }
 
     private func updateAllItemsSelectionState(_ focusing: Tab?) {
+        guard browserState?.groupOverviewState == nil else {
+            collectionView.visibleItems().compactMap { $0 as? PinnedTabItem }.forEach {
+                $0.isSelected = false
+            }
+            return
+        }
         guard let focusingTab = focusing, focusingTab.guidInLocalDB?.isEmpty ?? true == false else {
             collectionView.visibleItems().compactMap { $0 as? PinnedTabItem }.forEach {
                 $0.isSelected = false
@@ -432,6 +445,7 @@ class PinnedTabViewController: NSViewController {
     }
 
     private func handleTabClicked(_ tab: Tab) {
+        browserState?.clearGroupOverview()
         browserState?.openOrFocusPinnedTab(tab)
     }
 

@@ -18,6 +18,9 @@ class BrowserState {
     /// `TabGroupModel`; updated by the `handleTabGroup*` family.
     @Published var groups: [String: WebContentGroupInfo] = [:]
 
+    /// Window-scoped presentation state; membership remains owned by `Tab.groupToken`.
+    @Published var groupOverviewState: GroupOverviewState?
+
     /// Tab → token claims received from Chromium before the matching `Tab`
     /// arrived in `handleNewTabFromChromium`. The new-tab handler drains
     /// this map so the late-arriving Tab inherits its group membership.
@@ -34,10 +37,14 @@ class BrowserState {
     private struct PendingNormalTabInsertion {
         let url: String?
         let guid: Int?
+        let expectedGroupToken: String?
         let index: Int
         let syncChromiumOrder: Bool
 
         func matches(tab: Tab) -> Bool {
+            if let expectedGroupToken {
+                return tab.groupToken == expectedGroupToken
+            }
             if let guid { return tab.guid == guid }
             guard let url else { return false }
             return url.isEmpty || tab.url == url
@@ -497,6 +504,10 @@ class BrowserState {
         if let customGuid = tab.guidInLocalDB, Self.isAIChatId(customGuid) {
             return
         }
+
+        if normalTabs.contains(where: { $0.guid == tab.guid }) {
+            clearGroupOverview()
+        }
         
         if focusingTab?.guid == tab.guid {
             return
@@ -746,16 +757,10 @@ class BrowserState {
         }
 
         // Honor any pending insertion target for tabs promoted into the normal tab list.
-        if let pending = pendingNormalTabInsertion {
-            if pending.matches(tab: tab) {
-                insertIntoNormalTabOrder(tabGuid: tab.guid,
-                                         at: pending.index,
-                                         syncChromiumOrder: pending.syncChromiumOrder)
-                pendingNormalTabInsertion = nil
-                let elapsed = (CFAbsoluteTimeGetCurrent() - t0) * 1000
-                AppLogDebug("[NativeTab] ⏱ handleNewTabFromChromium tabId=\(tab.guid) took \(String(format: "%.2f", elapsed))ms")
-                return
-            }
+        if consumePendingNormalTabInsertion(for: tab) {
+            let elapsed = (CFAbsoluteTimeGetCurrent() - t0) * 1000
+            AppLogDebug("[NativeTab] ⏱ handleNewTabFromChromium tabId=\(tab.guid) took \(String(format: "%.2f", elapsed))ms")
+            return
         }
 
         if let insertionIndex = NativeTabDecisionEngine.insertionIndex(
@@ -937,6 +942,7 @@ class BrowserState {
             "localFix=\(nativeRelationGraph.locallyFixedOpenerTabIds)}"
         )
         updateNormalTabs()
+        validateActiveGroupOverview()
         let elapsed = (CFAbsoluteTimeGetCurrent() - t0) * 1000
         AppLogDebug("[NativeTab] ⏱ closeTab tabId=\(tabId) took \(String(format: "%.2f", elapsed))ms")
     }
@@ -1004,6 +1010,7 @@ class BrowserState {
     @MainActor
     func handleTabGroupClosed(token: String) {
         AppLogDebug("[TAB_GROUPS] groupClosed windowId=\(windowId) token=\(token)")
+        clearGroupOverview(ifToken: token)
         groups.removeValue(forKey: token)
         // Defensive: any tab that still claims this token gets cleared. In
         // normal flow Chromium fires kLeft for each member before kClosed,
@@ -1033,6 +1040,7 @@ class BrowserState {
         }
         if let tab = tabs.first(where: { $0.guid == tabId }) {
             tab.groupToken = token
+            _ = consumePendingNormalTabInsertion(for: tab)
             relocateJoinerIntoGroupRun(tabId: tabId, token: token)
             // Tab.groupToken is @Published but the sidebar's
             // TabSectionController doesn't subscribe per-tab; nudge the
@@ -1138,6 +1146,7 @@ class BrowserState {
         } else {
             info.objectWillChange.send()
         }
+        validateActiveGroupOverview()
     }
 
     /// Drains any pending group claim for `tab.guid` left by a kCreated /
@@ -1833,8 +1842,35 @@ class BrowserState {
     func scheduleNormalTabInsertion(tabGuid: Int, at index: Int) {
         pendingNormalTabInsertion = PendingNormalTabInsertion(url: nil,
                                                               guid: tabGuid,
+                                                              expectedGroupToken: nil,
                                                               index: index,
                                                               syncChromiumOrder: true)
+    }
+
+    func scheduleNextNormalTabInsertion(at index: Int,
+                                        syncChromiumOrder: Bool,
+                                        expectedGroupToken: String? = nil) {
+        if pendingNormalTabInsertion != nil {
+            AppLogWarn("[NativeTab] overriding pending normal tab insertion windowId=\(windowId)")
+        }
+        pendingNormalTabInsertion = PendingNormalTabInsertion(url: "",
+                                                              guid: nil,
+                                                              expectedGroupToken: expectedGroupToken,
+                                                              index: index,
+                                                              syncChromiumOrder: syncChromiumOrder)
+    }
+
+    @discardableResult
+    private func consumePendingNormalTabInsertion(for tab: Tab) -> Bool {
+        guard let pending = pendingNormalTabInsertion,
+              pending.matches(tab: tab) else {
+            return false
+        }
+        insertIntoNormalTabOrder(tabGuid: tab.guid,
+                                 at: pending.index,
+                                 syncChromiumOrder: pending.syncChromiumOrder)
+        pendingNormalTabInsertion = nil
+        return true
     }
 
     /// Source-driven companion: called by another window's
@@ -2133,6 +2169,7 @@ class BrowserState {
             // New tabs are appended first, so record the intended insertion index up front.
             pendingNormalTabInsertion = PendingNormalTabInsertion(url: pinnedTab.url ?? "",
                                                                   guid: nil,
+                                                                  expectedGroupToken: nil,
                                                                   index: normalIndex,
                                                                   syncChromiumOrder: true)
             ChromiumLauncher.sharedInstance().bridge?.createNewTab(withUrl: pinnedTab.url ?? "", at: -1, windowId: windowId, customGuid: nil)
@@ -2400,6 +2437,7 @@ class BrowserState {
             // Create a new Chromium tab and let `newTab()` apply the pending insertion point.
             pendingNormalTabInsertion = PendingNormalTabInsertion(url: url,
                                                                   guid: nil,
+                                                                  expectedGroupToken: nil,
                                                                   index: index,
                                                                   syncChromiumOrder: true)
             ChromiumLauncher.sharedInstance().bridge?.createNewTab(withUrl: url,

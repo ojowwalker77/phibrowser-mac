@@ -36,12 +36,19 @@ final class WebContentAddressBarViewModel: ObservableObject {
             .prepend(PhiPreferences.GeneralSettings.alwaysShowURLPath.loadValue())
             .removeDuplicates()
 
+        let overviewActivePublisher = browserState?.$groupOverviewState
+            .map { $0 != nil }
+            .prepend(browserState?.groupOverviewState != nil)
+            .removeDuplicates()
+            .eraseToAnyPublisher() ?? Just(false).eraseToAnyPublisher()
+
         tab.$url
             .removeDuplicates()
             .debounce(for: .milliseconds(100), scheduler: DispatchQueue.main)
-            .combineLatest(alwaysShowURLPathPublisher)
-            .map { [weak self] urlString, alwaysShowURLPath in
-                self?.formattedDisplayText(urlString: urlString ?? "", alwaysShowURLPath: alwaysShowURLPath) ?? ""
+            .combineLatest(alwaysShowURLPathPublisher, overviewActivePublisher)
+            .map { [weak self] urlString, alwaysShowURLPath, overviewActive in
+                guard !overviewActive else { return "" }
+                return self?.formattedDisplayText(urlString: urlString ?? "", alwaysShowURLPath: alwaysShowURLPath) ?? ""
             }
             .receive(on: DispatchQueue.main)
             .sink { [weak self] text in

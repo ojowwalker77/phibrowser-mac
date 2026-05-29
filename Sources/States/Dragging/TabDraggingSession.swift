@@ -735,7 +735,7 @@ extension TabDraggingSession {
     /// - Parameters:
     ///   - favicon: Favicon image to render (will be scaled to a fixed size).
     ///   - title: Title text; centered and limited to at most 2 lines (truncated with ellipsis if needed).
-    static func makeTabPlaceholderSnapshot(favicon: NSImage, title: String) -> NSImage {
+    static func makeTabPlaceholderSnapshot(favicon: NSImage, title: String, needBorder: Bool = true) -> NSImage {
         let canvasSize = Self.tabSnapshotSize
         let cornerRadius = Self.tabSnapshotCornerRadius
 
@@ -751,11 +751,13 @@ extension TabDraggingSession {
         let bg = NSColor.controlBackgroundColor.withAlphaComponent(0.98)
         bg.setFill()
         canvasRect.fill()
-
-        // Border
-        NSColor.separatorColor.withAlphaComponent(0.55).setStroke()
-        clipPath.lineWidth = 1
-        clipPath.stroke()
+        
+        if needBorder {
+            // Border
+            NSColor.separatorColor.withAlphaComponent(0.55).setStroke()
+            clipPath.lineWidth = 1
+            clipPath.stroke()
+        }
 
         // Layout constants
         let horizontalInset: CGFloat = 12
