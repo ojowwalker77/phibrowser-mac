@@ -13,9 +13,7 @@ struct FaviconDataProvider: ImageDataProvider {
     }
     
     func data(handler: @escaping (Result<Data, Error>) -> Void) {
-        if pageURL.absoluteString.starts(with: "chrome://newtab") ||
-        pageURL.absoluteString.starts(with: "phi://") ||
-            pageURL.absoluteString.isNTPUrlString {
+        if pageURL.absoluteString.isLocalUrlString {
             if let data = NSImage(resource: .phiDefaultFavicon).pngData() {
                 handler(.success(data))
                 return

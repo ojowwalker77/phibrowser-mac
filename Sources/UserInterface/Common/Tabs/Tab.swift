@@ -279,7 +279,7 @@ class Tab: WebContentRepresentable {
                 guard let urlStr else {
                     return false
                 }
-                return !urlStr.isNTPUrlString
+                return !urlStr.isLocalUrlString
             }
             .assign(to: \.aiChatEnabled, on: self)
             .store(in: &cancellables)
@@ -444,17 +444,17 @@ extension Tab {
 
 extension Tab {
     var isNTP: Bool {
-        return url?.hasPrefix("chrome://newtab") ?? false
-        || url?.hasPrefix("phi://newtab") ?? false
-        || url?.hasPrefix("chrome://conversation") ?? false
-        || url?.hasPrefix("phi://skills") ?? false
-        || url?.hasPrefix("chrome://skills") ?? false
+        url?.isNTP ?? false
     }
 }
 
 extension String {
-    var isNTPUrlString: Bool {
-        return hasPrefix("chrome://newtab") ||
+    var isNTP: Bool {
+        hasPrefix("chrome://newtab") || hasPrefix("phi://newtab")
+    }
+
+    var isLocalUrlString: Bool {
+        hasPrefix("chrome://newtab") ||
         hasPrefix("phi://newtab") ||
         hasPrefix("chrome://conversation") ||
         hasPrefix("phi://skills") ||

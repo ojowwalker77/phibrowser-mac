@@ -54,7 +54,7 @@ final class WebContentAddressBarViewModel: ObservableObject {
         guard !urlString.isEmpty else {
             return ""
         }
-        guard !urlString.isNTPUrlString else {
+        guard !urlString.isNTP else {
             return ""
         }
         if alwaysShowURLPath {

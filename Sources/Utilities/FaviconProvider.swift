@@ -35,7 +35,7 @@ struct FaviconConfiguration {
     /// Whether the URL is an internal page that should display the default Phi favicon.
     static func shouldUseDefaultFavicon(for url: URL) -> Bool {
         let str = url.absoluteString
-        if str.isNTPUrlString { return true }
+        if str.isLocalUrlString { return true }
 
         let path: Substring
         if str.hasPrefix("phi://") {

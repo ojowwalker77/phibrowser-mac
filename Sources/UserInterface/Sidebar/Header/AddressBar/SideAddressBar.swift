@@ -105,11 +105,7 @@ class SideAddressBar: NSView {
             .removeDuplicates()
             .debounce(for: .milliseconds(100), scheduler: DispatchQueue.main)
             .sink { [weak self] url in
-                guard let url, !url.isNTPUrlString else {
-                    self?.textField.stringValue = ""
-                    return
-                }
-                self?.textField.stringValue = URLProcessor.displayName(for: url)
+                self?.updateDisplayedURL(url)
             }
             .store(in: &cancellables)
 
@@ -162,6 +158,15 @@ class SideAddressBar: NSView {
             let button = createExtensionButton(for: ext)
             extensionIconsStackView.addArrangedSubview(button)
         }
+    }
+
+    private func updateDisplayedURL(_ url: String?) {
+        guard let url,
+              !url.isNTP else {
+            textField.stringValue = ""
+            return
+        }
+        textField.stringValue = URLProcessor.displayName(for: url)
     }
 
     private func shouldDisplayPinnedExtensionsWithinSidebar(
