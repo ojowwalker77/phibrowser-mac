@@ -2449,7 +2449,30 @@ class BrowserState {
         // Remove the old bookmark entry after migration.
         bookmarkManager.removeBookmark(realBookmark)
     }
-    
+
+    /// Detaches any live Chromium tab still backed by a bookmark that is about
+    /// to be deleted, so the tab survives as a plain normal tab. Without this
+    /// the tab keeps a stale `guidInLocalDB`, which keeps it out of tab groups.
+    /// For a folder, all descendant bookmarks are processed.
+    func detachOpenTabsForRemovedBookmark(_ bookmark: Bookmark) {
+        var guids: [String] = []
+        func collect(_ node: Bookmark) {
+            if node.isFolder {
+                node.children.forEach(collect)
+            } else {
+                guids.append(node.guid)
+            }
+        }
+        collect(bookmark)
+
+        for guid in guids {
+            guard let chromiumTab = tabs.first(where: { $0.guidInLocalDB == guid }) else { continue }
+            migrateAIChatTab(for: chromiumTab, toNewIdentifier: nil)
+            chromiumTab.guidInLocalDB = nil
+            chromiumTab.webContentWrapper?.updateTabCustomValue("")
+        }
+    }
+
     func updateFavoriteTabs(_ newFavoriteTabs: [Tab]) {
         guard !isIncognito else {
             pinnedTabs = []
