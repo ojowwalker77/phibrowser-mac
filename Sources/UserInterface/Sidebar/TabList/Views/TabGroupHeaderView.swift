@@ -156,13 +156,6 @@ struct TabGroupHeaderView: View {
                       ? Color(nsColor: NSColor(resource: .sidebarTabSelected))
                       : Color.clear)
         )
-        .overlay(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(viewModel.isOverviewSelected
-                        ? Color(nsColor: viewModel.color.nsColor).opacity(0.45)
-                        : Color.clear,
-                        lineWidth: 1)
-        )
         // `contentShape` makes the empty horizontal space between the
         // chevron / title / close button hit-testable so `.onHover`
         // fires across the entire header strip, not just on the

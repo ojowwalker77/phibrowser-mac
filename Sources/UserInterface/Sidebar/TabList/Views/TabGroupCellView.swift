@@ -445,7 +445,7 @@ final class TabGroupCellView: SidebarCellView {
         containerBorderOverlayView.layer?.cornerRadius = 8
         containerBorderOverlayView.layer?.cornerCurve = .continuous
         containerBorderOverlayView.layer?.borderWidth = 1
-        containerBorderOverlayView.layer?.borderColor = NSColor.clear.cgColor
+        containerBorderOverlayView.layer?.borderColor = NSColor(resource: .commonBorder).cgColor
         // Suppress fade-in on hover/drop color flips while leaving
         // bounds/position animations alone — the height-change animation
         // driven by the outer outline view relies on those.
@@ -455,7 +455,7 @@ final class TabGroupCellView: SidebarCellView {
             "backgroundColor": NSNull(),
             "hidden": NSNull(),
         ]
-        containerBorderOverlayView.isHidden = true
+        containerBorderOverlayView.isHidden = false
         containerView.addSubview(containerBorderOverlayView)
         containerBorderOverlayView.snp.makeConstraints { make in
             make.edges.equalToSuperview()
@@ -658,33 +658,11 @@ final class TabGroupCellView: SidebarCellView {
         containerView.layer?.cornerCurve = .continuous
         containerView.layer?.backgroundColor = NSColor.clear.cgColor
 
-        if isDropTargetHighlighted {
-            let groupColor = configuredGroup?.color ?? lastGroupColor
-            let tint = groupColor.nsColor
-            // Tint lives on the overlay (topmost subview). The header
-            // hosting view and inner table sit above `containerView.layer`,
-            // so a background on the container itself is never visible.
-            containerBorderOverlayView.isHidden = false
-            containerBorderOverlayView.layer?.backgroundColor =
-                groupColor.chipTintColor.cgColor
-            containerBorderOverlayView.layer?.borderColor =
-                tint.withAlphaComponent(0.36).cgColor
-        } else if isOverviewSelected {
-            let groupColor = configuredGroup?.color ?? lastGroupColor
-            containerBorderOverlayView.isHidden = false
-            containerBorderOverlayView.layer?.backgroundColor = NSColor.clear.cgColor
-            containerBorderOverlayView.layer?.borderColor =
-                groupColor.nsColor.withAlphaComponent(0.45).cgColor
-        } else if isHovered {
-            containerBorderOverlayView.isHidden = false
-            containerBorderOverlayView.layer?.backgroundColor = NSColor.clear.cgColor
-            containerBorderOverlayView.layer?.borderColor =
-                ThemedColor.border.resolve(in: containerView).cgColor
-        } else {
-            containerBorderOverlayView.isHidden = true
-            containerBorderOverlayView.layer?.backgroundColor = NSColor.clear.cgColor
-            containerBorderOverlayView.layer?.borderColor = NSColor.clear.cgColor
-        }
+        containerBorderOverlayView.isHidden = false
+        containerBorderOverlayView.layer?.backgroundColor =
+            NSColor(resource: .sidebarTabHovered).cgColor
+        containerBorderOverlayView.layer?.borderColor =
+            NSColor(resource: .commonBorder).cgColor
     }
 
     /// Container border hover is driven by `hoverRegionView` (same
