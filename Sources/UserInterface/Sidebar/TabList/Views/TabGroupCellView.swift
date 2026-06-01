@@ -181,13 +181,22 @@ private final class TabGroupHeaderHostingView: NSHostingView<TabGroupHeaderView>
     /// Slop matches `TabItemView` / `BookmarkItemView` so a click that
     /// drifts a couple of points doesn't get promoted to a drag.
     private static let dragThreshold: CGFloat = 5
+    /// Shorter than the system double-click interval so overview still
+    /// feels responsive while quick double-clicks can cancel the pending
+    /// single-click action.
+    private static let singleClickConfirmationDelay: TimeInterval = 0.15
 
     weak var dragDelegate: TabGroupHeaderHostingViewDelegate?
 
     private var pendingMouseDownEvent: NSEvent?
     private var pendingMouseDownPoint: NSPoint?
     private var pendingHitTarget: TabGroupHeaderHitTarget?
+    private var pendingSingleClickWorkItem: DispatchWorkItem?
     private var manualDragInProgress = false
+
+    deinit {
+        cancelPendingSingleClick()
+    }
 
     override func mouseDown(with event: NSEvent) {
         pendingMouseDownEvent = event
@@ -198,6 +207,9 @@ private final class TabGroupHeaderHostingView: NSHostingView<TabGroupHeaderView>
         )
         if pendingHitTarget == .closeGroup, rootView.viewModel.isHeaderHovered == false {
             pendingHitTarget = nil
+        }
+        if event.clickCount > 1 || pendingHitTarget != nil {
+            cancelPendingSingleClick()
         }
         manualDragInProgress = false
     }
@@ -215,6 +227,7 @@ private final class TabGroupHeaderHostingView: NSHostingView<TabGroupHeaderView>
         guard dx > Self.dragThreshold || dy > Self.dragThreshold else {
             return
         }
+        cancelPendingSingleClick()
         manualDragInProgress = true
         dragDelegate?.tabGroupHeaderHostingView(
             self,
@@ -251,7 +264,37 @@ private final class TabGroupHeaderHostingView: NSHostingView<TabGroupHeaderView>
             return
         }
 
-        dragDelegate?.tabGroupHeaderHostingViewDidRequestOverview(self)
+        let upPoint = convert(event.locationInWindow, from: nil)
+        if event.clickCount > 1,
+           TabGroupHeaderHitTargetResolver.canToggleCollapseWithDoubleClick(
+               at: upPoint,
+               in: bounds
+           ) {
+            cancelPendingSingleClick()
+            dragDelegate?.tabGroupHeaderHostingViewDidToggleCollapse(self)
+            return
+        }
+
+        scheduleOverviewRequest()
+    }
+
+    private func scheduleOverviewRequest() {
+        cancelPendingSingleClick()
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.pendingSingleClickWorkItem = nil
+            self.dragDelegate?.tabGroupHeaderHostingViewDidRequestOverview(self)
+        }
+        pendingSingleClickWorkItem = workItem
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + Self.singleClickConfirmationDelay,
+            execute: workItem
+        )
+    }
+
+    private func cancelPendingSingleClick() {
+        pendingSingleClickWorkItem?.cancel()
+        pendingSingleClickWorkItem = nil
     }
 }
 

@@ -3,6 +3,7 @@
 // Use of this source code is governed by an Apache license that can be
 // found in the LICENSE file.
 
+import AppKit
 import XCTest
 @testable import Phi
 
@@ -97,5 +98,16 @@ final class TabGroupChipWidthTests: XCTestCase {
         )
         XCTAssertEqual(smallGroup, bigGroup, accuracy: 0.5,
             "Collapsed chip width should be invariant to memberCount.")
+    }
+
+    func test_hitTestUsesParentCoordinates() {
+        let parent = NSView(frame: CGRect(x: 0, y: 0, width: 240, height: 80))
+        let chip = TabGroupChipView()
+        chip.frame = CGRect(x: 48, y: 16, width: 120, height: TabGroupChipView.height)
+        parent.addSubview(chip)
+
+        let hit = parent.hitTest(CGPoint(x: 60, y: 24))
+
+        XCTAssertTrue(hit === chip)
     }
 }

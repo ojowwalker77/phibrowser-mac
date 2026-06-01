@@ -100,7 +100,8 @@ final class TabGroupChipView: NSView {
     // mouseDown captures `mouseDownLocation` and sets pendingAction = .click.
     // mouseDragged promotes to `.drag` once |Δx| crosses the threshold and
     // fires `onDragStart` once. Subsequent drag events fire `onDrag`.
-    // mouseUp routes to `onClick` (still .click) or `onDragEnd` (.drag).
+    // mouseUp routes to `onClick` / `onCollapseToggle` (still .click)
+    // or `onDragEnd` (.drag).
 
     private enum PendingChipAction {
         case idle
@@ -116,10 +117,15 @@ final class TabGroupChipView: NSView {
     private var pendingAction: PendingChipAction = .idle
     private var pendingClickTarget: PendingClickTarget = .overview
     private var mouseDownLocation: CGPoint = .zero
+    private var pendingSingleClickWorkItem: DispatchWorkItem?
 
     /// Horizontal pixel threshold to promote click → drag. Matches
     /// `TabGroupDragController.dragActivationThreshold`.
     private static let dragActivationThreshold: CGFloat = 4
+    /// Shorter than the system double-click interval so overview still
+    /// feels responsive while quick double-clicks can cancel the pending
+    /// single-click action.
+    private static let singleClickConfirmationDelay: TimeInterval = 0.15
 
     // MARK: - Data
 
@@ -207,6 +213,10 @@ final class TabGroupChipView: NSView {
 
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+
+    deinit {
+        cancelPendingSingleClick()
     }
 
     // MARK: - Configuration
@@ -460,7 +470,9 @@ final class TabGroupChipView: NSView {
     }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
-        guard !isHidden, alphaValue > 0, bounds.contains(point) else { return nil }
+        guard !isHidden, alphaValue > 0 else { return nil }
+        let localPoint = convert(point, from: superview)
+        guard bounds.contains(localPoint) else { return nil }
         return self
     }
 
@@ -482,6 +494,9 @@ final class TabGroupChipView: NSView {
         let localPoint = convert(event.locationInWindow, from: nil)
         pendingClickTarget = collapseControlRect().contains(localPoint) ? .collapse : .overview
         pendingAction = .click
+        if event.clickCount > 1 {
+            cancelPendingSingleClick()
+        }
     }
 
     override func mouseDragged(with event: NSEvent) {
@@ -491,6 +506,7 @@ final class TabGroupChipView: NSView {
         case .click:
             guard pendingClickTarget == .overview else { return }
             if abs(dx) >= Self.dragActivationThreshold {
+                cancelPendingSingleClick()
                 pendingAction = .drag
                 onDragStart?(token, event.locationInWindow)
             }
@@ -515,8 +531,11 @@ final class TabGroupChipView: NSView {
             if pendingClickTarget == .collapse {
                 guard collapseControlRect().contains(p) else { return }
                 onCollapseToggle?(token)
+            } else if event.clickCount > 1 {
+                cancelPendingSingleClick()
+                onCollapseToggle?(token)
             } else {
-                onClick?(token)
+                scheduleOverviewClick(for: token)
             }
         case .drag:
             onDragEnd?(token, event.locationInWindow)
@@ -527,6 +546,26 @@ final class TabGroupChipView: NSView {
 
     override func menu(for event: NSEvent) -> NSMenu? {
         return onMenuRequest?(token)
+    }
+
+    private func scheduleOverviewClick(for token: String) {
+        cancelPendingSingleClick()
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.pendingSingleClickWorkItem = nil
+            guard self.token == token else { return }
+            self.onClick?(token)
+        }
+        pendingSingleClickWorkItem = workItem
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + Self.singleClickConfirmationDelay,
+            execute: workItem
+        )
+    }
+
+    private func cancelPendingSingleClick() {
+        pendingSingleClickWorkItem?.cancel()
+        pendingSingleClickWorkItem = nil
     }
 
     // MARK: - Accessibility

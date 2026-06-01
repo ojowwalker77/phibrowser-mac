@@ -195,7 +195,8 @@ enum TabGroupHeaderHitTarget {
 }
 
 /// Resolves explicit control zones on the header. The title/body zone
-/// stays nil so it can request overview on click and start a group drag.
+/// stays nil so it can request overview on single click, toggle collapse
+/// on double click, and start a group drag.
 struct TabGroupHeaderHitTargetResolver {
     static let controlSize: CGFloat = 24
     static let horizontalInset: CGFloat = 6
@@ -223,5 +224,9 @@ struct TabGroupHeaderHitTargetResolver {
         }
 
         return nil
+    }
+
+    static func canToggleCollapseWithDoubleClick(at point: CGPoint, in bounds: CGRect) -> Bool {
+        bounds.contains(point) && target(at: point, in: bounds) == nil
     }
 }
