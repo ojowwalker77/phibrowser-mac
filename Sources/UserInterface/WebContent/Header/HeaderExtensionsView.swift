@@ -13,10 +13,80 @@ enum HeaderExtensionLayout {
     static let itemSpacing: CGFloat = 2
 }
 
+/// Small badge pill overlaid on an extension icon, mirroring Chrome's action
+/// badge. Colors come resolved from Chromium (see ExtensionManager.BadgeState).
+struct ExtensionBadge: View {
+    let state: ExtensionManager.BadgeState
+
+    var body: some View {
+        Text(state.text)
+            .font(.system(size: 8, weight: .semibold))
+            .lineLimit(1)
+            .foregroundStyle(Color(nsColor: state.textColor))
+            .padding(.horizontal, 2)
+            .frame(minWidth: 11, minHeight: 11)
+            .background(Capsule().fill(Color(nsColor: state.backgroundColor)))
+            .fixedSize()
+    }
+}
+
+/// Full-size, non-interactive SwiftUI overlay for embedding the badge on AppKit
+/// surfaces via `NSHostingView`. Host it edge-pinned over the button/cell
+/// (edges are flip-agnostic, unlike AppKit top/bottom constraints); inside, a
+/// centered `iconSize` region anchors the badge to the icon's bottom-right via
+/// SwiftUI's flip-correct `.bottomTrailing`. Self-observing, so the host updates
+/// when the badge changes — no manual subscription needed.
+struct BadgeCornerOverlay: View {
+    @ObservedObject var manager: ExtensionManager
+    let extensionId: String
+    let iconSize: CGFloat
+
+    var body: some View {
+        Color.clear
+            .overlay {
+                Color.clear
+                    .frame(width: iconSize, height: iconSize)
+                    .extensionBadgeOverlay(manager.badges[extensionId])
+            }
+            .allowsHitTesting(false)
+    }
+}
+
+/// Hosts a decorative badge overlay over an AppKit control without intercepting
+/// its clicks. A plain `NSHostingView` can still swallow mouse events even when
+/// its SwiftUI content is `.allowsHitTesting(false)` — which kills a SwiftUI
+/// `Button`-backed control beneath it (e.g. the sidebar address-bar extension
+/// icon, whose `HoverableButton` tap then never fires). Forcing `hitTest` to nil
+/// passes every event through to the control below.
+final class BadgeHostingView<Content: View>: NSHostingView<Content> {
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+}
+
+extension View {
+    /// Overlays the action badge straddling this icon's bottom-right corner
+    /// (partial overlap, Chrome-style). Apply directly to the icon view so the
+    /// badge anchors to the icon, not its (larger) container.
+    func extensionBadgeOverlay(_ state: ExtensionManager.BadgeState?) -> some View {
+        overlay(alignment: .bottomTrailing) {
+            if let state, !state.text.isEmpty {
+                ExtensionBadge(state: state)
+                    .offset(x: 4, y: 4)
+                    .allowsHitTesting(false)
+            }
+        }
+    }
+}
+
 @Observable
 @MainActor
 final class WebContentHeaderExtensionsModel {
+    /// The full sorted pinned set.
     private(set) var pinnedExtensions: [Extension] = []
+    /// Pinned extensions whose action is visible on the current tab — what the
+    /// header actually lays out. Filtering here (not just per-button EmptyView)
+    /// stops a hidden page action from consuming a width slot and truncating a
+    /// genuinely visible extension off the header.
+    private(set) var visiblePinnedExtensions: [Extension] = []
 
     private weak var browserState: BrowserState?
     private var cancellables = Set<AnyCancellable>()
@@ -41,8 +111,29 @@ final class WebContentHeaderExtensionsModel {
                     return lhs.pinnedIndex < rhs.pinnedIndex
                 }
                 self?.pinnedExtensions = sorted
+                self?.recomputeVisiblePinned()
             }
             .store(in: &cancellables)
+
+        // Recompute the laid-out set when an extension's visibility flips (a page
+        // action shown/hidden on the current tab). Gated on the hidden-id set so
+        // a rapid badge-text tick (e.g. a blocked-count) does NOT recompute.
+        manager.$badges
+            .map { badges in Set(badges.compactMap { $0.value.visible ? nil : $0.key }) }
+            .removeDuplicates()
+            .dropFirst()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.recomputeVisiblePinned()
+            }
+            .store(in: &cancellables)
+    }
+
+    private func recomputeVisiblePinned() {
+        let badges = browserState?.extensionManager.badges
+        visiblePinnedExtensions = pinnedExtensions.filter {
+            badges?[$0.id]?.visible != false
+        }
     }
 
     private func refreshExtensionsIfNeeded() {
@@ -117,6 +208,22 @@ struct CircularIconButton: View {
     }
 }
 
+/// Red dot on the ⊞ overflow button when an *unpinned* extension has a
+/// non-empty, visible badge on the current tab (so it isn't missed off-toolbar).
+private struct OverflowBadgeDot: View {
+    @ObservedObject var manager: ExtensionManager
+
+    var body: some View {
+        let pinnedIds = Set(manager.pinedExtensions.map(\.id))
+        let hasHiddenBadge = manager.badges.contains { id, state in
+            !state.text.isEmpty && state.visible && !pinnedIds.contains(id)
+        }
+        if hasHiddenBadge {
+            Circle().fill(.red).frame(width: 6, height: 6)
+        }
+    }
+}
+
 struct HeaderExtensionMenuButton: View {
     let extensionManager: ExtensionManager?
     @Binding var isPopoverShown: Bool
@@ -129,6 +236,11 @@ struct HeaderExtensionMenuButton: View {
             accessibilityLabel: NSLocalizedString("Extensions", comment: "Web content header - Extensions menu button")
         ) {
             isPopoverShown.toggle()
+        }
+        .overlay(alignment: .bottomTrailing) {
+            if let manager = extensionManager {
+                OverflowBadgeDot(manager: manager).offset(x: 2, y: 2)
+            }
         }
         .background(
             AddressBarAnchorView { view in
@@ -160,10 +272,13 @@ struct HeaderExtensionContainer: View {
     var body: some View {
         HStack(spacing: HeaderExtensionLayout.itemSpacing) {
             ForEach(pinnedExtensions) { ext in
-                PinnedExtensionButton(
-                    ext: ext,
-                    windowId: browserState?.windowId.int64Value ?? 0
-                )
+                if let manager = extensionManager {
+                    PinnedExtensionButton(
+                        ext: ext,
+                        windowId: browserState?.windowId.int64Value ?? 0,
+                        manager: manager
+                    )
+                }
             }
             HeaderExtensionMenuButton(
                 extensionManager: extensionManager,
@@ -187,41 +302,59 @@ struct HeaderExtensionContainer: View {
 private struct PinnedExtensionButton: View {
     let ext: Extension
     let windowId: Int64
+    @ObservedObject var manager: ExtensionManager
 
     @State private var anchorView: NSView?
 
     var body: some View {
-        let image = ext.icon
-            ?? NSImage(systemSymbolName: "puzzlepiece.extension", accessibilityDescription: nil)
-            ?? NSImage()
+        let badge = manager.badges[ext.id]
+        // A hidden page action is not rendered at all (Phi spec §1).
+        if badge?.visible == false {
+            EmptyView()
+        } else {
+            // Dynamic action icon (setIcon / declarative) overrides the static
+            // manifest icon when present.
+            let image = manager.dynamicIcons[ext.id]
+                ?? ext.icon
+                ?? NSImage(systemSymbolName: "puzzlepiece.extension", accessibilityDescription: nil)
+                ?? NSImage()
 
-        CircularIconButton(
-            image: image,
-            accessibilityLabel: ext.name,
-            action: {
-                let point = anchorView.flatMap(ExtensionPopupAnchor.pointBelowView)
-                    ?? ExtensionPopupAnchor.mouseFallback()
-                ChromiumLauncher.sharedInstance().bridge?.triggerExtension(
-                    withId: ext.id,
-                    pointInScreen: point,
-                    windowId: windowId
-                )
-            },
-            secondaryAction: {
-                let point = anchorView.flatMap(ExtensionPopupAnchor.pointBelowView)
-                    ?? ExtensionPopupAnchor.mouseFallback()
-                ChromiumLauncher.sharedInstance().bridge?.triggerExtensionContextMenu(
-                    withId: ext.id,
-                    pointInScreen: point,
-                    windowId: windowId
-                )
+            CircularIconButton(
+                image: image,
+                accessibilityLabel: ext.name,
+                action: {
+                    let point = anchorView.flatMap(ExtensionPopupAnchor.pointBelowView)
+                        ?? ExtensionPopupAnchor.mouseFallback()
+                    ChromiumLauncher.sharedInstance().bridge?.triggerExtension(
+                        withId: ext.id,
+                        pointInScreen: point,
+                        windowId: windowId
+                    )
+                },
+                secondaryAction: {
+                    let point = anchorView.flatMap(ExtensionPopupAnchor.pointBelowView)
+                        ?? ExtensionPopupAnchor.mouseFallback()
+                    ChromiumLauncher.sharedInstance().bridge?.triggerExtensionContextMenu(
+                        withId: ext.id,
+                        pointInScreen: point,
+                        windowId: windowId
+                    )
+                }
+            )
+            // Anchor the badge to the centered icon (not the larger button) so
+            // it straddles the icon's bottom-right corner.
+            .overlay {
+                Color.clear
+                    .frame(width: HeaderExtensionLayout.iconSize,
+                           height: HeaderExtensionLayout.iconSize)
+                    .extensionBadgeOverlay(badge)
             }
-        )
-        .background(
-            AddressBarAnchorView { view in
-                anchorView = view
-            }
-            .allowsHitTesting(false)
-        )
+            .background(
+                AddressBarAnchorView { view in
+                    anchorView = view
+                }
+                .allowsHitTesting(false)
+            )
+        }
     }
 }

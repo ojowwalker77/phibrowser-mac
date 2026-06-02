@@ -54,6 +54,10 @@ class SideAddressBar: NSView {
     @Published var currentTab: Tab?
     
     private var cancellables = Set<AnyCancellable>()
+    // The last (unfiltered) pinned set handed to updateExtensionIcons, so a
+    // dynamic-icon or visibility change can rebuild and re-apply the visibility
+    // filter without re-deriving the display gating.
+    private var lastPinnedExtensions: [Extension] = []
 
     var showBackgroundWhenInactive: Bool = true {
         didSet {
@@ -163,26 +167,65 @@ class SideAddressBar: NSView {
         browserState.extensionManager.$pinedExtensions
             .combineLatest(
                 browserState.extensionManager.$shouldDisplayExtensionsWithinSidebar.removeDuplicates(),
-                browserState.$layoutMode.removeDuplicates()
+                browserState.$layoutMode.removeDuplicates(),
+                browserState.$isInPlaceholderMode.removeDuplicates()
             )
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] pinnedExtensions, display, layoutMode in
-                guard layoutMode == .performance, display == false else {
+            .sink { [weak self] pinnedExtensions, display, layoutMode, isPlaceholder in
+                // Include placeholder mode so the visibility filter is re-applied
+                // on placeholder exit (mirrors PinnedTabViewController); otherwise
+                // a per-tab visibility flip during placeholder leaves stale icons.
+                guard layoutMode == .performance, display == false, !isPlaceholder else {
                     self?.updateExtensionIcons([])
                     return
                 }
                 self?.updateExtensionIcons(pinnedExtensions)
             }
             .store(in: &cancellables)
+
+        // Rebuild the shown buttons when a dynamic icon changes (the pinned set
+        // is unchanged, so the subscription above won't fire). Badge *text*
+        // changes are handled by the self-observing BadgeCornerOverlay host and
+        // don't need a rebuild; badge *visibility* flips do (handled below).
+        browserState.extensionManager.$dynamicIcons
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                guard let self, !self.extensionIconsStackView.isHidden else { return }
+                self.updateExtensionIcons(self.lastPinnedExtensions)
+            }
+            .store(in: &cancellables)
+
+        // Rebuild only when the set of hidden (visible == false) extensions
+        // changes — a page action shown/hidden on the current tab — so the icon
+        // appears/disappears in step with the header. Gated on the id set so a
+        // rapid badge-text tick (e.g. a blocked-count) does NOT trigger a rebuild.
+        browserState.extensionManager.$badges
+            .map { badges in Set(badges.compactMap { $0.value.visible ? nil : $0.key }) }
+            .removeDuplicates()
+            .dropFirst()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                guard let self, !self.extensionIconsStackView.isHidden else { return }
+                self.updateExtensionIcons(self.lastPinnedExtensions)
+            }
+            .store(in: &cancellables)
     }
-    
+
     private func updateExtensionIcons(_ pinnedExtensions: [Extension]) {
+        lastPinnedExtensions = pinnedExtensions
+        // Hide page actions reporting visible == false on the current tab,
+        // mirroring the header (spec §4.3). The badge pill self-updates via the
+        // hosted overlay; whole-icon show/hide needs this rebuild.
+        let manager = unsafeBrowserState?.extensionManager
+        let visibleExtensions = pinnedExtensions.filter {
+            manager?.badges[$0.id]?.visible != false
+        }
         extensionIconsStackView.arrangedSubviews.forEach { view in
             extensionIconsStackView.removeArrangedSubview(view)
             view.removeFromSuperview()
         }
-        
-        for ext in pinnedExtensions {
+
+        for ext in visibleExtensions {
             let button = createExtensionButton(for: ext)
             extensionIconsStackView.addArrangedSubview(button)
         }
@@ -219,25 +262,21 @@ class SideAddressBar: NSView {
     }
     
     private func createExtensionButton(for ext: Extension) -> HoverableButtonNSView {
-        let image: NSImage
-        if let icon = ext.icon {
-            image = icon
-        } else {
-            if let defaultImage = NSImage(systemSymbolName: "puzzlepiece.extension", accessibilityDescription: nil) {
-                image = defaultImage
-            } else {
-                image = NSImage()
-            }
-        }
-        
+        let iconSize = NSSize(width: 16, height: 16)
+        let manager = unsafeBrowserState?.extensionManager
+        // Icon only (dynamic override + fallback); the badge is a hosted overlay.
+        let image = manager?.iconImage(extensionId: ext.id, staticIcon: ext.icon)
+            ?? ext.icon
+            ?? NSImage()
+
         let config = HoverableButtonConfig(image: image,
-                                           imageSize: .init(width: 16, height: 16),
+                                           imageSize: iconSize,
                                            displayMode: .imageOnly,
                                            hoverBackgroundColor: .hover,
                                            cornerRadius: 4)
         let button = HoverableButtonNSView(config: config, target: self, selector: #selector(extensionButtonClicked(_:)))
         button.toolTip = ext.name
-        
+
         button.identifier = NSUserInterfaceItemIdentifier(ext.id)
         button.secondaryAction = { [weak self, weak button] in
             guard let self, let button else { return }
@@ -252,11 +291,27 @@ class SideAddressBar: NSView {
                 windowId: self.unsafeBrowserState?.windowId.int64Value ?? 0
             )
         }
-        
+
         button.snp.makeConstraints { make in
             make.size.equalTo(CGSize(width: 24, height: 24))
         }
-        
+
+        // Self-observing badge overlay, edge-pinned over the button (edges are
+        // flip-agnostic; SwiftUI handles the bottom-right corner placement).
+        if let manager {
+            // Pass-through host: the decorative badge must not swallow the
+            // button's click — the icon is a SwiftUI Button beneath it, whose
+            // gesture needs the hit-test to reach its own hosting view.
+            let badgeHost = BadgeHostingView(
+                rootView: BadgeCornerOverlay(manager: manager,
+                                             extensionId: ext.id,
+                                             iconSize: iconSize.width))
+            button.addSubview(badgeHost)
+            badgeHost.snp.makeConstraints { make in
+                make.edges.equalToSuperview()
+            }
+        }
+
         return button
     }
     

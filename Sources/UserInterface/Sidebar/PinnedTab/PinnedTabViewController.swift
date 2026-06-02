@@ -41,7 +41,14 @@ class PinnedTabViewController: NSViewController {
                 guard let pinnedItem = collectionView.makeItem(withIdentifier: PinnedExtensionItem.reuseIdentifier, for: indexPath) as? PinnedExtensionItem else {
                     return NSCollectionViewItem()
                 }
-                pinnedItem.configure(with: model)
+                // Dynamic icon looked up by id (overrides the model's static
+                // icon). The badge is a self-observing overlay in the cell, so it
+                // updates without reloading; reloadItems is only needed for icon
+                // changes (see the $dynamicIcons subscription).
+                let manager = browserState?.extensionManager
+                pinnedItem.configure(with: model,
+                                     dynamicIcon: manager?.dynamicIcons[model.id],
+                                     manager: manager)
                 pinnedItem.itemClicked = { [weak self] model, view in
                     self?.handleExtensionClicked(model, anchor: view)
                 }
@@ -354,7 +361,48 @@ class PinnedTabViewController: NSViewController {
             }
             .store(in: &cancellables)
 
+        // A dynamic-icon change doesn't change the pinned set, and the id-only
+        // model equality means a plain re-apply won't refresh cells, so reload
+        // the extension items to re-run the cell provider with the new icon.
+        // (Badge changes are handled by the self-observing overlay in the cell,
+        // so they need no reload here.)
+        browserState.extensionManager.$dynamicIcons
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.reloadExtensionItems()
+            }
+            .store(in: &cancellables)
+
+        // Re-apply the snapshot when the set of hidden (visible == false)
+        // extensions changes — a page action shown/hidden on the current tab —
+        // so the cell appears/disappears in step with the header. Gated on the
+        // id set so a rapid badge-text tick (e.g. a blocked-count) does NOT
+        // rebuild (that would be the deferred rebuild-all churn).
+        browserState.extensionManager.$badges
+            .map { badges in Set(badges.compactMap { $0.value.visible ? nil : $0.key }) }
+            .removeDuplicates()
+            .dropFirst()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                guard let self else { return }
+                self.handlePinnedExtensionsUpdate(self.currentPinnedExtensionsForDisplay())
+            }
+            .store(in: &cancellables)
+
         syncCurrentState()
+    }
+
+    private func reloadExtensionItems() {
+        // Skip mid-drag snapshot apply (re-synced on drag end), matching the
+        // isDragging invariant the tab/split sinks honor.
+        guard !isDragging else { return }
+        var snapshot = dataSource.snapshot()
+        let extensionItems = snapshot.itemIdentifiers(inSection: .extensions)
+        guard !extensionItems.isEmpty else { return }
+        // reloadItems re-runs the cell provider for these identifiers even though
+        // the model equality is id-only, so the provider picks up the new icon.
+        snapshot.reloadItems(extensionItems)
+        dataSource.apply(snapshot, animatingDifferences: false)
     }
 
     private func deactivate() {
@@ -367,12 +415,7 @@ class PinnedTabViewController: NSViewController {
     private func syncCurrentState() {
         guard let browserState else { return }
         pinnedTabs = browserState.pinnedTabs
-        let showExtensions = browserState.extensionManager.shouldDisplayExtensionsWithinSidebar
-            && !browserState.isInPlaceholderMode
-        let extensions = showExtensions ? browserState.extensionManager.pinedExtensions : []
-        pinnedExtensionItems = extensions.map {
-            PinnedTabItemModel(id: $0.id, title: $0.name, icon: $0.icon, tooltip: $0.name)
-        }
+        pinnedExtensionItems = visibleExtensionItems(currentPinnedExtensionsForDisplay())
         applySnapshot(animatingDifferences: false)
         updateEmptyViewVisibility(isDraggingTab: browserState.isDraggingTab)
         updateAllItemsSelectionState(browserState.focusingTab)
@@ -396,15 +439,37 @@ class PinnedTabViewController: NSViewController {
         }
     }
 
+    /// Hide page actions reporting visible == false on the current tab (spec
+    /// §4.3), mapping the rest to display models. Reused by the pinned-set, sync,
+    /// and visibility-change paths so all three agree.
+    private func visibleExtensionItems(_ extensions: [Extension]) -> [PinnedTabItemModel] {
+        let manager = browserState?.extensionManager
+        return extensions
+            .filter { manager?.badges[$0.id]?.visible != false }
+            .map { PinnedTabItemModel(id: $0.id, title: $0.name, icon: $0.icon, tooltip: $0.name) }
+    }
+
+    /// The pinned extensions to display, honoring the sidebar-display +
+    /// placeholder gating (before the per-tab visibility filter).
+    private func currentPinnedExtensionsForDisplay() -> [Extension] {
+        guard let browserState else { return [] }
+        let show = browserState.extensionManager.shouldDisplayExtensionsWithinSidebar
+            && !browserState.isInPlaceholderMode
+        return show ? browserState.extensionManager.pinedExtensions : []
+    }
+
     private func handlePinnedExtensionsUpdate(_ extensions: [Extension]) {
-        let mappedItems = extensions.map {
-            PinnedTabItemModel(id: $0.id, title: $0.name, icon: $0.icon, tooltip: $0.name)
-        }
+        let mappedItems = visibleExtensionItems(extensions)
         guard mappedItems != pinnedExtensionItems else {
             updateEmptyViewVisibility()
             return
         }
         pinnedExtensionItems = mappedItems
+        // Match the $pinnedTabs / $splits sinks: keep the data current but skip
+        // the visual apply during a drag (endedAt re-applies on drag end), so an
+        // async page-action visibility flip can't reflow the grid under the
+        // cursor mid-reorder.
+        guard !isDragging else { return }
         applySnapshot(animatingDifferences: true)
         updateEmptyViewVisibility()
     }

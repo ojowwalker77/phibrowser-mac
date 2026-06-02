@@ -129,6 +129,8 @@ struct ExtensionEvent: WindowEvent {
 
     enum ExtensionAction {
         case extensionChanged(info: [[AnyHashable : Any]])
+        case badgeChanged(info: [AnyHashable: Any])
+        case iconChanged(info: [AnyHashable: Any])
     }
 }
 
@@ -279,6 +281,10 @@ class EventBus {
             if let typedInfo = info as? [[String: Any]] {
                 state.extensionManager.extensionChanged(typedInfo)
             }
+        case .badgeChanged(let info):
+            state.extensionManager.handleBadgeInfo(info)
+        case .iconChanged(let info):
+            state.extensionManager.handleIconInfo(info)
         }
     }
 

@@ -266,6 +266,13 @@ typedef NS_ENUM(NSUInteger, PhiOmniboxSuggestionDisposition) {
                                       windowId:(int64_t)windowId;
 
 @optional
+// Per-window extension action badge state (text/colors/visibility/enabled).
+// Keys: windowId, extensionId, tabId, badgeText, backgroundColor, textColor,
+// visible, enabled.
+- (void)badgeInfoChanged:(NSDictionary *)info;
+// Per-window dynamic extension action icon. Keys: windowId, extensionId, tabId,
+// iconData (PNG NSData, empty => no dynamic icon), dipSize, scale.
+- (void)actionIconChanged:(NSDictionary *)info;
 // Optional metadata-rich variants for richer native tab orchestration.
 - (void)tabWillBeRemove:(int64_t)tabId
                windowId:(int64_t)windowId
