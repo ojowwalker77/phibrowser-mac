@@ -3109,6 +3109,9 @@ extension SidebarTabListViewController: TabGroupCellViewDelegate {
             "[TAB_GROUPS][INNER_DRAG] controller.beginDragging tab=\(tab.guid) " +
             "token=\(tab.groupToken ?? "nil") eventWindowPoint=\(mouseDownEvent.locationInWindow)"
         )
+        if browserState.multiSelection.isActive {
+            browserState.clearMultiSelection()
+        }
         guard let image = rowView.createDraggingImage() else { return }
         AppLogDebug(
             "[TAB_GROUPS][INNER_DRAG] controller.dragImage size=\(image.size) " +
@@ -3278,10 +3281,18 @@ extension SidebarTabListViewController: SideBarOutlineViewDelegate {
               let rowView = outlineView.view(
                 atColumn: 0,
                 row: row,
-                makeIfNecessary: false) as? SidebarTabCellView,
-              let image = rowView.createDraggingImage() else {
+                makeIfNecessary: false) as? SidebarTabCellView else {
             AppLogDebug(
                 "[SIDEBAR_TAB_DRAG_THRESHOLD] manual drag failed row=\(row)"
+            )
+            return
+        }
+        if browserState.multiSelection.isActive {
+            browserState.clearMultiSelection()
+        }
+        guard let image = rowView.createDraggingImage() else {
+            AppLogDebug(
+                "[SIDEBAR_TAB_DRAG_THRESHOLD] manual drag image failed row=\(row)"
             )
             return
         }

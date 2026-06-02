@@ -1544,7 +1544,12 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
             )
             view.configure(with: renderData)
 
-            if view.alphaValue < 1.0 {
+            let isDraggingSourceView = dragController.context.map {
+                tabId(for: $0.draggingTab) == id
+            } ?? false
+            if isDraggingSourceView {
+                view.alphaValue = 0
+            } else if view.alphaValue < 1.0 {
                 view.animator().alphaValue = 1.0
             }
 
@@ -2972,6 +2977,9 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
             // Keep the initial frame in overlay coordinates for drag math.
             tabFrame: dragOverlay.convert(frame, from: isPinned ? pinnedContainer : normalContainer)
         )
+        if browserState.multiSelection.isActive {
+            browserState.clearMultiSelection()
+        }
     }
 
     private func handleTabDragUpdate(event: NSEvent) {
