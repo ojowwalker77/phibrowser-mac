@@ -1011,6 +1011,9 @@
     "Previous image" : {
       "comment" : "Image preview: accessibility label for previous image control"
     },
+    "Preview attachment" : {
+      "comment" : "Feedback form - Tooltip for previewing an attachment"
+    },
     "Pure" : {
       "comment" : "Pure theme name"
     },

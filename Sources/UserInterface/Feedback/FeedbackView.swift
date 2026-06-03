@@ -18,7 +18,7 @@ struct FeedbackView: View {
     var onCancel: (() -> Void)?
     var onSend: (() -> Void)?
 
-    private let attachmentRowHeight: CGFloat = 22
+    private let attachmentRowHeight: CGFloat = 24
     private let attachmentRowSpacing: CGFloat = 6
     
     private var legalText: AttributedString {
@@ -258,6 +258,8 @@ struct FeedbackView: View {
         VStack(spacing: attachmentRowSpacing) {
             ForEach(viewModel.attachments) { attachment in
                 FeedbackAttachmentRow(attachment: attachment) {
+                    FeedbackAttachmentPreviewer.open(attachment)
+                } onRemove: {
                     viewModel.removeAttachment(id: attachment.id)
                 }
                 .frame(height: attachmentRowHeight)
@@ -289,6 +291,7 @@ struct FeedbackView: View {
 
 private struct FeedbackAttachmentRow: View {
     let attachment: FeedbackDraftAttachment
+    let onInspect: () -> Void
     let onRemove: () -> Void
 
     var body: some View {
@@ -303,15 +306,102 @@ private struct FeedbackAttachmentRow: View {
 
             Spacer(minLength: 8)
 
+            Button(action: onInspect) {
+                Image(systemName: "magnifyingglass")
+                    .symbolRenderingMode(.hierarchical)
+                    .frame(width: 16, height: 16)
+            }
+            .buttonStyle(.plain)
+            .help(attachment.kind == .image
+                  ? NSLocalizedString("Preview attachment", comment: "Feedback form - Tooltip for previewing an attachment")
+                  : NSLocalizedString("Show in Finder", comment: "Download item row - Tooltip for show in finder button"))
+
             Button(action: onRemove) {
                 Image(systemName: "xmark.circle.fill")
                     .symbolRenderingMode(.hierarchical)
+                    .frame(width: 16, height: 16)
             }
             .buttonStyle(.plain)
             .help(NSLocalizedString("Remove attachment", comment: "Feedback form - Tooltip for removing an attachment"))
         }
         .font(.system(size: 12))
         .frame(maxWidth: .infinity)
+    }
+}
+
+@MainActor
+private enum FeedbackAttachmentPreviewer {
+    private static let previewBundleIdentifier = "com.apple.Preview"
+
+    static func open(_ attachment: FeedbackDraftAttachment) {
+        switch attachment.kind {
+        case .image:
+            guard let url = imagePreviewURL(for: attachment) else { return }
+            openInPreview(url)
+        case .file:
+            revealInFinder(attachment)
+        }
+    }
+
+    private static func imagePreviewURL(for attachment: FeedbackDraftAttachment) -> URL? {
+        switch attachment.source {
+        case .file(let url):
+            return url
+        case .pastedImage(let data):
+            do {
+                return try writeTemporaryPreviewFile(for: attachment, data: data)
+            } catch {
+                AppLogError("Feedback attachment preview failed: \(error.localizedDescription)")
+                return nil
+            }
+        }
+    }
+
+    private static func writeTemporaryPreviewFile(
+        for attachment: FeedbackDraftAttachment,
+        data: Data
+    ) throws -> URL {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("PhiFeedbackPreviews", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
+        let filename = attachment.filename.replacingOccurrences(of: "/", with: "-")
+        let url = directory.appendingPathComponent("\(attachment.id.uuidString)-\(filename)")
+        try data.write(to: url, options: .atomic)
+        return url
+    }
+
+    private static func openInPreview(_ url: URL) {
+        let didAccess = url.startAccessingSecurityScopedResource()
+
+        guard let previewURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: previewBundleIdentifier) else {
+            if !NSWorkspace.shared.open(url) {
+                AppLogError("Feedback attachment preview failed: Preview.app is unavailable")
+            }
+            if didAccess {
+                url.stopAccessingSecurityScopedResource()
+            }
+            return
+        }
+
+        let configuration = NSWorkspace.OpenConfiguration()
+        NSWorkspace.shared.open([url], withApplicationAt: previewURL, configuration: configuration) { _, error in
+            if didAccess {
+                url.stopAccessingSecurityScopedResource()
+            }
+            if let error {
+                AppLogError("Feedback attachment preview failed: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    private static func revealInFinder(_ attachment: FeedbackDraftAttachment) {
+        guard case .file(let url) = attachment.source else { return }
+        let didAccess = url.startAccessingSecurityScopedResource()
+        NSWorkspace.shared.activateFileViewerSelecting([url])
+        if didAccess {
+            url.stopAccessingSecurityScopedResource()
+        }
     }
 }
 
