@@ -543,8 +543,8 @@ struct EditPinnedTabView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(
                         NSLocalizedString(
-                            "Second Name",
-                            comment: "Bookmark editor - Label for the secondary title input field on a split-view bookmark"
+                            "Right Name",
+                            comment: "Bookmark editor - Label for the right (secondary) title input field on a split-view bookmark"
                         )
                     )
                     .font(.subheadline)
@@ -567,8 +567,8 @@ struct EditPinnedTabView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(
                         NSLocalizedString(
-                            "Second URL",
-                            comment: "Bookmark editor - Label for the secondary URL input field on a split-view bookmark"
+                            "Right URL",
+                            comment: "Bookmark editor - Label for the right (secondary) URL input field on a split-view bookmark"
                         )
                     )
                     .font(.subheadline)
@@ -616,8 +616,8 @@ struct EditPinnedTabView: View {
     private var primaryUrlFieldLabel: String {
         if isSplitBookmark {
             return NSLocalizedString(
-                "First URL",
-                comment: "Bookmark editor - Label for the primary URL input field on a split-view bookmark"
+                "Left URL",
+                comment: "Bookmark editor - Label for the left (primary) URL input field on a split-view bookmark"
             )
         }
         return NSLocalizedString(
@@ -629,8 +629,8 @@ struct EditPinnedTabView: View {
     private var primaryNameFieldLabel: String {
         if isSplitBookmark {
             return NSLocalizedString(
-                "First Name",
-                comment: "Bookmark editor - Label for the primary title input field on a split-view bookmark"
+                "Left Name",
+                comment: "Bookmark editor - Label for the left (primary) title input field on a split-view bookmark"
             )
         }
         return NSLocalizedString(

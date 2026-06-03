@@ -139,19 +139,19 @@ extension Tab: ContextMenuRepresentable {
             copyRightURL = nil
         }
         if let leftURL = copyLeftURL, let rightURL = copyRightURL {
-            let copyUrl1Item = NSMenuItem(title: NSLocalizedString("Copy Link 1", comment: "Tab context menu - Copy the first pane's URL for a split"),
-                                          action: #selector(copySplitPaneURL(_:)),
-                                          keyEquivalent: "")
-            copyUrl1Item.target = self
-            copyUrl1Item.representedObject = leftURL
-            items.append(copyUrl1Item)
+            let copyLeftURLItem = NSMenuItem(title: NSLocalizedString("Copy Left URL", comment: "Tab context menu - Copy the left pane's URL for a split"),
+                                             action: #selector(copySplitPaneURL(_:)),
+                                             keyEquivalent: "")
+            copyLeftURLItem.target = self
+            copyLeftURLItem.representedObject = leftURL
+            items.append(copyLeftURLItem)
 
-            let copyUrl2Item = NSMenuItem(title: NSLocalizedString("Copy Link 2", comment: "Tab context menu - Copy the second pane's URL for a split"),
-                                          action: #selector(copySplitPaneURL(_:)),
-                                          keyEquivalent: "")
-            copyUrl2Item.target = self
-            copyUrl2Item.representedObject = rightURL
-            items.append(copyUrl2Item)
+            let copyRightURLItem = NSMenuItem(title: NSLocalizedString("Copy Right URL", comment: "Tab context menu - Copy the right pane's URL for a split"),
+                                              action: #selector(copySplitPaneURL(_:)),
+                                              keyEquivalent: "")
+            copyRightURLItem.target = self
+            copyRightURLItem.representedObject = rightURL
+            items.append(copyRightURLItem)
         } else {
             let copyUrlItem = NSMenuItem(title: NSLocalizedString("Copy Link", comment: "Tab context menu - Menu item to copy the tab URL to clipboard"), action: #selector(MainBrowserWindowController.myCopyLink(_:)), keyEquivalent: "")
             items.append(copyUrlItem)

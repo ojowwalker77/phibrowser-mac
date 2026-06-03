@@ -331,8 +331,7 @@ class SidebarTabCellView: SidebarCellView {
 /// Two halves stand side-by-side inside one rounded background; each
 /// half shows its favicon, title, and an x close button that appears on
 /// cell hover. The pane whose tab is focused gets a solid white pill,
-/// the other half stays at the cell-level hover tint. A swap arrow
-/// appears between the two halves on hover and reverses the split.
+/// the other half stays at the cell-level hover tint.
 class SidebarSplitPairCellView: SidebarCellView {
     private let outerBackground = HoverableView()
     private let leftPane = HoverableView()
@@ -347,7 +346,6 @@ class SidebarSplitPairCellView: SidebarCellView {
     private var rightMuteHost: ZeroSafeAreaHostingView<AnyView>!
     private var leftMuteWidth: Constraint?
     private var rightMuteWidth: Constraint?
-    private var swapIconHost: ZeroSafeAreaHostingView<AnyView>!
     private let dividerView = NSView()
     private var leftFaviconHandle: ProfileScopedFaviconLoadHandle?
     private var rightFaviconHandle: ProfileScopedFaviconLoadHandle?
@@ -355,10 +353,11 @@ class SidebarSplitPairCellView: SidebarCellView {
     private weak var configuredRightTab: Tab?
     private var configuredSplitId: String?
     /// Owning window's BrowserState. Lets the cell re-resolve which pane
-    /// is "left" after Chromium reorders the strip (e.g. via the swap
-    /// button) — the `SplitPairSidebarItem.id` is keyed on the SplitGroup
-    /// alone so the diff path treats a strip swap as a no-op, but the
-    /// underlying `normalTabs` adjacency tells us which guid is now first.
+    /// is "left" after Chromium reorders the strip (e.g. via the
+    /// "Reverse Panes" context-menu action or a drag) — the
+    /// `SplitPairSidebarItem.id` is keyed on the SplitGroup alone so the
+    /// diff path treats a strip swap as a no-op, but the underlying
+    /// `normalTabs` adjacency tells us which guid is now first.
     weak var browserState: BrowserState?
     private var hoverTrackingArea: NSTrackingArea?
     private var isCellHovered = false {
@@ -478,22 +477,9 @@ class SidebarSplitPairCellView: SidebarCellView {
             tab.performAction(with: self.owner)
         }
 
-        // Reuse the horizontal strip's `SplitSwapIcon` so both layouts share
-        // the same glyph weight, foreground opacity, and circle hover-fill.
-        swapIconHost = ZeroSafeAreaHostingView(rootView: AnyView(
-            SplitSwapIcon { [weak self] in self?.swapTapped() }
-        ))
-        swapIconHost.isHidden = true
-        outerBackground.addSubview(swapIconHost)
-        swapIconHost.snp.makeConstraints { make in
-            make.centerX.equalTo(outerBackground.snp.centerX)
-            make.centerY.equalToSuperview()
-            make.size.equalTo(CGSize(width: 16, height: 16))
-        }
-
-        // Vertical seam in the gap between the two panes. Sits where the
-        // swap glyph appears on hover, so the pair always reads as two
-        // grouped tabs. Mirrors `splitDividerView` in the horizontal strip.
+        // Vertical seam in the gap between the two panes so the pair
+        // always reads as two grouped tabs. Mirrors `splitDividerView`
+        // in the horizontal strip.
         dividerView.wantsLayer = true
         dividerView.phiLayer?.setBackgroundColor(ThemedColor.separator)
         outerBackground.addSubview(dividerView)
@@ -598,19 +584,9 @@ class SidebarSplitPairCellView: SidebarCellView {
         configuredRightTab?.close()
     }
 
-    private func swapTapped() {
-        guard let splitId = configuredSplitId,
-              let state = (configuredLeftTab?.windowId).flatMap({
-                  MainBrowserWindowControllersManager.shared.getBrowserState(for: $0)
-              }) else { return }
-        state.reverseTabsInSplit(splitId)
-    }
-
     private func updateHoverChrome() {
         leftCloseHost.isHidden = !isCellHovered
         rightCloseHost.isHidden = !isCellHovered
-        swapIconHost.isHidden = !isCellHovered
-        dividerView.isHidden = isCellHovered
     }
 
     override func configureAppearance() {

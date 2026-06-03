@@ -132,8 +132,7 @@ final class TabItemView: NSView {
     }()
 
     /// Thin vertical line between the two halves of a split-merged cell.
-    /// Hidden when `pinnedSplitPartner` is nil, or when the cell is active
-    /// (the swap icon takes the divider's place to signal the linked pair).
+    /// Hidden when `pinnedSplitPartner` is nil.
     ///
     /// Sizing + color mirror the tab↔tab separator (`TabStripMetrics.Content.separator*`)
     /// so the divider inside a merged cell reads as the same affordance as
@@ -142,17 +141,6 @@ final class TabItemView: NSView {
         let view = NSView()
         view.wantsLayer = true
         view.phiLayer?.setBackgroundColor(TabStripMetrics.Content.separatorColor)
-        view.isHidden = true
-        return view
-    }()
-
-    /// Swap glyph (⇄) shown between the two halves of a split-merged cell
-    /// when the cell is hovered or active, in place of the vertical divider.
-    /// Click invokes the same "Reverse Panes" action as the context menu
-    /// (routes through `BrowserState.reverseTabsInSplit`).
-    private lazy var splitSwapIconHostingView: ZeroSafeAreaHostingView<AnyView> = {
-        let view = ZeroSafeAreaHostingView(rootView: makeSplitSwapIconRootView())
-        view.layer?.backgroundColor = .clear
         view.isHidden = true
         return view
     }()
@@ -248,7 +236,6 @@ final class TabItemView: NSView {
         addSubview(titleHostingView)
         addSubview(secondaryTitleHostingView)
         addSubview(splitDividerView)
-        addSubview(splitSwapIconHostingView)
         addSubview(closeButtonHostingView)
         addSubview(secondaryCloseButtonHostingView)
     }
@@ -300,11 +287,10 @@ final class TabItemView: NSView {
 
         switch mode {
         case .pinned, .compact:
-            // Pinned/compact cells never carry the divider or swap glyph;
-            // reset both so a recycled view that previously rendered a
-            // normal-mode split doesn't leak its center decoration.
+            // Pinned/compact cells never carry the divider; reset so a
+            // recycled view that previously rendered a normal-mode split
+            // doesn't leak its center decoration.
             splitDividerView.isHidden = true
-            splitSwapIconHostingView.isHidden = true
             if showRecording {
                 recordingIconHostingView.isHidden = false
                 recordingIconHostingView.frame = centeredFrame(for: recordingIconSize)
@@ -353,10 +339,10 @@ final class TabItemView: NSView {
 
         case .normal:
             // Split-merged cell: render two halves (favicon + title each)
-            // separated by a vertical divider (inactive) or the swap glyph
-            // (active). Each pane carries its own mute toggle so audible
-            // state stays addressable per-pane; the recording badge is
-            // still dropped — the user can manage it via context menu.
+            // separated by a vertical divider. Each pane carries its own mute
+            // toggle so audible state stays addressable per-pane; the
+            // recording badge is still dropped — the user can manage it via
+            // context menu.
             if let _ = pinnedSplitPartner {
                 let half = bounds.width / 2
                 faviconHostingView.isHidden = false
@@ -373,27 +359,14 @@ final class TabItemView: NSView {
                     width: metrics.faviconSize.width,
                     height: metrics.faviconSize.height
                 )
-                if isActive || isHovered {
-                    splitDividerView.isHidden = true
-                    splitSwapIconHostingView.isHidden = false
-                    let iconSize = TabStripMetrics.Content.splitSwapIconSize
-                    splitSwapIconHostingView.frame = CGRect(
-                        x: half - iconSize.width / 2,
-                        y: centerY - iconSize.height / 2,
-                        width: iconSize.width,
-                        height: iconSize.height
-                    )
-                } else {
-                    splitSwapIconHostingView.isHidden = true
-                    splitDividerView.isHidden = false
-                    let sepSize = TabStripMetrics.Content.separatorSize
-                    splitDividerView.frame = CGRect(
-                        x: half - sepSize.width / 2,
-                        y: (bounds.height - sepSize.height) / 2,
-                        width: sepSize.width,
-                        height: sepSize.height
-                    )
-                }
+                splitDividerView.isHidden = false
+                let sepSize = TabStripMetrics.Content.separatorSize
+                splitDividerView.frame = CGRect(
+                    x: half - sepSize.width / 2,
+                    y: (bounds.height - sepSize.height) / 2,
+                    width: sepSize.width,
+                    height: sepSize.height
+                )
                 muteButtonHostingView.isHidden = !showMute
                 if showMute {
                     muteButtonHostingView.frame = CGRect(
@@ -422,7 +395,6 @@ final class TabItemView: NSView {
             secondaryFaviconHostingView.isHidden = true
             secondaryTitleHostingView.isHidden = true
             splitDividerView.isHidden = true
-            splitSwapIconHostingView.isHidden = true
             faviconHostingView.frame = CGRect(
                 x: metrics.faviconLeading,
                 y: centerY - metrics.faviconSize.height / 2,
@@ -550,7 +522,6 @@ final class TabItemView: NSView {
             titleHostingView,
             secondaryTitleHostingView,
             splitDividerView,
-            splitSwapIconHostingView,
             closeButtonHostingView,
             secondaryCloseButtonHostingView,
         ] {
@@ -625,30 +596,6 @@ final class TabItemView: NSView {
             }
             .phiThemeObserver(themeObserver)
         )
-    }
-
-    private func makeSplitSwapIconRootView() -> AnyView {
-        AnyView(
-            SplitSwapIcon { [weak self] in
-                self?.reversePanes()
-            }
-            .phiThemeObserver(themeObserver)
-        )
-    }
-
-    /// Triggered by the swap glyph; mirrors the "Reverse Panes" context-menu
-    /// item. Looks up the live split for `sourceTab` and asks the active
-    /// window's `BrowserState` to swap its panes. No-op when the tab isn't
-    /// in a split (e.g., a stale state during teardown) or when the split is
-    /// pinned (pinned splits hide the affordance in the menu, but the cell
-    /// is rendered as merged so this guard keeps the behaviors aligned).
-    @MainActor
-    private func reversePanes() {
-        guard let tab = sourceTab,
-              let state = MainBrowserWindowControllersManager.shared.activeWindowController?.browserState,
-              let group = state.splitGroup(forTabId: tab.guid),
-              !group.isPinned else { return }
-        state.reverseTabsInSplit(group.id)
     }
 
     private func makeCloseButtonRootView() -> AnyView {
@@ -810,14 +757,6 @@ final class TabItemView: NSView {
                 return
             }
 
-            // Swap glyph owns its own click → reverse panes. The button's
-            // SwiftUI action already fires; this guard prevents the cell
-            // from also flipping focus to the partner pane based on the
-            // x>midX rule below.
-            if !splitSwapIconHostingView.isHidden && splitSwapIconHostingView.frame.contains(point) {
-                return
-            }
-
             // Click check for Mute Button (Only block if active)
             if !muteButtonHostingView.isHidden && muteButtonHostingView.frame.contains(point) && isActive {
                 return
@@ -853,12 +792,10 @@ final class TabItemView: NSView {
         let isOnMute = !muteButtonHostingView.isHidden && muteButtonHostingView.frame.contains(point)
         let isOnClose = (!closeButtonHostingView.isHidden && closeButtonHostingView.frame.contains(point))
             || (!secondaryCloseButtonHostingView.isHidden && secondaryCloseButtonHostingView.frame.contains(point))
-        let isOnSwap = !splitSwapIconHostingView.isHidden
-            && splitSwapIconHostingView.frame.contains(point)
 
         // Only block press state if on functional buttons
         let isFunctionalMute = isOnMute && isActive
-        if !isFunctionalMute && !isOnClose && !isOnSwap {
+        if !isFunctionalMute && !isOnClose {
             viewModel.isPressed = true
         }
     }
@@ -870,10 +807,8 @@ final class TabItemView: NSView {
         let isOnMute = !muteButtonHostingView.isHidden && muteButtonHostingView.frame.contains(startPoint)
         let isOnClose = (!closeButtonHostingView.isHidden && closeButtonHostingView.frame.contains(startPoint))
             || (!secondaryCloseButtonHostingView.isHidden && secondaryCloseButtonHostingView.frame.contains(startPoint))
-        let isOnSwap = !splitSwapIconHostingView.isHidden
-            && splitSwapIconHostingView.frame.contains(startPoint)
 
-        if (isOnMute && isActive) || isOnClose || isOnSwap {
+        if (isOnMute && isActive) || isOnClose {
             return
         }
 

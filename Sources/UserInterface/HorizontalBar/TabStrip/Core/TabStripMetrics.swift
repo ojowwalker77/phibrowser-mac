@@ -63,15 +63,6 @@ enum TabStripMetrics {
             DefaultColors.separator.color(for: appearance)
         }
 
-        /// Footprint of the ⇄ swap glyph rendered between the two halves of
-        /// an active split-merged cell. The glyph sits where the inactive
-        /// divider line would otherwise be drawn; width is capped at
-        /// `faviconLeading * 2` so it stays clear of the inner favicon edges
-        /// (right pane's favicon starts at `half + faviconLeading`).
-        static let splitSwapIconSize = CGSize(width: 12, height: 16)
-        static let splitSwapIconPointSize: CGFloat = 10
-        static let splitSwapIconColor = NSColor(calibratedWhite: 0, alpha: 0.55)
-
         // FaviconLeading 6 + FaviconSize 16 + titleToCloseButton 14 + CloseButtonSize 24 + CloseButtonTrailing 4
         static let compactModeThreshold: CGFloat = 64
     }

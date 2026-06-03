@@ -175,31 +175,3 @@ struct UnifiedTabRecordingIcon: View {
             .onAppear { isAnimating = true }
     }
 }
-
-/// Clickable swap glyph (⇄) rendered between the two halves of a split-merged
-/// tab cell. Tapping it mirrors the context menu's "Reverse Panes" action.
-/// Hover state is purely visual — `TabItemView`'s outer hover already drives
-/// the icon's visibility from the layout side.
-struct SplitSwapIcon: View {
-    let action: () -> Void
-    @State private var isHovered = false
-
-    var body: some View {
-        Button(action: action) {
-            Image(systemName: "arrow.left.arrow.right")
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(Color.primary.opacity(isHovered ? 0.85 : 0.55))
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(
-                    Circle()
-                        .fill(Color.primary.opacity(isHovered ? 0.08 : 0))
-                )
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .onHover { isHovered = $0 }
-        .help(NSLocalizedString("Reverse Panes",
-                                comment: "Split tab swap-icon tooltip"))
-        .ignoresSafeArea()
-    }
-}

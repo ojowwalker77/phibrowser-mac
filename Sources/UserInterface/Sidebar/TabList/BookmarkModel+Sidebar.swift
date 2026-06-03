@@ -60,14 +60,14 @@ extension Bookmark: ContextMenuRepresentable {
             // case needs a dedicated handler routed via the menu item's tag.
             let hasSecondary = !(secondaryUrl ?? "").isEmpty
             if hasSecondary {
-                let copyPrimary = NSMenuItem(title: NSLocalizedString("Copy Link 1", comment: "Bookmark context menu - Copy the primary URL of a split-view bookmark"),
+                let copyPrimary = NSMenuItem(title: NSLocalizedString("Copy Left URL", comment: "Bookmark context menu - Copy the left (primary) URL of a split-view bookmark"),
                                              action: #selector(copySplitLink(_:)),
                                              keyEquivalent: "")
                 copyPrimary.target = self
                 copyPrimary.tag = 0
                 menu.addItem(copyPrimary)
 
-                let copySecondary = NSMenuItem(title: NSLocalizedString("Copy Link 2", comment: "Bookmark context menu - Copy the secondary URL of a split-view bookmark"),
+                let copySecondary = NSMenuItem(title: NSLocalizedString("Copy Right URL", comment: "Bookmark context menu - Copy the right (secondary) URL of a split-view bookmark"),
                                                action: #selector(copySplitLink(_:)),
                                                keyEquivalent: "")
                 copySecondary.target = self
