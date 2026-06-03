@@ -303,7 +303,7 @@
       "comment" : "Import data type - Browsing history toggle label"
     },
     "Cancel" : {
-      "comment" : "AI settings - Cancel button in disable-AI confirmation alert\nAI settings - Cancel button in disable-connectors confirmation alert\nAccount settings - Cancel button in logout confirmation dialog\nAccount settings - Cancel button in rename dialog\nCancel\nDebug clear data - Alert button to cancel clearing user data\nDebug import user data - Alert button to cancel importing user data\nDownload item row - Tooltip for cancel button during safety scan\nDownload item row - Tooltip for cancel download button\nEditor - Cancel button title\nFeedback form - Cancel button to dismiss feedback form\nNew folder dialog cancel button title\nTab group rename alert - Cancel button\nTooltip for cancel button during safety scan in living downloads toast\nUpdate alert - Button to cancel update installation"
+      "comment" : "AI settings - Cancel button in disable-AI confirmation alert\nAI settings - Cancel button in disable-connectors confirmation alert\nAccount settings - Cancel button in logout confirmation dialog\nAccount settings - Cancel button in rename dialog\nCancel\nDebug clear data - Alert button to cancel clearing user data\nDebug import user data - Alert button to cancel importing user data\nDownload item row - Tooltip for cancel button during safety scan\nDownload item row - Tooltip for cancel download button\nEditor - Cancel button title\nNew folder dialog cancel button title\nTab group rename alert - Cancel button\nTooltip for cancel button during safety scan in living downloads toast\nUpdate alert - Button to cancel update installation"
     },
     "Cancel First" : {
 
@@ -481,7 +481,7 @@
       "comment" : "Download item row - Status label when downloaded file was deleted"
     },
     "Describe the issue in detail" : {
-      "comment" : "Feedback form - Label prompting user to describe the issue"
+      "comment" : "Feedback form - Section header prompting user to describe the issue"
     },
     "Discard" : {
       "comment" : "Download item row - Tooltip for discard button on blocked download\nDownload item row - Tooltip for discard button on safety warning\nTooltip for discard button on blocked download in living downloads toast\nTooltip for discard button on safety warning in living downloads toast"

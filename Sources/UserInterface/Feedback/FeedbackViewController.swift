@@ -54,8 +54,7 @@ class FeedbackViewController: NSViewController {
     override func loadView() {
         view = NSView()
         view.wantsLayer = true
-//        view.layer?.backgroundColor = .white
-        view.phiLayer?.backgroundColor = .white <> NSColor.black.withAlphaComponent(0.7).cgColor
+        view.layer?.backgroundColor = NSColor.white.cgColor
     }
     
     override func viewDidLoad() {
@@ -64,7 +63,7 @@ class FeedbackViewController: NSViewController {
         view.addSubview(feedbackHosting.view)
         feedbackHosting.view.snp.makeConstraints { make in
             make.edges.equalToSuperview()
-            make.size.equalTo(NSSize(width: 520, height: 652))
+            make.size.equalTo(NSSize(width: 520, height: 580))
         }
         
         if let tab = hostWindowController.browserState.focusingTab {

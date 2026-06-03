@@ -20,18 +20,6 @@ struct FeedbackView: View {
 
     private let attachmentRowHeight: CGFloat = 22
     private let attachmentRowSpacing: CGFloat = 6
-    private let attachmentScrollIndicatorInset: CGFloat = 16
-    private let maxVisibleAttachmentRows = 4
-
-    private var attachmentListHeight: CGFloat {
-        let count = CGFloat(min(viewModel.attachments.count, maxVisibleAttachmentRows))
-        guard count > 0 else { return 0 }
-        return count * attachmentRowHeight + max(0, count - 1) * attachmentRowSpacing
-    }
-
-    private var shouldScrollAttachments: Bool {
-        viewModel.attachments.count > maxVisibleAttachmentRows
-    }
     
     private var legalText: AttributedString {
         var string = AttributedString(NSLocalizedString("Some account and system information may be sent to Phinomenon. We will use the information you give us to help address technical issues and to improve our services, subject to our Privacy Policy and Terms of Service.", comment: "Feedback form - Legal disclaimer text explaining data usage, contains links to Privacy Policy and Terms of Service"))
@@ -66,143 +54,28 @@ struct FeedbackView: View {
     }
     
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            VStack(alignment: .trailing, spacing: 0) {
-                HStack {
-                    Text(NSLocalizedString("Describe the issue in detail", comment: "Feedback form - Label prompting user to describe the issue"))
-                        .foregroundColor(.secondary)
-                    Spacer()
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 24) {
+                    descriptionSection
+                    additionalInfoSection
+                    legalSection
                 }
-                
-                Spacer()
-                    .frame(height: 16)
-                
-                TextEditor(text: $viewModel.descriptionText)
-                    .scrollContentBackground(.hidden)
-                    .font(.body)
-                    .frame(height: 144)
-                    .padding(4)
-                    .background(Color(NSColor.black.withAlphaComponent(0.02)))
-                    .clipShape(.rect(cornerRadius: 8))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8)
-                            .stroke(Color(NSColor.separatorColor), lineWidth: 1)
-                    )
-                    .onChange(of: viewModel.descriptionText, { oldValue, newValue in
-                        if newValue.count > maxDescriptionLength {
-                            viewModel.descriptionText = String(newValue.prefix(maxDescriptionLength))
-                        }
-                    })
-                
-                if viewModel.descriptionText.count >= 3000 {
-                    Spacer()
-                        .frame(height: 5)
-                    
-                    Text("\(viewModel.descriptionText.count)/\(maxDescriptionLength)")
-                        .font(.caption)
-                        .foregroundStyle(viewModel.descriptionText.count >= maxDescriptionLength ? .red : .yellow)
-                }
+                .padding(.horizontal, 24)
+                .padding(.top, 20)
+                .padding(.bottom, 24)
+                .animation(.easeOut(duration: 0.2), value: viewModel.attachments.count)
             }
-            
-            VStack(alignment: .leading, spacing: 16) {
-                Text(NSLocalizedString("Additional info (optional)", comment: "Feedback form - Section header for optional additional information"))
-                    .foregroundColor(.secondary)
-                
-                VStack(spacing: 11) {
-                    HStack {
-                        Text(NSLocalizedString("URL", comment: "Feedback form - Label for URL input field"))
-                            .foregroundColor(.primary)
-                        Spacer()
-                        TextField("URL", text: $urlString)
-                            .textFieldStyle(.plain)
-                            .focusEffectDisabled()
-                            .multilineTextAlignment(.trailing)
-                            .foregroundColor(.secondary)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                    }
-                    
-                    Divider()
-                    
-                    attachmentPickerRow
-
-                    if !viewModel.attachments.isEmpty {
-                        Divider()
-                        if shouldScrollAttachments {
-                            ScrollViewReader { proxy in
-                                ScrollView {
-                                    attachmentList(trailingInset: attachmentScrollIndicatorInset)
-                                }
-                                .frame(height: attachmentListHeight)
-                                .onAppear {
-                                    scrollToLastAttachment(proxy)
-                                }
-                                .onChange(of: viewModel.attachments.count, { _, _ in
-                                    scrollToLastAttachment(proxy)
-                                })
-                            }
-                        } else {
-                            attachmentList()
-                        }
-                    }
-                }
-                .padding()
-                .background(Color(NSColor.black.withAlphaComponent(0.02)))
-                .clipShape(.rect(cornerRadius: 8))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8)
-                        .stroke(Color(NSColor.separatorColor), lineWidth: 1)
-                )
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                footer
             }
-            .padding(.top, 24)
-            
-            VStack {
-                Spacer()
-                    .frame(height: 24)
-                
-                Text(legalText)
-                    .font(.system(size: 11, weight: .regular))
-                    .foregroundColor(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .environment(\.openURL, OpenURLAction { url in
-                        if url.absoluteString == "privacy" {
-                            openPrivacyPolicy()
-                            return .handled
-                        } else if url.absoluteString == "terms" {
-                            openTermsOfService()
-                            return .handled
-                        }
-                        return .discarded
-                    })
-                
-                Spacer()
-                
-                HStack {
-                    Spacer()
-                    Button(NSLocalizedString("Cancel", comment: "Feedback form - Cancel button to dismiss feedback form")) {
-                        onCancel?()
-                    }
-                    .buttonStyle(CancelButtonStyle())
-                    .keyboardShortcut(.cancelAction)
-                    
-                    Button(NSLocalizedString("Send", comment: "Feedback form - Send button to submit feedback")) {
-                        guard viewModel.canSend else {
-                            onCancel?()
-                            return
-                        }
-                        onSend?()
-                    }
-                    .disabled(!viewModel.canSend)
-                    .buttonStyle(SendButtonStyle())
-                    .keyboardShortcut(.defaultAction)
-                    Spacer()
-                }
-//                .padding(.top, 2)
+            .onChange(of: viewModel.attachments.count) { _, _ in
+                scrollToLastAttachment(proxy)
             }
-//            .debugBorder()
         }
-        .padding(36)
         .frame(width: 520)
+        .frame(maxHeight: .infinity)
+        .background(Color.white)
         .background(FeedbackPasteImageMonitor { image in
             viewModel.addPastedImage(image)
         })
@@ -250,6 +123,113 @@ struct FeedbackView: View {
         }
     }
 
+    private var descriptionSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(NSLocalizedString("Describe the issue in detail", comment: "Feedback form - Section header prompting user to describe the issue"))
+                .font(.headline)
+
+            TextEditor(text: $viewModel.descriptionText)
+                .scrollContentBackground(.hidden)
+                .font(.body)
+                .frame(height: 144)
+                .padding(4)
+                .background(Color(NSColor.black.withAlphaComponent(0.02)))
+                .clipShape(.rect(cornerRadius: 8))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(Color(NSColor.separatorColor), lineWidth: 1)
+                )
+                .onChange(of: viewModel.descriptionText, { _, newValue in
+                    if newValue.count > maxDescriptionLength {
+                        viewModel.descriptionText = String(newValue.prefix(maxDescriptionLength))
+                    }
+                })
+
+            if viewModel.descriptionText.count >= 3000 {
+                Text("\(viewModel.descriptionText.count)/\(maxDescriptionLength)")
+                    .font(.caption)
+                    .foregroundStyle(viewModel.descriptionText.count >= maxDescriptionLength ? .red : .yellow)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+            }
+        }
+    }
+
+    private var additionalInfoSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(NSLocalizedString("Additional info (optional)", comment: "Feedback form - Section header for optional additional information"))
+                .font(.headline)
+
+            VStack(spacing: 11) {
+                HStack {
+                    Text(NSLocalizedString("URL", comment: "Feedback form - Label for URL input field"))
+                        .foregroundColor(.primary)
+                    Spacer()
+                    TextField("URL", text: $urlString)
+                        .textFieldStyle(.plain)
+                        .focusEffectDisabled()
+                        .multilineTextAlignment(.trailing)
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+
+                Divider()
+
+                attachmentPickerRow
+
+                if !viewModel.attachments.isEmpty {
+                    Divider()
+                    attachmentList()
+                }
+            }
+            .padding()
+            .background(Color(NSColor.black.withAlphaComponent(0.02)))
+            .clipShape(.rect(cornerRadius: 8))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(Color(NSColor.separatorColor), lineWidth: 1)
+            )
+        }
+    }
+
+    private var legalSection: some View {
+        Text(legalText)
+            .font(.system(size: 11, weight: .regular))
+            .foregroundColor(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+            .environment(\.openURL, OpenURLAction { url in
+                if url.absoluteString == "privacy" {
+                    openPrivacyPolicy()
+                    return .handled
+                } else if url.absoluteString == "terms" {
+                    openTermsOfService()
+                    return .handled
+                }
+                return .discarded
+            })
+    }
+
+    private var footer: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Spacer()
+                Button(NSLocalizedString("Send", comment: "Feedback form - Send button to submit feedback")) {
+                    guard viewModel.canSend else { return }
+                    onSend?()
+                }
+                .disabled(!viewModel.canSend)
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .keyboardShortcut(.defaultAction)
+            }
+            .padding(.horizontal, 24)
+            .padding(.vertical, 14)
+            .frame(maxWidth: .infinity)
+            .background(Color.white)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
     private var attachmentPickerRow: some View {
         HStack {
             VStack(alignment: .leading, spacing: 3) {
@@ -274,13 +254,12 @@ struct FeedbackView: View {
         }
     }
 
-    private func attachmentList(trailingInset: CGFloat = 0) -> some View {
+    private func attachmentList() -> some View {
         VStack(spacing: attachmentRowSpacing) {
             ForEach(viewModel.attachments) { attachment in
                 FeedbackAttachmentRow(attachment: attachment) {
                     viewModel.removeAttachment(id: attachment.id)
                 }
-                .padding(.trailing, trailingInset)
                 .frame(height: attachmentRowHeight)
                 .id(attachment.id)
             }
@@ -387,36 +366,6 @@ private struct FeedbackPasteImageMonitor: NSViewRepresentable {
             event.charactersIgnoringModifiers?.lowercased() == "v" &&
             event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command
         }
-    }
-}
-
-struct CancelButtonStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(.system(size: 13, weight: .regular))
-            .frame(width: 110, height: 28)
-            .background(Color(NSColor.controlBackgroundColor))
-            .foregroundColor(.primary)
-            .cornerRadius(5)
-            .overlay(
-                RoundedRectangle(cornerRadius: 5)
-                    .stroke(Color(NSColor.separatorColor), lineWidth: 1)
-            )
-            .opacity(configuration.isPressed ? 0.8 : 1.0)
-    }
-}
-
-struct SendButtonStyle: ButtonStyle {
-    @Environment(\.isEnabled) var isEnabled
-    
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(.system(size: 13, weight: .regular))
-            .frame(width: 110, height: 28)
-            .background(isEnabled ? Color.blue : Color.gray.opacity(0.5))
-            .foregroundColor(.white)
-            .cornerRadius(5)
-            .opacity(configuration.isPressed ? 0.8 : 1.0)
     }
 }
 
