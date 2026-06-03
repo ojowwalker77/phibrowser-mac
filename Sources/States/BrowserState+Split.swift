@@ -454,6 +454,46 @@ extension BrowserState {
         if splitBookmarkBindings.values.contains(splitId) {
             updateNormalTabs()
         }
+
+        reconcileSplitChatBinding(group)
+        syncSplitAIChatCollapsed(group)
+    }
+
+    /// Sync both panes of a freshly-created split to one AI Chat collapse
+    /// state (the foreground pane's), so switching the active pane does not
+    /// toggle the sidebar between collapsed and expanded.
+    @MainActor
+    func syncSplitAIChatCollapsed(_ group: SplitGroup) {
+        guard let primary = tabs.first(where: { $0.guid == group.primaryTabId }),
+              let secondary = tabs.first(where: { $0.guid == group.secondaryTabId }) else {
+            return
+        }
+        let (source, target) = focusingTab?.guid == secondary.guid
+            ? (secondary, primary)
+            : (primary, secondary)
+        if target.aiChatCollapsed != source.aiChatCollapsed {
+            target.toggleAIChat(source.aiChatCollapsed)
+        }
+    }
+
+    /// Reconcile a freshly-created split so it shares exactly one chat tab.
+    /// Principle 1: a pane that already has a chat tab keeps it (resolver handles
+    /// it; no action needed here). Principle 2: when BOTH panes have a chat tab,
+    /// keep the foreground pane's and close the other (a split owns one chat tab).
+    @MainActor
+    func reconcileSplitChatBinding(_ group: SplitGroup) {
+        guard let primary = tabs.first(where: { $0.guid == group.primaryTabId }),
+              let secondary = tabs.first(where: { $0.guid == group.secondaryTabId }) else {
+            return
+        }
+        let primaryId = getTabIdentifier(for: primary)
+        let secondaryId = getTabIdentifier(for: secondary)
+        guard aiChatTabs[primaryId] != nil, aiChatTabs[secondaryId] != nil else {
+            return
+        }
+        let keepSecondary = focusingTab?.guid == secondary.guid
+        let dropId = keepSecondary ? primaryId : secondaryId
+        closeAIChatTab(for: dropId)
     }
 
     @MainActor

@@ -16,6 +16,7 @@ final class TabItemViewCollapsedLayoutTests: XCTestCase {
             url: "https://example.com",
             isActive: false,
             isPinned: false,
+            isSplitGroupActive: false,
             sourceTab: nil
         ))
 

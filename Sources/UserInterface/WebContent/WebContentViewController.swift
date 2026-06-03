@@ -462,8 +462,11 @@ class WebContentViewController: NSViewController {
                 self.isUpdatingAIChatState = true
                 defer { self.isUpdatingAIChatState = false }
                 
-                // Mirror the split view state back into the tab model.
-                self.associatedTab?.toggleAIChat(isCollapsed)
+                // Mirror the split view state back into the tab model (and its
+                // split partner, so both panes share one collapse state).
+                if let tab = self.associatedTab {
+                    self.browserState?.setAIChatCollapsed(for: tab, collapsed: isCollapsed)
+                }
                 // Keep styling in sync with the chat state.
                 self.updateLeftContainerStyle(isAIChatExpanded: !isCollapsed)
                 self.persistAIChatSidebarStateIfNeeded(for: self.associatedTab)
@@ -839,6 +842,15 @@ class WebContentViewController: NSViewController {
     func refreshContentForCurrentTab() {
         guard let tab = associatedTab else { return }
         updateContentForTab(tab)
+        // Re-attach the AI Chat view synchronously while the outgoing
+        // controller is still in-window. Switching the active pane of a split
+        // swaps the visible controller; the split shares one chat tab, so its
+        // Chromium webContentView must move between the two panes' chat hosts.
+        // Doing it here (same-window move) avoids the windowless transition
+        // that blanks the renderer — mirrors the split-content remount above.
+        if view.window != nil {
+            embeddedChatViewController?.reattachAIChatViewIfNeeded()
+        }
     }
 
     /// The active split this controller's tab is part of, or nil.

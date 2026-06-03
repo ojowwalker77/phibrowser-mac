@@ -246,6 +246,24 @@ class BrowserState {
         return String(tab.guid)
     }
 
+    /// Resolves the identifier under which a tab's AI Chat tab is keyed.
+    /// For tabs inside a split, both panes resolve to a single shared key so the
+    /// split shares exactly one chat tab and switching the active pane does not
+    /// switch the chat. Outside a split, falls back to the per-tab identifier.
+    func chatIdentifier(for tab: Tab) -> String {
+        guard let group = splitGroup(forTabId: tab.guid),
+              let primary = tabs.first(where: { $0.guid == group.primaryTabId }),
+              let secondary = tabs.first(where: { $0.guid == group.secondaryTabId }) else {
+            return getTabIdentifier(for: tab)
+        }
+        let primaryId = getTabIdentifier(for: primary)
+        let secondaryId = getTabIdentifier(for: secondary)
+        if aiChatTabs[primaryId] != nil { return primaryId }
+        if aiChatTabs[secondaryId] != nil { return secondaryId }
+        if let focused = focusingTab, focused.guid == secondary.guid { return secondaryId }
+        return primaryId
+    }
+
     // MARK: - Native NTP (Incognito)
 
     func enqueueNativeNTP() {
@@ -270,6 +288,14 @@ class BrowserState {
             aiChatTabs[targetIdentifier] = aiChatTab
             AppLogInfo("🔄 [AIChat] Migrated AI Chat tab from '\(oldIdentifier)' to '\(targetIdentifier)'")
         }
+    }
+
+    /// Move the shared chat tab from one identifier to another (e.g. when a split
+    /// pane closes and the chat tab must follow the surviving pane).
+    func migrateAIChatTab(fromIdentifier oldId: String, toIdentifier newId: String) {
+        guard oldId != newId, let aiChatTab = aiChatTabs.removeValue(forKey: oldId) else { return }
+        aiChatTabs[newId] = aiChatTab
+        AppLogInfo("🔄 [AIChat] Migrated split chat tab from '\(oldId)' to '\(newId)'")
     }
     
     private var cancellables = Set<AnyCancellable>()
@@ -653,8 +679,11 @@ class BrowserState {
         // Primary entry points are gated upstream; this is the safety net.
         guard !isInPlaceholderMode else { return }
 
-        // Dispatch to the focusing tab's AI Chat state
-        focusingTab?.toggleAIChat(collapse)
+        // Dispatch to the focusing tab's AI Chat state, mirroring to its split
+        // partner so both panes of a split share one expand/collapse state.
+        if let tab = focusingTab {
+            setAIChatCollapsed(for: tab, collapsed: collapse ?? !tab.aiChatCollapsed)
+        }
 
         // Also update the global state for backward compatibility
         // (e.g., for AIChatViewController in non-traditional layout)
@@ -663,6 +692,19 @@ class BrowserState {
         } else {
             aiChatCollapsed.toggle()
         }
+    }
+
+    /// Sets the AI Chat collapsed state for a tab, mirroring it to the tab's
+    /// split partner so both panes of a split share one expand/collapse state.
+    func setAIChatCollapsed(for tab: Tab, collapsed: Bool) {
+        tab.toggleAIChat(collapsed)
+        guard let group = splitGroup(forTabId: tab.guid),
+              let partnerId = group.partnerTabId(of: tab.guid),
+              let partner = tabs.first(where: { $0.guid == partnerId }),
+              partner.aiChatCollapsed != collapsed else {
+            return
+        }
+        partner.toggleAIChat(collapsed)
     }
 
     // =========================================================================
@@ -1305,7 +1347,17 @@ class BrowserState {
         // `Task @MainActor`, so we are no longer inside Chromium's tab strip
         // change callback and can call `WebContentWrapper.close()` directly.
         let identifier = getTabIdentifier(for: closedTab)
-        closeAIChatTab(for: identifier)
+        if let group = splitGroup(forTabId: closedTab.guid),
+           let partnerId = group.partnerTabId(of: closedTab.guid),
+           let survivor = tabs.first(where: { $0.guid == partnerId }),
+           aiChatTabs[identifier] != nil {
+            // Closing pane owns the split's shared chat tab → hand it to the
+            // surviving pane instead of closing it (follow survivor).
+            migrateAIChatTab(fromIdentifier: identifier,
+                             toIdentifier: getTabIdentifier(for: survivor))
+        } else {
+            closeAIChatTab(for: identifier)
+        }
         
         // Remove the tab from pinned state if it was mirrored there.
         if let localGuid = closedTab.guidInLocalDB,

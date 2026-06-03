@@ -88,7 +88,7 @@ class EmbeddedChatViewController: NSViewController {
         self.associatedTab = tab
         
         if let state = browserState {
-            let newIdentifier = state.getTabIdentifier(for: tab)
+            let newIdentifier = state.chatIdentifier(for: tab)
             if newIdentifier != tabIdentifier {
                 tabIdentifier = newIdentifier
                 loadAIChatForCurrentTab()
@@ -105,13 +105,20 @@ class EmbeddedChatViewController: NSViewController {
         isSetup = true
         
         if let tab = associatedTab {
-            tabIdentifier = state.getTabIdentifier(for: tab)
+            tabIdentifier = state.chatIdentifier(for: tab)
         }
         
         state.$aiChatTabs
             .receive(on: DispatchQueue.main)
             .sink { [weak self] tabs in
                 self?.handleAIChatTabsChanged(tabs)
+            }
+            .store(in: &cancellables)
+        
+        state.$splits
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.refreshChatIdentifierIfNeeded()
             }
             .store(in: &cancellables)
         
@@ -130,10 +137,20 @@ class EmbeddedChatViewController: NSViewController {
     }
     
     private func clearCurrentAIChatTab() {
-        currentAIChatTab?.webContentView?.removeFromSuperview()
+        detachChatNativeIfHostedHere(currentAIChatTab?.webContentView)
         currentAIChatTab?.onFocusGained = nil
         currentAIChatTab = nil
         contentView.subviews.forEach { $0.removeFromSuperview() }
+    }
+    
+    /// Re-resolves the shared chat identifier when split membership/ownership
+    /// changes, switching the displayed chat tab if the resolved key moved.
+    private func refreshChatIdentifierIfNeeded() {
+        guard let state = browserState, let tab = associatedTab else { return }
+        let resolved = state.chatIdentifier(for: tab)
+        guard resolved != tabIdentifier else { return }
+        tabIdentifier = resolved
+        loadAIChatForCurrentTab()
     }
     
     /// Loads or creates the AI Chat tab for the associated browser tab.
@@ -159,7 +176,7 @@ class EmbeddedChatViewController: NSViewController {
     ///   - isNewlyCreated: Whether to focus the chat after the content loads.
     private func switchToAIChatTab(_ tab: Tab, isNewlyCreated: Bool) {
         if currentAIChatTab !== tab {
-            currentAIChatTab?.webContentView?.removeFromSuperview()
+            detachChatNativeIfHostedHere(currentAIChatTab?.webContentView)
             currentAIChatTab?.onFocusGained = nil
         }
         
@@ -218,7 +235,23 @@ class EmbeddedChatViewController: NSViewController {
         }
     }
     
+    private func detachChatNativeIfHostedHere(_ native: NSView?) {
+        guard let native, native.superview === contentView else { return }
+        native.removeFromSuperview()
+    }
+    
     private func addWebContent(_ native: NSView) {
+        // In a split both panes share one chat tab, but its single
+        // webContentView can only live in one contentView. Both panes' chat
+        // controllers receive viewDidAppear/observer callbacks (e.g. when the
+        // shared sidebar expands), so an inactive pane must not claim the view
+        // — otherwise it steals it from the active pane, which goes blank until
+        // the next pane switch reclaims it.
+        if let tab = associatedTab,
+           browserState?.splitGroup(forTabId: tab.guid) != nil,
+           tab.isActive == false {
+            return
+        }
         contentView.subviews.forEach { $0.removeFromSuperview() }
         
         contentView.addSubview(native)
@@ -235,7 +268,7 @@ class EmbeddedChatViewController: NSViewController {
     /// `setupIfNeeded()` on the first appear; the dedup in
     /// `BrowserState.createAIChatTab(for:chromeTabId:)` (`aiChatTabsBeingCreated`
     /// in-flight set) is what keeps Chromium from building duplicate AI tabs.
-    private func reattachAIChatViewIfNeeded() {
+    func reattachAIChatViewIfNeeded() {
         if currentAIChatTab == nil {
             loadAIChatForCurrentTab()
             return
