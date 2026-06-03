@@ -902,6 +902,7 @@ class WebContentViewController: NSViewController {
         if let group = activeSplitForCurrentTab() {
             installSplitContent(group: group, ownTabId: tabId, ownNativeView: contentView)
             contentMode = .webContent
+            updateLeftContainerStyleForCurrentAIChatState()
             return
         }
         // Tear down any leftover split host before re-mounting single content.
@@ -912,10 +913,12 @@ class WebContentViewController: NSViewController {
         // Check if content view is already the primary view in hostView
         if hostView.subviews.contains(contentView),
            contentView.superview === hostView {
+            updateLeftContainerStyleForCurrentAIChatState()
             return
         }
         addWebContentView(contentView, tabId: tabId)
         contentMode = .webContent
+        updateLeftContainerStyleForCurrentAIChatState()
     }
 
     /// Mount or update the SplitPaneHostView so that this tab and its partner
@@ -1024,6 +1027,11 @@ class WebContentViewController: NSViewController {
     }
 
     private weak var currentSplitHost: SplitPaneHostView?
+
+    private var isSplitContentMounted: Bool {
+        guard let currentSplitHost else { return false }
+        return currentSplitHost.superview === hostView
+    }
 
     private func addWebContentView(_ contentView: NSView, tabId: Int) {
         hostView.subviews.forEach { $0.removeFromSuperview() }
@@ -1647,8 +1655,10 @@ class WebContentViewController: NSViewController {
     /// Updates left-container border and inset styling for AI Chat state.
     /// - Parameter isAIChatExpanded: Whether the AI Chat sidebar is expanded.
     private func updateLeftContainerStyle(isAIChatExpanded: Bool) {
-        let shouldSeparateExpandedChat = isAIChatExpanded &&
-            PhiPreferences.GeneralSettings.loadLayoutMode() != .performance
+        let isPerformanceSplitContent =
+            PhiPreferences.GeneralSettings.loadLayoutMode() == .performance &&
+            isSplitContentMounted
+        let shouldSeparateExpandedChat = isAIChatExpanded && !isPerformanceSplitContent
 
         if shouldSeparateExpandedChat {
             leftContainerView.layer?.borderWidth = 1
@@ -1658,6 +1668,10 @@ class WebContentViewController: NSViewController {
             leftContainerView.layer?.borderWidth = 0
             leftContainerInsetConstraint?.update(inset: 0)
         }
+    }
+
+    private func updateLeftContainerStyleForCurrentAIChatState() {
+        updateLeftContainerStyle(isAIChatExpanded: aiChatSplitViewItem?.isCollapsed == false)
     }
     
     /// Collapses AI Chat when the associated tab disables it.
