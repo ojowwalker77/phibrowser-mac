@@ -221,6 +221,10 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
     private var draggingSiblingPlacement: (index: Int, offsetX: CGFloat)?
     // Container zone currently used for drag presentation styling.
     private var draggingPresentationZone: TabContainerType?
+    // When the dragged source is the first pane of a merged split cell
+    // (normal or pinned), holds the partner pane so the proxy keeps the
+    // two-favicon merged-cell rendering after a cross-zone restyle.
+    private weak var draggingMergedPartner: Tab?
     private var dragImageWindow: NSPanel?
     private var dragImageView: NSImageView?
     private var cachedTabDragImage: NSImage?
@@ -3339,10 +3343,13 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
         // the sibling proxy must be suppressed since the partner's source
         // view is already collapsed under the merged cell.
         let normalCollapse = !isPinned ? normalSplitCollapseInfo() : nil
+        let pinnedCollapse = isPinned ? pinnedSplitCollapseInfo() : nil
         let mergedSplitPartner: Tab? = {
-            guard let collapse = normalCollapse else { return nil }
-            return collapse.partners[id]
+            if let collapse = normalCollapse { return collapse.partners[id] }
+            if let collapse = pinnedCollapse { return collapse.partners[id] }
+            return nil
         }()
+        draggingMergedPartner = mergedSplitPartner
         let suppressSiblingProxy = mergedSplitPartner != nil
         if let view = isPinned ? pinnedTabViews[id] : normalTabViews[id] {
             // Proxy view carries drag visuals so the source view can stay out of layout flow.
@@ -3689,7 +3696,15 @@ extension TabStrip: TabStripDragDelegate {
             }
         } else {
             if toZone == .pinned {
-                browserState.moveNormalTab(tabId: tab.guid, toPinnd: toIndex, selectAfterMove: tab.isActive)
+                // Split-aware: pin the whole pair as a single pinned-split unit
+                // when the dragged tab belongs to a live split, matching the
+                // sidebar pinned-drop path and the right-click "Pin Split" menu.
+                if let splitGroup = browserState.splitGroup(forTabId: tab.guid),
+                   !splitGroup.isPinned {
+                    browserState.pinSplitInsertingAtPinnedIndex(splitGroup.id, atIndex: toIndex)
+                } else {
+                    browserState.moveNormalTab(tabId: tab.guid, toPinnd: toIndex, selectAfterMove: tab.isActive)
+                }
             } else {
                 // Capture the source run BEFORE the local move so the
                 // range / index comparison is in the same coordinate
@@ -4057,14 +4072,19 @@ extension TabStrip: TabStripDragDelegate {
         // Only restyle the proxy; the source view stays hidden.
         guard let draggingView = draggingProxyView else { return }
         let splitInfo = splitRenderInfo(for: tab)
+        // Merged-split source: keep the two-favicon rendering after the
+        // restyle so a normal-merged cell dragged into the pinned zone (or
+        // vice versa) doesn't collapse to a single-favicon proxy.
+        let mergedPartner = draggingMergedPartner
         let renderData = TabRenderData(
             id: tab.uniqueId,
             title: tab.title,
             url: tab.url ?? "",
             isActive: isTabActive(tab, activeTab: browserState.focusingTab),
             isPinned: zone == .pinned,
-            splitPairPosition: splitInfo.position,
-            isSplitGroupActive: splitInfo.groupActive,
+            splitPairPosition: mergedPartner == nil ? splitInfo.position : nil,
+            isSplitGroupActive: mergedPartner == nil ? splitInfo.groupActive : false,
+            pinnedSplitPartner: mergedPartner,
             sourceTab: tab
         )
         draggingView.configure(with: renderData)
@@ -4083,8 +4103,13 @@ extension TabStrip: TabStripDragDelegate {
 
         switch context.targetContainerType {
         case .pinned:
-            // Pinned tabs use a fixed width and centered height.
-            frame.size = CGSize(width: TabStripMetrics.PinnedTab.width, height: TabStripMetrics.PinnedTab.height)
+            // Pinned tabs use a fixed width and centered height. Merged
+            // split cells span both panes' slots (mirrors layoutPinned's
+            // wideWidth) so the proxy matches what the drop will produce.
+            let pinnedWidth = draggingMergedPartner == nil
+                ? TabStripMetrics.PinnedTab.width
+                : TabStripMetrics.PinnedTab.width * 2 + TabStripMetrics.PinnedTab.spacing
+            frame.size = CGSize(width: pinnedWidth, height: TabStripMetrics.PinnedTab.height)
         case .normal:
             // Normal tabs use the current average tab width.
             let width = max(
@@ -4210,6 +4235,7 @@ extension TabStrip: TabStripDragDelegate {
         draggingSiblingSourceView = nil
         draggingSiblingPlacement = nil
         draggingPresentationZone = nil
+        draggingMergedPartner = nil
         dragOverlay.isHidden = true
         hideFloatingDragPreview()
         cachedTabDragImage = nil
