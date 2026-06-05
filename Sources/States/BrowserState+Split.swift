@@ -1044,6 +1044,29 @@ extension BrowserState {
         MainActor.assumeIsolated {
             focuseTab(tab)
         }
+        // If the partner sits in a tab group, pull the new pane into the
+        // same group BEFORE the placeTabAdjacent / createSplit calls so the
+        // split stays at the partner's position. Doing the add afterwards
+        // works for membership but Chromium's `AddToExistingGroup` always
+        // relocates the joining tabs to the trailing edge of the group's
+        // strip range — the split would visibly jump to the end of the
+        // group. Setting membership first keeps the new tab inside the run
+        // and `placeTabAdjacent`'s relocate-interloper guard becomes a no-op
+        // (both panes share the token), so the pair lands exactly where the
+        // partner was.
+        //
+        // `applyOptimisticGroupMembership` is `@MainActor`; mirror the
+        // `focuseTab` call below — this flow arrives via EventBus's
+        // `Task { @MainActor in ... }` dispatch, so `assumeIsolated` is safe.
+        if let partnerToken = tabs.first(where: { $0.guid == pending.partnerTabId })?.groupToken {
+            ChromiumLauncher.sharedInstance().bridge?.addTabsToGroup(
+                withWindowId: Int64(windowId),
+                tabIds: [NSNumber(value: Int64(tab.guid))],
+                tokenHex: partnerToken)
+            MainActor.assumeIsolated {
+                applyOptimisticGroupMembership(tabId: tab.guid, newToken: partnerToken)
+            }
+        }
         // Bridge-created tabs land at the end of the strip when no
         // `insertAfterTabId` hint is provided, so the new pane would sit far
         // from its partner if the right-clicked tab wasn't the active tab.
