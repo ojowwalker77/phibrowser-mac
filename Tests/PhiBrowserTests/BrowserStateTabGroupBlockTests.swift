@@ -181,6 +181,34 @@ final class BrowserStateTabGroupBlockTests: XCTestCase {
         XCTAssertEqual(state.normalTabs.map { $0.guid }, before)
     }
 
+    // MARK: - optimistic group membership
+
+    func testApplyOptimisticGroupMembership_batchSplitJoinAtGroupFrontPreservesInsertion() throws {
+        let state = try makeBrowserState()
+        seed(state: state, tabs: [
+            (guid: 100, url: "https://left.example", token: nil),
+            (guid: 101, url: "https://right.example", token: nil),
+            (guid: 200, url: "https://a1.example", token: "A"),
+            (guid: 201, url: "https://a2.example", token: "A"),
+        ])
+        state.splits = [
+            SplitGroup(id: "split-100-101",
+                       primaryTabId: 100,
+                       secondaryTabId: 101,
+                       layout: .vertical,
+                       ratio: 0.5)
+        ]
+
+        state.moveNormalTabLocally(from: 0, to: 2)
+        state.applyOptimisticGroupMembership(updates: [
+            (tabId: 100, newToken: "A"),
+            (tabId: 101, newToken: "A"),
+        ])
+
+        XCTAssertEqual(state.normalTabs.map(\.guid), [100, 101, 200, 201])
+        XCTAssertEqual(state.normalTabs.map(\.groupToken), ["A", "A", "A", "A"])
+    }
+
     // MARK: - convertGroupToBookmarks
 
     func testConvertGroupToBookmarks_createsFolderAndRewiresOpenTabsToChildBookmarks() throws {

@@ -4,6 +4,7 @@
 // found in the LICENSE file.
 
 import XCTest
+import AppKit
 @testable import Phi
 
 final class SidebarGroupDropResolverTests: XCTestCase {
@@ -171,12 +172,10 @@ final class SidebarGroupDropResolverTests: XCTestCase {
         proposedChildIndex: Int,
         draggingTab: Tab?,
         pasteboard: PasteboardKind = .normalTab,
-        isCrossWindow: Bool = false
+        isCrossWindow: Bool = false,
+        cursorY: CGFloat = 200
     ) -> SidebarGroupDropContext {
         let frame = rowFrame(midY: 100)
-        // Cursor below the wrapper row frame entirely (in the
-        // expanded children area). minY=82, maxY=118; pick y=200.
-        let cursorY: CGFloat = 200
         return SidebarGroupDropContext(
             proposedItem: wrapper,
             proposedChildIndex: proposedChildIndex,
@@ -557,6 +556,23 @@ final class SidebarGroupDropResolverTests: XCTestCase {
         )
     }
 
+    func test_resolver_caseHeaderChildIdx_topInsertionZoneIgnoresSpuriousEndIndex() {
+        // When a split row sits immediately above a group, AppKit can report
+        // the group's end child index even though the pointer is visually in
+        // the first-member insertion zone. Keep that drop at group slot 0.
+        let wrapper = stubGroupWrapper(token: "A")
+        let n1 = stubTab(guid: 1001, token: nil, idxInNormalTabs: 0)
+        let ctx = ctxWithWrapperChildIndex(
+            wrapper: wrapper,
+            proposedChildIndex: 2,
+            draggingTab: n1,
+            cursorY: 72)
+        XCTAssertEqual(
+            SidebarGroupDropResolver.resolve(ctx),
+            .joinAtFront(token: "A", normalTabsIdx: 1)
+        )
+    }
+
     func test_resolver_caseHeaderChildIdx_ownGroupMemberBetweenSelfAndA2_isSameSlot() {
         // A1 (idx 1) dragged; AppKit reports (A wrapper, 1) for
         // cursor in the gap between A1 and A2. Intent = reorder at
@@ -619,6 +635,50 @@ final class SidebarGroupDropResolverTests: XCTestCase {
         XCTAssertEqual(
             SidebarGroupDropResolver.resolve(ctx),
             .rejected(reason: .pinnedNotAllowedInGroup)
+        )
+    }
+
+    // MARK: - inner group table insertion row
+
+    func test_groupTabsInsertionRow_onUpperHalf_keepsCurrentRow() {
+        let rowFrame = CGRect(x: 0, y: 0, width: 200, height: 36)
+        XCTAssertEqual(
+            TabGroupCellView.resolvedInnerInsertionRow(
+                proposedRow: 1,
+                dropOperation: .on,
+                rowCount: 3,
+                cursorY: 8,
+                rowFrame: rowFrame,
+                isFlipped: true),
+            1
+        )
+    }
+
+    func test_groupTabsInsertionRow_onLowerHalf_advancesToNextRow() {
+        let rowFrame = CGRect(x: 0, y: 0, width: 200, height: 36)
+        XCTAssertEqual(
+            TabGroupCellView.resolvedInnerInsertionRow(
+                proposedRow: 1,
+                dropOperation: .on,
+                rowCount: 3,
+                cursorY: 28,
+                rowFrame: rowFrame,
+                isFlipped: true),
+            2
+        )
+    }
+
+    func test_groupTabsInsertionRow_onLowerHalfOfLastRow_returnsEndSlot() {
+        let rowFrame = CGRect(x: 0, y: 0, width: 200, height: 36)
+        XCTAssertEqual(
+            TabGroupCellView.resolvedInnerInsertionRow(
+                proposedRow: 2,
+                dropOperation: .on,
+                rowCount: 3,
+                cursorY: 28,
+                rowFrame: rowFrame,
+                isFlipped: true),
+            3
         )
     }
 }

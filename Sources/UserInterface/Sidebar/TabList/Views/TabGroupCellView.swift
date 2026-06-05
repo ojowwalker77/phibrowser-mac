@@ -1186,16 +1186,15 @@ extension TabGroupCellView: GroupTabsDragSource {
                                proposedRow: Int,
                                proposedDropOperation dropOperation: NSTableView.DropOperation) -> NSDragOperation {
         let pasteboard = info.draggingPasteboard
+        let insertionRow = resolvedInnerInsertionRow(
+            proposedRow: proposedRow,
+            dropOperation: dropOperation,
+            draggingInfo: info)
         AppLogDebug(
             "[TAB_GROUPS][INNER_DRAG] inner.validateDrop row=\(proposedRow) " +
-            "op=\(dropOperation.rawValue) types=\(pasteboard.types?.map(\.rawValue) ?? [])"
+            "resolvedRow=\(insertionRow) op=\(dropOperation.rawValue) " +
+            "types=\(pasteboard.types?.map(\.rawValue) ?? [])"
         )
-        // Inner table only accepts drops *between* rows, not "on" them.
-        // Promote `.on` to `.above` so AppKit shows the insertion line
-        // instead of the row-highlight feedback.
-        if dropOperation == .on {
-            innerTable.setDropRow(proposedRow, dropOperation: .above)
-        }
         let result: NSDragOperation = {
             // Pinned and bookmark drops never join a group.
             if pasteboard.string(forType: .pinnedTab) != nil { return [] }
@@ -1210,6 +1209,14 @@ extension TabGroupCellView: GroupTabsDragSource {
             }
             return pasteboard.string(forType: .normalTab) != nil ? .move : []
         }()
+        // Inner table accepts only between-row insertion. When AppKit reports
+        // `.on`, choose the before/after insertion row from the cursor's
+        // vertical half so dropping on a row's lower half can target the next
+        // slot, including the position after the last visible member.
+        if result == .move,
+           (dropOperation == .on || insertionRow != proposedRow) {
+            innerTable.setDropRow(insertionRow, dropOperation: .above)
+        }
         if let group = configuredGroup {
             groupCellDelegate?.tabGroupCell(
                 self,
@@ -1223,9 +1230,13 @@ extension TabGroupCellView: GroupTabsDragSource {
     func groupTabsAcceptDrop(_ info: NSDraggingInfo,
                              row: Int,
                              dropOperation: NSTableView.DropOperation) -> Bool {
+        let insertionRow = resolvedInnerInsertionRow(
+            proposedRow: row,
+            dropOperation: dropOperation,
+            draggingInfo: info)
         AppLogDebug(
             "[TAB_GROUPS][INNER_DRAG] inner.acceptDrop row=\(row) " +
-            "op=\(dropOperation.rawValue)"
+            "resolvedRow=\(insertionRow) op=\(dropOperation.rawValue)"
         )
         guard let state = configuredBrowserState,
               let group = configuredGroup,
@@ -1234,8 +1245,9 @@ extension TabGroupCellView: GroupTabsDragSource {
               let tab = state.tabs.first(where: { $0.guid == guid })
         else { return false }
 
-        // `proposedRow` is in inner-table indices (0..<memberCount).
-        // The outer normal-tabs index = group's lower bound + row.
+        // `insertionRow` is in visible inner-table row space. Merged split
+        // rows count once here but twice in `normalTabs`, so translate via
+        // `currentMemberOrder` before calling the controller.
         let members = state.normalTabs.filter { $0.groupToken == group.token }
         let groupLowerBound: Int = {
             guard let firstMember = members.first,
@@ -1243,8 +1255,11 @@ extension TabGroupCellView: GroupTabsDragSource {
             else { return state.normalTabs.count }
             return idx
         }()
-        let clampedRow = min(max(0, row), members.count)
-        let normalTabsIdx = groupLowerBound + clampedRow
+        let normalTabsIdx = normalTabsInsertionIndex(
+            forVisibleInsertionRow: insertionRow,
+            members: members,
+            groupLowerBound: groupLowerBound,
+            state: state)
 
         let accepted = groupCellDelegate?.tabGroupCell(
             self,
@@ -1253,6 +1268,76 @@ extension TabGroupCellView: GroupTabsDragSource {
             atNormalTabsIdx: normalTabsIdx) ?? false
         AppLogDebug("[TAB_GROUPS][INNER_DRAG] inner.acceptDrop -> \(accepted)")
         return accepted
+    }
+
+    private func resolvedInnerInsertionRow(
+        proposedRow: Int,
+        dropOperation: NSTableView.DropOperation,
+        draggingInfo: NSDraggingInfo
+    ) -> Int {
+        let rowCount = innerTable.numberOfRows
+        let localPoint = innerTable.convert(draggingInfo.draggingLocation, from: nil)
+        let rowFrame: CGRect? = {
+            guard proposedRow >= 0, proposedRow < rowCount else { return nil }
+            return innerTable.rect(ofRow: proposedRow)
+        }()
+        return Self.resolvedInnerInsertionRow(
+            proposedRow: proposedRow,
+            dropOperation: dropOperation,
+            rowCount: rowCount,
+            cursorY: localPoint.y,
+            rowFrame: rowFrame,
+            isFlipped: innerTable.isFlipped)
+    }
+
+    static func resolvedInnerInsertionRow(
+        proposedRow: Int,
+        dropOperation: NSTableView.DropOperation,
+        rowCount: Int,
+        cursorY: CGFloat,
+        rowFrame: CGRect?,
+        isFlipped: Bool
+    ) -> Int {
+        let clampedRow = min(max(0, proposedRow), rowCount)
+        guard dropOperation == .on,
+              proposedRow >= 0,
+              proposedRow < rowCount,
+              let rowFrame else {
+            return clampedRow
+        }
+
+        let isLowerHalf = isFlipped
+            ? cursorY >= rowFrame.midY
+            : cursorY <= rowFrame.midY
+        let insertionRow = isLowerHalf ? proposedRow + 1 : proposedRow
+        return min(max(0, insertionRow), rowCount)
+    }
+
+    private func normalTabsInsertionIndex(
+        forVisibleInsertionRow row: Int,
+        members: [Tab],
+        groupLowerBound: Int,
+        state: BrowserState
+    ) -> Int {
+        let visibleRowCount = currentMemberOrder.count
+        let clampedRow = min(max(0, row), visibleRowCount)
+        guard clampedRow < visibleRowCount else {
+            return groupLowerBound + members.count
+        }
+
+        let key = currentMemberOrder[clampedRow]
+        if let pair = splitPairsByKey[key] {
+            let leftIdx = state.normalTabs.firstIndex { $0.guid == pair.leftTab.guid }
+            let rightIdx = state.normalTabs.firstIndex { $0.guid == pair.rightTab.guid }
+            if let leftIdx, let rightIdx {
+                return min(leftIdx, rightIdx)
+            }
+        }
+        if let tab = tabsByGuid[key],
+           let idx = state.normalTabs.firstIndex(where: { $0.guid == tab.guid }) {
+            return idx
+        }
+        return groupLowerBound + min(clampedRow, members.count)
     }
 }
 

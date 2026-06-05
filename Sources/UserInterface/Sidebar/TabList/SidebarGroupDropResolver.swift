@@ -224,21 +224,27 @@ enum SidebarGroupDropResolver {
         //       cursor.y vs row.midY rule to pick upper/lower half.
         //
         //   (b) Cursor is OUTSIDE the wrapper's row body — i.e., over
-        //       the wrapper's expanded children area (or in the gap
-        //       between expanded children). AppKit reports
-        //       `(wrapper, k)` where `k` is the child-index "insert
-        //       before child k". The cursor.y vs wrapper.midY rule is
-        //       wrong here (wrapper sits at the TOP of the group, so
-        //       cursor in any child-row area is below wrapper.midY and
-        //       would be wrongly classified as "lower half →
-        //       joinAtFront"). Use the child-index directly:
-        //       `normalTabsIdx = lowerBound + k`.
+        //       the wrapper's expanded body area (or in a gap between
+        //       rendered members). AppKit reports `(wrapper, k)` where
+        //       `k` is the child-index "insert before child k". The
+        //       cursor.y vs wrapper.midY rule is wrong here (wrapper sits
+        //       at the TOP of the group, so cursor in any member-row area
+        //       would be wrongly classified as "lower half → joinAtFront").
+        //       Use the child-index directly, except for the first-member
+        //       insertion zone: when a split row sits immediately above a
+        //       group, AppKit can report the group's last child index while
+        //       the cursor is still visually at group slot 0.
         let cursorOnWrapperRow = ctx.cursorYInOutline >= frame.minY
                               && ctx.cursorYInOutline <= frame.maxY
         let useChildIndex = !cursorOnWrapperRow && ctx.proposedChildIndex >= 0
 
         if useChildIndex {
-            let normalTabsIdx = groupRange.lowerBound + ctx.proposedChildIndex
+            let proposedChildIndex = Self.resolvedHeaderChildIndex(
+                ctx.proposedChildIndex,
+                cursorY: ctx.cursorYInOutline,
+                headerFrame: frame,
+                isFlipped: ctx.outlineIsFlipped)
+            let normalTabsIdx = groupRange.lowerBound + proposedChildIndex
             // Cross-window into a group is unsupported (Phase 3 boundary).
             if ctx.isCrossWindow {
                 return .rejected(reason: .crossWindowGroupJoinUnsupported)
@@ -289,6 +295,29 @@ enum SidebarGroupDropResolver {
         return upper
             ? .rootInsert(normalTabsIdx: beforeIdx)
             : .joinAtFront(token: token, normalTabsIdx: firstMemberIdx)
+    }
+
+    static func resolvedHeaderChildIndex(
+        _ proposedChildIndex: Int,
+        cursorY: CGFloat,
+        headerFrame: CGRect,
+        isFlipped: Bool
+    ) -> Int {
+        guard proposedChildIndex > 0 else { return proposedChildIndex }
+
+        let firstMemberInsertionZone =
+            TabGroupCellView.innerTableTopInset + TabGroupCellView.memberRowHeight * 0.5
+        let distanceAfterHeader: CGFloat
+        if isFlipped {
+            guard cursorY > headerFrame.maxY else { return proposedChildIndex }
+            distanceAfterHeader = cursorY - headerFrame.maxY
+        } else {
+            guard cursorY < headerFrame.minY else { return proposedChildIndex }
+            distanceAfterHeader = headerFrame.minY - cursorY
+        }
+        return distanceAfterHeader <= firstMemberInsertionZone
+            ? 0
+            : proposedChildIndex
     }
 
     private static func resolveGroupMember(

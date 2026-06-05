@@ -1345,12 +1345,13 @@ extension SidebarTabListViewController: NSOutlineViewDataSource {
                 // still queued on EventBus) doesn't see the
                 // [member, non-member, member] split this drop just made.
                 if oldToken != newToken {
-                    browserState.applyOptimisticGroupMembership(
-                        tabId: draggedTab.guid, newToken: newToken)
+                    var updates: [(tabId: Int, newToken: String?)] =
+                        [(draggedTab.guid, newToken)]
                     if let partner = splitPartner {
-                        browserState.applyOptimisticGroupMembership(
-                            tabId: partner.guid, newToken: newToken)
+                        updates.append((partner.guid, newToken))
                     }
+                    browserState.applyOptimisticGroupMembership(
+                        updates: updates)
                 }
 
                 setDropFeedback(.none)
@@ -3634,12 +3635,13 @@ extension SidebarTabListViewController: TabGroupCellViewDelegate {
         // membership locally so a layout-switch race can't observe the
         // transient split.
         if oldToken != token {
-            browserState.applyOptimisticGroupMembership(
-                tabId: tab.guid, newToken: token)
+            var updates: [(tabId: Int, newToken: String?)] =
+                [(tab.guid, token)]
             if let partner = splitPartner {
-                browserState.applyOptimisticGroupMembership(
-                    tabId: partner.guid, newToken: token)
+                updates.append((partner.guid, token))
             }
+            browserState.applyOptimisticGroupMembership(
+                updates: updates)
         }
         setDropFeedback(.none)
         return true
