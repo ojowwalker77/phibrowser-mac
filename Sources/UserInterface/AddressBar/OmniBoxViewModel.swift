@@ -145,9 +145,9 @@ class OmniBoxViewModel: ObservableObject {
         openedFromGroupOverview = false
         if tab?.isNTP == true {
             state.inputText = ""
-            opennedFromCurrentTab = false
-        } else {
             opennedFromCurrentTab = true
+        } else {
+            opennedFromCurrentTab = tab != nil
         }
     }
     
@@ -234,12 +234,30 @@ class OmniBoxViewModel: ObservableObject {
             } else {
                 browserState.createTab(url)
             }
-        } else if opennedFromCurrentTab, let wrapper = currentTab?.webContentWrapper {
-            wrapper.navigate(toURL: url)
+        } else if opennedFromCurrentTab {
+            navigateCurrentTab(to: url)
         } else {
             browserState.createTab(url)
         }
         finishNavigationAction()
+    }
+
+    private func navigateCurrentTab(to url: String) {
+        if let wrapper = currentTab?.webContentWrapper {
+            wrapper.navigate(toURL: url)
+            return
+        }
+
+        guard let currentTab, currentTab.usesNativeNTP else {
+            browserState.createTab(url)
+            return
+        }
+
+        guard let wrapper = chromiumBridge?.newWebContents(forUrl: url) as? (WebContentWrapper & NSObject) else {
+            browserState.createTab(url)
+            return
+        }
+        currentTab.setWebContentsWrapper(wrapper: wrapper)
     }
 
     private func finishNavigationAction() {

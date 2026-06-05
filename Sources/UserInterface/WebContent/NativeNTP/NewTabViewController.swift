@@ -15,6 +15,7 @@ final class NewTabViewController: NSViewController {
     private let contentSpacing: CGFloat = 40
     private let collapsedOmniBoxHeight: CGFloat = 57
     private var areControlsHidden = false
+    private var keyDownMonitor: Any?
 
     private lazy var omniBoxController: OmniBoxViewController = {
         let controller = OmniBoxViewController(viewModel: .init(windowState: browserState), state: browserState)
@@ -73,6 +74,10 @@ final class NewTabViewController: NSViewController {
         fatalError("init(coder:) has not been implemented")
     }
 
+    deinit {
+        stopKeyboardMonitoring()
+    }
+
     override func loadView() {
         view = NSView()
         view.wantsLayer = true
@@ -88,7 +93,13 @@ final class NewTabViewController: NSViewController {
 
     override func viewDidAppear() {
         super.viewDidAppear()
+        startKeyboardMonitoring()
         omniBoxController.focusTextField()
+    }
+
+    override func viewDidDisappear() {
+        super.viewDidDisappear()
+        stopKeyboardMonitoring()
     }
 
     override func viewDidLayout() {
@@ -137,6 +148,43 @@ final class NewTabViewController: NSViewController {
                 self?.updateContentLayout()
             }
             .store(in: &cancellables)
+    }
+
+    private func startKeyboardMonitoring() {
+        guard keyDownMonitor == nil else { return }
+        keyDownMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            self?.handleKeyDown(event) ?? event
+        }
+    }
+
+    private func stopKeyboardMonitoring() {
+        guard let keyDownMonitor else { return }
+        NSEvent.removeMonitor(keyDownMonitor)
+        self.keyDownMonitor = nil
+    }
+
+    private func handleKeyDown(_ event: NSEvent) -> NSEvent? {
+        guard shouldHandleKeyboardEvent(event) else { return event }
+
+        let isCommandKeyPressed = event.modifierFlags
+            .intersection(.deviceIndependentFlagsMask)
+            .contains(.command)
+        let isReturnKey = event.keyCode == 36 || event.keyCode == 76
+
+        guard isCommandKeyPressed && isReturnKey else { return event }
+
+        omniBoxController.confirmSelection(commandKeyPressed: true)
+        return nil
+    }
+
+    private func shouldHandleKeyboardEvent(_ event: NSEvent) -> Bool {
+        guard !areControlsHidden,
+              let window = view.window,
+              let eventWindow = event.window,
+              eventWindow === window else {
+            return false
+        }
+        return true
     }
 
     private func updateContentLayout() {
@@ -200,4 +248,3 @@ extension NewTabViewController: OmniBoxActionDelegate {
         omniBoxController.reset()
     }
 }
-
