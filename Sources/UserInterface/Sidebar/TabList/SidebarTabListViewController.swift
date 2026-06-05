@@ -143,6 +143,7 @@ class SidebarTabListViewController: NSViewController {
     
     /// Tracks the identity of the focusing tab we last scrolled to.
     /// Scroll is skipped when the focusing tab hasn't changed (e.g. bookmark expand/collapse).
+    /// Update only when scheduling a scroll; clear when focus has no representable sidebar row.
     private var lastScrolledFocusingTabId: AnyHashable?
 
     /// Flag to control whether bookmarks are shown in the sidebar
@@ -393,13 +394,16 @@ class SidebarTabListViewController: NSViewController {
     private func selectItem(_ item: SidebarItem?, clearSelectionFirst: Bool = true) {
         if item == nil || clearSelectionFirst {
             outlineView.deselectAll(nil)
-            lastScrolledFocusingTabId = nil
         }
         if let item, item.isActive {
             let index = outlineView.row(forItem: item)
             outlineView.selectRowIndexes(IndexSet(integer: index), byExtendingSelection: false)
-            lastScrolledFocusingTabId = item.id
         }
+    }
+
+    private func clearFocusingSelection() {
+        lastScrolledFocusingTabId = nil
+        selectItem(nil)
     }
     
     // MARK: - Actions
@@ -3259,8 +3263,7 @@ extension SidebarTabListViewController {
     
     private func applyFocusingSelection(for tab: Tab?) {
         guard let tab else {
-            lastScrolledFocusingTabId = nil
-            selectItem(nil)
+            clearFocusingSelection()
             return
         }
         
@@ -3304,14 +3307,14 @@ extension SidebarTabListViewController {
                     scheduleScrollToVisible(forItem: presentation.proxy)
                 }
             } else {
-                selectItem(nil)
+                clearFocusingSelection()
             }
             return
         }
         
         guard let localGuid = tab.guidInLocalDB,
               let bookmark = browserState.bookmarkManager.bookmark(withGuid: localGuid) else {
-            selectItem(nil)
+            clearFocusingSelection()
             return
         }
         var row = outlineView.row(forItem: bookmark)
@@ -3326,7 +3329,7 @@ extension SidebarTabListViewController {
                 scheduleScrollToVisible(forItem: bookmark)
             }
         } else {
-            selectItem(nil)
+            clearFocusingSelection()
         }
     }
 }
