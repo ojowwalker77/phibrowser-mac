@@ -755,8 +755,18 @@ class WebContentContainerViewController: NSViewController {
         guard let tab, let state = browserState else { return }
 
         let identifier = state.getTabIdentifier(for: tab)
-        // Skip if already showing this tab
-        guard identifier != currentTabIdentifier else { return }
+        // Skip if already showing this exact tab. Identifier alone can
+        // collide: when a bookmark-bound tab is detached (its `guidInLocalDB`
+        // cleared as it joins a split) and then a fresh tab is opened with
+        // the same bookmark guid via `customGuid`, both share the bookmark
+        // guid as identifier even though they're different Chromium tabs.
+        // If we relied on identifier alone we'd short-circuit here and the
+        // old split-pane controller would stay mounted under the new tab's
+        // focus, leaving the splitview on screen. Require the underlying
+        // Chromium tab to match too.
+        let alreadyShowingExactTab = identifier == currentTabIdentifier
+            && currentWebContentController?.associatedTab?.guid == tab.guid
+        guard !alreadyShowingExactTab else { return }
 
         // Clear status URL when switching tabs
         state.targetURL = ""
@@ -770,9 +780,20 @@ class WebContentContainerViewController: NSViewController {
         // Flicker fix: Choose switch strategy based on whether tab has painted
         // =========================================================================
 
+        let leavingSplit = currentWebContentController?.associatedTab.map {
+            state.splitGroup(forTabId: $0.guid) != nil
+        } ?? false
+        let enteringSplit = state.splitGroup(forTabId: tab.guid) != nil
+
         if tab.hasFirstPaint {
             // Scenario 1: Tab has already painted, switch immediately (bring to front)
             // AppLogDebug("[FlickerFix][Mac] Tab has first paint, using immediate switch (scenario 1)")
+            switchToWebContentController(controller)
+            currentTabIdentifier = identifier
+        } else if leavingSplit && !enteringSplit {
+            // Leaving a split for a non-split tab — the split's pane host
+            // shouldn't linger via the flicker-fix deferral. Force the
+            // immediate switch so the new tab takes over.
             switchToWebContentController(controller)
             currentTabIdentifier = identifier
         } else {

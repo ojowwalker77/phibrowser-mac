@@ -212,7 +212,19 @@ extension BrowserState {
             return
         }
 
-        if realBookmark.isOpened, let wrapper = realBookmark.webContentWrapper {
+        // Verify the binding from BOTH directions before activating: the
+        // bookmark side (isOpened/webContentWrapper) must agree with the
+        // tab side (a live tab whose `guidInLocalDB` still points back at
+        // this bookmark, and which isn't currently a pane of a split).
+        // When the tab side has been cleared (e.g. a normal-tab drop onto
+        // the bookmark's pane formed a split and detached the pane) the
+        // bookmark-side check alone would activate the now-split pane —
+        // falling through to `createTab` here opens a fresh bookmark
+        // tab, which `handleBookmarkTabOpened` rebinds cleanly.
+        if realBookmark.isOpened,
+           let wrapper = realBookmark.webContentWrapper,
+           let boundTab = tabs.first(where: { $0.guidInLocalDB == realBookmark.guid }),
+           splitGroup(forTabId: boundTab.guid) == nil {
             wrapper.setAsActiveTab()
         } else {
             createTab(URLProcessor.processUserInput(url), customGuid: realBookmark.guid, focusAfterCreate: true)
