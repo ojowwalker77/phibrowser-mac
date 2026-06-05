@@ -694,19 +694,17 @@ final class TabItemView: NSView {
             super.otherMouseDown(with: event)
             return
         }
-        guard !isPinned else { return }
-        guard let tab = sourceTab else { return }
-        // Split tab reads as "one tab" to the user — close both panes
-        // so middle-click on either half dissolves the whole split.
-        if let state = MainBrowserWindowControllersManager.shared.getBrowserState(for: tab.windowId),
-           let group = state.splitGroup(forTabId: tab.guid),
-           let partnerId = group.partnerTabId(of: tab.guid),
-           let partner = state.normalTabs.first(where: { $0.guid == partnerId }) {
-            tab.close()
-            partner.close()
+        // Pinned-merged split: one TabItemView hosts two panes side-by-side
+        // (`sourceTab` left, `pinnedSplitPartner` right). Route to the half
+        // the click landed in, matching the left-click split in `mouseUp`.
+        if let partner = pinnedSplitPartner {
+            let point = convert(event.locationInWindow, from: nil)
+            let target = point.x > bounds.midX ? partner : sourceTab
+            target?.close()
             return
         }
-        tab.close()
+        guard !isPinned else { return }
+        sourceTab?.close()
     }
 
     override func menu(for event: NSEvent) -> NSMenu? {

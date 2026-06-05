@@ -11,7 +11,12 @@ protocol SideBarOutlineViewDelegate: AnyObject {
     /// - Parameters:
     ///   - outlineView: The outline view that received the click
     ///   - row: The row index that was clicked, or -1 if click was outside any row
-    func outlineView(_ outlineView: SideBarOutlineView, didMiddleClickRow row: Int)
+    ///   - location: Click location in outline-view coordinates — lets the
+    ///     delegate route middle-click within a merged splitPair row to the
+    ///     specific pane (left/right) the user actually hit.
+    func outlineView(_ outlineView: SideBarOutlineView,
+                     didMiddleClickRow row: Int,
+                     at location: NSPoint)
     func outlineView(_ outlineView: SideBarOutlineView, didClickRow row: Int)
     func outlineView(_ outlineView: SideBarOutlineView,
                      beginDraggingTabAtRow row: Int,
@@ -210,9 +215,11 @@ class SideBarOutlineView: NSOutlineView {
         
         let clickLocation = convert(event.locationInWindow, from: nil)
         let clickedRow = row(at: clickLocation)
-        
+
         // Notify delegate about the middle click
-        phiOutlineDelegate?.outlineView(self, didMiddleClickRow: clickedRow)
+        phiOutlineDelegate?.outlineView(self,
+                                        didMiddleClickRow: clickedRow,
+                                        at: clickLocation)
     }
     
     override func frameOfCell(atColumn column: Int, row: Int) -> NSRect {

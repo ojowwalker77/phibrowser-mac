@@ -1039,14 +1039,18 @@ extension TabGroupCellView: GroupTabsTableViewDelegate {
     }
 
     func tableView(_ tableView: GroupTabsTableView,
-                   didMiddleClickRow row: Int) {
+                   didMiddleClickRow row: Int,
+                   at location: NSPoint) {
         guard currentMemberOrder.indices.contains(row) else { return }
         let key = currentMemberOrder[row]
         if let pair = splitPairsByKey[key] {
-            // Merged in-group split row reads as "one tab" — middle click
-            // closes both panes so the whole split disappears.
-            groupCellDelegate?.tabGroupCell(self, tabDidRequestClose: pair.leftTab)
-            groupCellDelegate?.tabGroupCell(self, tabDidRequestClose: pair.rightTab)
+            // Merged in-group split row renders both panes side-by-side —
+            // route the close to the pane whose half the click landed in.
+            // Use the cell frame so any leading inset doesn't pull midX
+            // off the visible centerline between the two panes.
+            let cellRect = tableView.frameOfCell(atColumn: 0, row: row)
+            let target = location.x < cellRect.midX ? pair.leftTab : pair.rightTab
+            groupCellDelegate?.tabGroupCell(self, tabDidRequestClose: target)
             return
         }
         guard let tab = tabsByGuid[key], !tab.isPinned else { return }

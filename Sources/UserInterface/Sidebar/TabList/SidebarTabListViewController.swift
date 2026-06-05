@@ -3734,14 +3734,19 @@ extension SidebarTabListViewController: SideBarOutlineViewDelegate {
         )
     }
     
-    func outlineView(_ outlineView: SideBarOutlineView, didMiddleClickRow row: Int) {
+    func outlineView(_ outlineView: SideBarOutlineView,
+                     didMiddleClickRow row: Int,
+                     at location: NSPoint) {
         guard row >= 0 else { return }
         guard let item = outlineView.item(atRow: row) as? SidebarItem else { return }
         if let pair = item as? SplitPairSidebarItem {
-            // Merged split row reads as "one tab" in the sidebar — middle
-            // click closes both panes so the whole split disappears.
-            tabSectionController.closeTab(pair.leftTab)
-            tabSectionController.closeTab(pair.rightTab)
+            // Merged split row renders both panes side-by-side — route the
+            // close to the pane whose half the click landed in. Use the
+            // cell frame (not the row rect) so the indent area on the left
+            // doesn't shift midX into the visible left pane.
+            let cellRect = outlineView.frameOfCell(atColumn: 0, row: row)
+            let target = location.x < cellRect.midX ? pair.leftTab : pair.rightTab
+            tabSectionController.closeTab(target)
             return
         }
         guard let tab = item as? Tab, !tab.isPinned else { return }

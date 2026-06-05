@@ -99,7 +99,9 @@ final class GroupTabsTableView: NSTableView {
         guard clickedRow >= 0 else { return }
 
         resetPendingDragState()
-        phiTableDelegate?.tableView(self, didMiddleClickRow: clickedRow)
+        phiTableDelegate?.tableView(self,
+                                    didMiddleClickRow: clickedRow,
+                                    at: clickLocation)
     }
 
     override func mouseUp(with event: NSEvent) {
@@ -178,7 +180,8 @@ protocol GroupTabsTableViewDelegate: AnyObject {
     func tableView(_ tableView: GroupTabsTableView,
                    didClickRow row: Int)
     func tableView(_ tableView: GroupTabsTableView,
-                   didMiddleClickRow row: Int)
+                   didMiddleClickRow row: Int,
+                   at location: NSPoint)
     func tableView(_ tableView: GroupTabsTableView,
                    didRequest target: GroupTabsTableInteractionTarget,
                    row: Int)
