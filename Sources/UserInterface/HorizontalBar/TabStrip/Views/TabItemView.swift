@@ -627,10 +627,14 @@ final class TabItemView: NSView {
                 guard let partner else { return }
                 partner.setAudioMuted(!partner.isAudioMuted)
             }
+            secondaryFaviconViewModel.onToolTipUpdated = { [weak self] in
+                self?.updateTitleHostingToolTips()
+            }
             secondaryFaviconHostingView.isHidden = false
         } else {
             secondaryFaviconViewModel.cancelSubscriptions()
             secondaryFaviconViewModel.onToggleMute = nil
+            secondaryFaviconViewModel.onToolTipUpdated = nil
             secondaryFaviconHostingView.isHidden = true
             secondaryMuteButtonHostingView.isHidden = true
         }
@@ -646,10 +650,10 @@ final class TabItemView: NSView {
             }
             
             viewModel.onToolTipUpdated = { [weak self] in
-                self?.toolTip = self?.viewModel.displayTitle
+                self?.updateTitleHostingToolTips()
             }
             
-            self.toolTip = viewModel.displayTitle
+            updateTitleHostingToolTips()
 
             // Listen for state changes to trigger re-layout
             cancellables.removeAll()
@@ -683,6 +687,17 @@ final class TabItemView: NSView {
         }
 
         layoutContent()
+    }
+
+    private func updateTitleHostingToolTips() {
+        titleHostingView.toolTip = viewModel.displayTitle
+        guard pinnedSplitPartner != nil else {
+            toolTip = viewModel.displayTitle
+            secondaryTitleHostingView.toolTip = nil
+            return
+        }
+        toolTip = nil
+        secondaryTitleHostingView.toolTip = secondaryFaviconViewModel.displayTitle
     }
 
     func setDragHighlighted(_ highlighted: Bool) {

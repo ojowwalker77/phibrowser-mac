@@ -462,6 +462,9 @@ class SidebarSplitPairCellView: SidebarCellView {
         rightIconView.image = nil
         leftTitleLabel.stringValue = ""
         rightTitleLabel.stringValue = ""
+        leftTitleLabel.toolTip = nil
+        rightTitleLabel.toolTip = nil
+        toolTip = nil
         configuredLeftTab = nil
         configuredRightTab = nil
         configuredSplitId = nil
@@ -720,9 +723,7 @@ class SidebarSplitPairCellView: SidebarCellView {
 
         refreshFavicon(into: leftIconView, for: pair.leftTab, handle: &leftFaviconHandle)
         refreshFavicon(into: rightIconView, for: pair.rightTab, handle: &rightFaviconHandle)
-        leftTitleLabel.stringValue = pair.leftTab.title
-        rightTitleLabel.stringValue = pair.rightTab.title
-        toolTip = pair.title
+        updatePaneTitles(leftTitle: pair.leftTab.title, rightTitle: pair.rightTab.title)
         updateSelected()
         updateHoverChrome()
         updateMute(isLeft: true,
@@ -799,20 +800,25 @@ class SidebarSplitPairCellView: SidebarCellView {
                 .sink { [weak self, weak tab] newTitle in
                     guard let self, let tab else { return }
                     if tab === self.configuredLeftTab {
-                        self.leftTitleLabel.stringValue = newTitle
+                        self.updatePaneTitle(isLeft: true, title: newTitle)
                     } else if tab === self.configuredRightTab {
-                        self.rightTitleLabel.stringValue = newTitle
+                        self.updatePaneTitle(isLeft: false, title: newTitle)
                     }
                 }
                 .store(in: &cancellables)
-            tab.$url
-                .receive(on: DispatchQueue.main)
-                .sink { [weak self] _ in
-                    guard let self, let pair = self.item as? SplitPairSidebarItem else { return }
-                    self.toolTip = pair.title
-                }
-                .store(in: &cancellables)
         }
+    }
+
+    private func updatePaneTitles(leftTitle: String, rightTitle: String) {
+        toolTip = nil
+        updatePaneTitle(isLeft: true, title: leftTitle)
+        updatePaneTitle(isLeft: false, title: rightTitle)
+    }
+
+    private func updatePaneTitle(isLeft: Bool, title: String) {
+        let label = isLeft ? leftTitleLabel : rightTitleLabel
+        label.stringValue = title
+        label.toolTip = title
     }
 
     private func refreshFaviconForTab(_ tab: Tab) {
@@ -894,11 +900,9 @@ class SidebarSplitPairCellView: SidebarCellView {
             pair.rightTab = oldLeft
             configuredLeftTab = pair.leftTab
             configuredRightTab = pair.rightTab
-            leftTitleLabel.stringValue = pair.leftTab.title
-            rightTitleLabel.stringValue = pair.rightTab.title
+            updatePaneTitles(leftTitle: pair.leftTab.title, rightTitle: pair.rightTab.title)
             refreshFavicon(into: leftIconView, for: pair.leftTab, handle: &leftFaviconHandle)
             refreshFavicon(into: rightIconView, for: pair.rightTab, handle: &rightFaviconHandle)
-            toolTip = pair.title
             updateSelected()
             updateMute(isLeft: true,
                        audible: pair.leftTab.isCurrentlyAudible,
