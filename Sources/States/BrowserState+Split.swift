@@ -737,6 +737,23 @@ extension BrowserState {
         let anchorGuid: String? = clampedIndex > 0
             ? pinnedTabs[clampedIndex - 1].guidInLocalDB
             : nil
+        // Detach both panes from any Chromium tab group before pinning.
+        // Phi-side pinning bypasses Chromium's `TabStripModel::SetTabPinned`,
+        // so the automatic "pinning detaches from group" never fires. The
+        // normal-tab pin path handles this explicitly in `moveNormalTab`,
+        // but the split path goes straight to the shared `moveNormalTabToPinned`
+        // helper and skips it — without this the panes keep their `groupToken`
+        // and re-enter the group on unpin.
+        if let bridge = ChromiumLauncher.sharedInstance().bridge {
+            let groupedPanes = [primaryLive, secondaryLive].filter { $0.groupToken != nil }
+            if !groupedPanes.isEmpty {
+                bridge.removeTabsFromGroup(withWindowId: windowId.int64Value,
+                                            tabIds: groupedPanes.map { NSNumber(value: Int64($0.guid)) })
+                for pane in groupedPanes {
+                    pane.groupToken = nil
+                }
+            }
+        }
         moveNormalTabToPinned(primaryLive,
                               after: anchorGuid,
                               selectAfterMove: primaryLive.isActive)
