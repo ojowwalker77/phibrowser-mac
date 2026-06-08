@@ -164,6 +164,31 @@ final class FeedbackOutboxArchiveTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: root.appendingPathComponent(attachments[0].relativePath).path))
     }
 
+    func testMakeZipAttachmentsIncludesChromiumSystemLogsAtRoot() throws {
+        let preparedDir = try makePreparedDirectory()
+        let systemLogsText = "chromium system logs\n"
+        let systemLogsURL = root.appendingPathComponent("system_logs.txt")
+        try Data(systemLogsText.utf8).write(to: systemLogsURL)
+
+        let attachments = try FeedbackOutbox.makeZipAttachments(
+            items: [
+                FeedbackOutbox.chromiumSystemLogsArchiveItem(sourceURL: systemLogsURL),
+                archiveItem(path: "PhiLogs/a.log", inlineText: "phi")
+            ],
+            preparedDir: preparedDir,
+            singleFilename: "logs.zip",
+            numberedPrefix: "logs",
+            attachmentType: .log,
+            required: true,
+            preferSingleArchiveWhenPossible: true
+        )
+
+        XCTAssertEqual(attachments.map(\.filename), ["logs.zip"])
+        let zipURL = root.appendingPathComponent(attachments[0].relativePath)
+        XCTAssertEqual(try zipEntryText("system_logs.txt", in: zipURL), systemLogsText)
+        XCTAssertEqual(try zipEntryText("PhiLogs/a.log", in: zipURL), "phi")
+    }
+
     func testMakeZipAttachmentsPrefersSingleLogsZipWhenCompressedUnderLimit() throws {
         let preparedDir = try makePreparedDirectory()
         let items = [
@@ -453,6 +478,30 @@ final class FeedbackOutboxArchiveTests: XCTestCase {
             length: UInt64(data.count),
             archivePath: path
         )
+    }
+
+    private func zipEntryText(_ entry: String, in zipURL: URL) throws -> String {
+        let output = Pipe()
+        let errorOutput = Pipe()
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/unzip")
+        process.arguments = ["-p", zipURL.path, entry]
+        process.standardOutput = output
+        process.standardError = errorOutput
+        try process.run()
+        process.waitUntilExit()
+
+        guard process.terminationStatus == 0 else {
+            let message = String(data: errorOutput.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+            throw NSError(
+                domain: "FeedbackOutboxArchiveTests",
+                code: Int(process.terminationStatus),
+                userInfo: [NSLocalizedDescriptionKey: message]
+            )
+        }
+
+        let data = output.fileHandleForReading.readDataToEndOfFile()
+        return String(data: data, encoding: .utf8) ?? ""
     }
 
     private func randomData(byteCount: Int) throws -> Data {

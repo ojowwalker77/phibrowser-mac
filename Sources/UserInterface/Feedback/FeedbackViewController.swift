@@ -28,14 +28,7 @@ class FeedbackViewController: NSViewController {
             closeWindow()
         } onSend: { [weak self] in
             guard let self else { return }
-            refreshFeedbackContext()
-            do {
-                try viewModel.enqueueFeedback()
-                closeWindow()
-            } catch {
-                AppLogError("Feedback V2 enqueue failed: \(error.localizedDescription)")
-                viewModel.localSaveError = error.localizedDescription
-            }
+            submitFeedback()
         }
         return view
     }()
@@ -90,6 +83,45 @@ class FeedbackViewController: NSViewController {
             viewModel.pageTitle = tab.title
         }
         viewModel.componentVersions = hostWindowController.browserState.extensionManager.phiExtensionVersions
+    }
+
+    private func submitFeedback() {
+        guard viewModel.canSend else { return }
+
+        refreshFeedbackContext()
+        viewModel.isSubmitting = true
+
+        let windowId = Int64(hostWindowController.browserState.windowId)
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let chromiumSystemLogsText = await fetchChromiumSystemLogsText(windowId: windowId)
+
+            do {
+                try viewModel.enqueueFeedback(chromiumSystemLogsText: chromiumSystemLogsText)
+                closeWindow()
+            } catch {
+                AppLogError("Feedback V2 enqueue failed: \(error.localizedDescription)")
+                viewModel.localSaveError = error.localizedDescription
+            }
+
+            viewModel.isSubmitting = false
+        }
+    }
+
+    private func fetchChromiumSystemLogsText(windowId: Int64) async -> String? {
+        guard let bridge = ChromiumLauncher.sharedInstance().bridge else {
+            AppLogWarn("Feedback V2 Chromium system logs skipped because the bridge is unavailable")
+            return nil
+        }
+
+        return await withCheckedContinuation { continuation in
+            bridge.getFeedbackSystemLogsText(withWindowId: windowId) { text in
+                if text == nil {
+                    AppLogWarn("Feedback V2 Chromium system logs skipped because Chromium returned no text")
+                }
+                continuation.resume(returning: text)
+            }
+        }
     }
     
     private func closeWindow() {

@@ -14,12 +14,13 @@ final class FeedbackViewModel: ObservableObject {
     @Published private(set) var attachments: [FeedbackDraftAttachment] = []
     @Published var localSaveError: String?
     @Published var attachmentError: String?
+    @Published var isSubmitting: Bool = false
 
     var pageTitle: String?
     var componentVersions: [String: String] = [:]
 
     var canSend: Bool {
-        !descriptionText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        !isSubmitting && !descriptionText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     func addFileURLs(_ urls: [URL]) {
@@ -71,7 +72,7 @@ final class FeedbackViewModel: ObservableObject {
         attachments.removeAll { $0.id == id }
     }
 
-    func enqueueFeedback() throws {
+    func enqueueFeedback(chromiumSystemLogsText: String? = nil) throws {
         guard let account = AccountController.shared.account else {
             throw FeedbackOutboxError.missingAccount
         }
@@ -94,6 +95,7 @@ final class FeedbackViewModel: ObservableObject {
                     version: $0.value
                 )
             }.sorted { $0.id.localizedCaseInsensitiveCompare($1.id) == .orderedAscending },
+            chromiumSystemLogsText: chromiumSystemLogsText,
             attachments: attachments
         )
 
@@ -126,6 +128,7 @@ struct FeedbackDraft {
     let pageTitle: String?
     let contactEmail: String?
     let components: [FeedbackV2Metadata.Component]
+    let chromiumSystemLogsText: String?
     let attachments: [FeedbackDraftAttachment]
 }
 
@@ -173,9 +176,10 @@ enum FeedbackOutbox {
     static let maxAttachmentBytes: Int64 = 20 * 1024 * 1024
     static let zipPlanningBytes: Int64 = maxAttachmentBytes - 512 * 1024
     static let maxJobRetryCount = 5
-    static let archiveStrategyVersion = 4
+    static let archiveStrategyVersion = 5
     private static let directoryName = "feedbackOutbox"
     private static let manifestFilename = "manifest.json"
+    private static let systemLogsFilename = "system_logs.txt"
 
     static func outboxRoot(for account: Account) -> URL {
         account.userDataStorage.appendingPathComponent(directoryName, isDirectory: true)
@@ -226,14 +230,17 @@ enum FeedbackOutbox {
         let jobRoot = root.appendingPathComponent(jobID, isDirectory: true)
         let imagesDir = jobRoot.appendingPathComponent("images", isDirectory: true)
         let filesDir = jobRoot.appendingPathComponent("files", isDirectory: true)
+        let logsDir = jobRoot.appendingPathComponent("logs", isDirectory: true)
         let preparedDir = jobRoot.appendingPathComponent("prepared", isDirectory: true)
 
         try fm.createDirectory(at: imagesDir, withIntermediateDirectories: true)
         try fm.createDirectory(at: filesDir, withIntermediateDirectories: true)
+        try fm.createDirectory(at: logsDir, withIntermediateDirectories: true)
         try fm.createDirectory(at: preparedDir, withIntermediateDirectories: true)
 
         var imageSources: [FeedbackOutboxSourceAttachment] = []
         var fileSources: [FeedbackOutboxSourceAttachment] = []
+        var chromiumSystemLogs: FeedbackOutboxSourceAttachment?
 
         for attachment in draft.attachments {
             switch attachment.source {
@@ -276,6 +283,17 @@ enum FeedbackOutbox {
             }
         }
 
+        if let chromiumSystemLogsText = draft.chromiumSystemLogsText {
+            let destination = logsDir.appendingPathComponent(systemLogsFilename)
+            try Data(chromiumSystemLogsText.utf8).write(to: destination, options: .atomic)
+            chromiumSystemLogs = sourceAttachment(
+                filename: systemLogsFilename,
+                fileURL: destination,
+                jobRoot: jobRoot,
+                mimeType: "text/plain"
+            )
+        }
+
         let metadata = makeMetadata(jobID: jobID, draft: draft)
         let manifest = FeedbackOutboxManifest(
             id: jobID,
@@ -285,6 +303,7 @@ enum FeedbackOutbox {
             metadata: metadata,
             sourceImages: imageSources,
             sourceFiles: fileSources,
+            chromiumSystemLogs: chromiumSystemLogs,
             preparedAttachments: [],
             archiveStrategyVersion: archiveStrategyVersion,
             status: .queued,
@@ -293,6 +312,13 @@ enum FeedbackOutbox {
             lastError: nil
         )
         try writeManifest(manifest, jobRoot: jobRoot)
+        logSourceAttachmentDiskLocations(
+            jobID: jobID,
+            jobRoot: jobRoot,
+            imageSources: imageSources,
+            fileSources: fileSources,
+            chromiumSystemLogs: chromiumSystemLogs
+        )
         AppLogInfo("Feedback V2 outbox job enqueued: \(jobID)")
     }
 
@@ -325,7 +351,9 @@ enum FeedbackOutbox {
         try FileManager.default.createDirectory(at: preparedDir, withIntermediateDirectories: true)
 
         let logAttachments = try prepareLogZipAttachments(
-            preparedDir: preparedDir
+            jobRoot: jobRoot,
+            preparedDir: preparedDir,
+            chromiumSystemLogs: manifest.chromiumSystemLogs
         )
         let slotsAfterLogs = max(maxSubmitAttachments - logAttachments.count, 0)
         let reserveOtherSlot = !manifest.sourceFiles.isEmpty && slotsAfterLogs > 1
@@ -347,7 +375,9 @@ enum FeedbackOutbox {
         )
 
         let requiredAttachments = imageAttachments + logAttachments
-        return try attachmentsWithinSubmitLimit(required: requiredAttachments, optional: fileAttachments)
+        let attachments = try attachmentsWithinSubmitLimit(required: requiredAttachments, optional: fileAttachments)
+        logPreparedAttachmentDiskLocations(jobID: manifest.id, jobRoot: jobRoot, attachments: attachments)
+        return attachments
     }
 
     static func prepareImageAttachments(
@@ -455,8 +485,15 @@ enum FeedbackOutbox {
         return PreparedFile(url: destination, filename: filename, mimeType: "image/jpeg", size: Int64(data.count))
     }
 
-    private static func prepareLogZipAttachments(preparedDir: URL) throws -> [FeedbackOutboxUploadAttachment] {
-        let items = try collectLogArchiveItems()
+    private static func prepareLogZipAttachments(
+        jobRoot: URL,
+        preparedDir: URL,
+        chromiumSystemLogs: FeedbackOutboxSourceAttachment?
+    ) throws -> [FeedbackOutboxUploadAttachment] {
+        let items = try collectLogArchiveItems(
+            jobRoot: jobRoot,
+            chromiumSystemLogs: chromiumSystemLogs
+        )
         return try makeZipAttachments(
             items: items,
             preparedDir: preparedDir,
@@ -564,15 +601,36 @@ enum FeedbackOutbox {
         return required + Array(optional.prefix(remainingSlots))
     }
 
-    private static func collectLogArchiveItems() throws -> [ArchiveItem] {
+    private static func collectLogArchiveItems(
+        jobRoot: URL,
+        chromiumSystemLogs: FeedbackOutboxSourceAttachment?
+    ) throws -> [ArchiveItem] {
         let phiLogsURL = URL(fileURLWithPath: FileSystemUtils.phiBrowserDataDirectory(), isDirectory: true)
             .appendingPathComponent("PhiLogs", isDirectory: true)
         let sentinelLogsURL = SentinelHelper.sentinelLogsDirectoryURL()
 
         var items: [ArchiveItem] = []
+        if let chromiumSystemLogs {
+            let systemLogsURL = jobRoot.appendingPathComponent(chromiumSystemLogs.relativePath)
+            if FileManager.default.fileExists(atPath: systemLogsURL.path) {
+                items.append(chromiumSystemLogsArchiveItem(sourceURL: systemLogsURL))
+            } else {
+                AppLogWarn("Feedback V2 Chromium system logs file was missing when preparing logs.zip")
+            }
+        }
         items.append(contentsOf: try collectLogArchiveItems(root: phiLogsURL, archiveRoot: "PhiLogs"))
         items.append(contentsOf: try collectLogArchiveItems(root: sentinelLogsURL, archiveRoot: "SentinelLogs"))
         return items
+    }
+
+    static func chromiumSystemLogsArchiveItem(sourceURL: URL) -> ArchiveItem {
+        ArchiveItem(
+            sourceURL: sourceURL,
+            inlineData: nil,
+            offset: 0,
+            length: UInt64(max(fileSize(sourceURL), 0)),
+            archivePath: systemLogsFilename
+        )
     }
 
     static func collectLogArchiveItems(root: URL, archiveRoot: String) throws -> [ArchiveItem] {
@@ -876,6 +934,54 @@ enum FeedbackOutbox {
             mimeType: mimeType,
             size: fileSize(fileURL)
         )
+    }
+
+    private static func logSourceAttachmentDiskLocations(
+        jobID: String,
+        jobRoot: URL,
+        imageSources: [FeedbackOutboxSourceAttachment],
+        fileSources: [FeedbackOutboxSourceAttachment],
+        chromiumSystemLogs: FeedbackOutboxSourceAttachment?
+    ) {
+        var entries: [String] = []
+        entries.append(contentsOf: imageSources.map {
+            sourceAttachmentDebugLine(kind: "source-image", source: $0, jobRoot: jobRoot)
+        })
+        entries.append(contentsOf: fileSources.map {
+            sourceAttachmentDebugLine(kind: "source-file", source: $0, jobRoot: jobRoot)
+        })
+        if let chromiumSystemLogs {
+            entries.append(sourceAttachmentDebugLine(
+                kind: "chromium-system-logs",
+                source: chromiumSystemLogs,
+                jobRoot: jobRoot
+            ))
+        }
+
+        let detail = entries.isEmpty ? "none" : entries.joined(separator: "\n")
+        AppLogDebug("Feedback V2 source attachment disk locations: job=\(jobID) count=\(entries.count)\n\(detail)")
+    }
+
+    private static func sourceAttachmentDebugLine(
+        kind: String,
+        source: FeedbackOutboxSourceAttachment,
+        jobRoot: URL
+    ) -> String {
+        let absolutePath = jobRoot.appendingPathComponent(source.relativePath).path
+        return "- kind=\(kind) filename=\(source.filename) size=\(source.size) relativePath=\(source.relativePath) path=\(absolutePath)"
+    }
+
+    private static func logPreparedAttachmentDiskLocations(
+        jobID: String,
+        jobRoot: URL,
+        attachments: [FeedbackOutboxUploadAttachment]
+    ) {
+        let entries = attachments.map { attachment in
+            let absolutePath = jobRoot.appendingPathComponent(attachment.relativePath).path
+            return "- type=\(attachment.attachmentType.rawValue) required=\(attachment.required) status=\(attachment.status.rawValue) filename=\(attachment.filename) size=\(attachment.size) relativePath=\(attachment.relativePath) path=\(absolutePath)"
+        }
+        let detail = entries.isEmpty ? "none" : entries.joined(separator: "\n")
+        AppLogDebug("Feedback V2 prepared attachment disk locations: job=\(jobID) count=\(entries.count)\n\(detail)")
     }
 
     private static func mimeType(for url: URL, fallback: String) -> String {
@@ -1280,6 +1386,7 @@ struct FeedbackOutboxManifest: Codable {
     var metadata: FeedbackV2Metadata
     var sourceImages: [FeedbackOutboxSourceAttachment]
     var sourceFiles: [FeedbackOutboxSourceAttachment]
+    var chromiumSystemLogs: FeedbackOutboxSourceAttachment?
     var preparedAttachments: [FeedbackOutboxUploadAttachment]
     var archiveStrategyVersion: Int?
     var status: Status
