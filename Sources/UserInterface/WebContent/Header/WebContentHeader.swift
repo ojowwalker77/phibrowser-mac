@@ -75,6 +75,9 @@ class WebContentHeader: NSView {
     private let state = WebContentHeaderState()
     private let downloadViewModel = DownloadButtonViewModel()
     private var cancellables = Set<AnyCancellable>()
+    /// Subscription for the current tab's split-partner `aiChatEnabled` state,
+    /// rebuilt whenever the tab or split membership changes.
+    private var partnerAIChatEnabledCancellable: AnyCancellable?
     private weak var browserState: BrowserState?
     private var didSetupHostingView = false
     private var themeObserver = ThemeObserver.shared
@@ -219,6 +222,8 @@ class WebContentHeader: NSView {
     private func setupObservers() {
         cancellables.forEach { $0.cancel() }
         cancellables.removeAll()
+        partnerAIChatEnabledCancellable?.cancel()
+        partnerAIChatEnabledCancellable = nil
         setupConfigObserver()
 
         unsafeBrowserState?.$sidebarCollapsed
@@ -231,6 +236,18 @@ class WebContentHeader: NSView {
         unsafeBrowserState?.$groupOverviewState
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
+                self?.updateLayoutVisibility()
+            }
+            .store(in: &cancellables)
+
+        // Split membership controls whether we treat the partner's
+        // aiChatEnabled as a fallback for the chat button. Rebind the partner
+        // observer and refresh on every splits change so the button reacts
+        // when this tab joins or leaves a split.
+        unsafeBrowserState?.$splits
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.observePartnerAIChatEnabled()
                 self?.updateLayoutVisibility()
             }
             .store(in: &cancellables)
@@ -273,6 +290,32 @@ class WebContentHeader: NSView {
                 self?.updateLayoutVisibility()
             }
             .store(in: &cancellables)
+
+        observePartnerAIChatEnabled()
+    }
+
+    /// Resolve the current tab's split partner, if any.
+    private func splitPartner() -> Tab? {
+        guard let state = unsafeBrowserState,
+              let tab = currentTab,
+              let group = state.splitGroup(forTabId: tab.guid),
+              let partnerId = group.partnerTabId(of: tab.guid) else {
+            return nil
+        }
+        return state.tabs.first { $0.guid == partnerId }
+    }
+
+    /// Observe `aiChatEnabled` on the current tab's split partner so the chat
+    /// button stays visible while either pane has chat enabled.
+    private func observePartnerAIChatEnabled() {
+        partnerAIChatEnabledCancellable?.cancel()
+        partnerAIChatEnabledCancellable = nil
+        guard let partner = splitPartner() else { return }
+        partnerAIChatEnabledCancellable = partner.$aiChatEnabled
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.updateLayoutVisibility()
+            }
     }
 
     private func updateLayoutVisibility() {
@@ -282,7 +325,12 @@ class WebContentHeader: NSView {
         let isCollapsed = unsafeBrowserState?.sidebarCollapsed ?? false
         let isIncognito = unsafeBrowserState?.isIncognito ?? false
         let overviewActive = unsafeBrowserState?.groupOverviewState != nil
-        let aiChatEnabled = currentTab?.aiChatEnabled ?? false
+        let focusedAIChat = currentTab?.aiChatEnabled ?? false
+        // In a split the chat is shared between the two panes, so keep the
+        // button visible while either pane has chat enabled (e.g. one side
+        // is an NTP and the other is a real page).
+        let partnerAIChat = splitPartner()?.aiChatEnabled ?? false
+        let aiChatEnabled = focusedAIChat || partnerAIChat
         let isInPlaceholder = unsafeBrowserState?.isInPlaceholderMode ?? false
         let phiAIEnabled = UserDefaults.standard.bool(forKey: PhiPreferences.AISettings.phiAIEnabled.rawValue)
 
