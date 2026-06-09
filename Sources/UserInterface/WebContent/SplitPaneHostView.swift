@@ -30,6 +30,13 @@ final class SplitPaneHostView: NSView {
     private let paneInset: CGFloat = 4
     private let minPaneFraction: CGFloat = 0.1
 
+    /// Ratios the divider magnetically snaps to while dragging: an even split
+    /// plus one-third / two-thirds for the common asymmetric layouts.
+    private let magneticSnapRatios: [CGFloat] = [1.0 / 3.0, 0.5, 2.0 / 3.0]
+    /// How close (in points) the divider must come to a snap ratio before it
+    /// sticks. Converted to a ratio per-drag from the usable axis length.
+    private let magneticSnapDistance: CGFloat = 18
+
     private(set) var paneLayout: SplitLayout
     private(set) var ratio: CGFloat
 
@@ -69,6 +76,9 @@ final class SplitPaneHostView: NSView {
     private var isUserDragging = false
     private var dragStartLocation: NSPoint = .zero
     private var dragStartRatio: CGFloat = 0
+    /// Snap ratio the divider is currently stuck to, or nil when free. Tracked
+    /// so the alignment haptic fires once on entry, not every mouse move.
+    private var activeMagneticSnap: CGFloat?
     private var paneClickMonitor: Any?
 
     /// Pane attachment is deliberately deferred: the caller must mount the
@@ -397,24 +407,28 @@ final class SplitPaneHostView: NSView {
         isUserDragging = true
         dragStartLocation = convert(event.locationInWindow, from: nil)
         dragStartRatio = ratio
+        activeMagneticSnap = nil
     }
 
     private func continueDrag(at event: NSEvent) {
         let location = convert(event.locationInWindow, from: nil)
-        let newRatio: CGFloat
+        let usable: CGFloat
+        let delta: CGFloat
         switch paneLayout {
         case .vertical:
-            let usable = bounds.width - dividerThickness
+            usable = bounds.width - dividerThickness
             guard usable > 0 else { return }
-            let delta = (location.x - dragStartLocation.x) / usable
-            newRatio = clamp(dragStartRatio + delta)
+            delta = (location.x - dragStartLocation.x) / usable
         case .horizontal:
-            let usable = bounds.height - dividerThickness
+            usable = bounds.height - dividerThickness
             guard usable > 0 else { return }
             // y grows upward; primary sits on top, so drag-up = larger primary.
-            let delta = (location.y - dragStartLocation.y) / usable
-            newRatio = clamp(dragStartRatio + delta)
+            delta = (location.y - dragStartLocation.y) / usable
         }
+        let raw = clamp(dragStartRatio + delta)
+        let snapTarget = magneticSnapTarget(for: raw, usable: usable)
+        emitSnapFeedbackIfNeeded(snapTarget)
+        let newRatio = snapTarget ?? raw
         if abs(ratio - newRatio) > .ulpOfOne {
             ratio = newRatio
             needsLayout = true
@@ -423,7 +437,37 @@ final class SplitPaneHostView: NSView {
 
     private func endDrag() {
         isUserDragging = false
+        activeMagneticSnap = nil
         onRatioCommit?(Double(ratio))
+    }
+
+    /// Snap ratio the divider should stick to at `ratio`, or nil when it's
+    /// outside every snap point's pull radius. `usable` is the draggable axis
+    /// length in points, turning the point threshold into a ratio.
+    private func magneticSnapTarget(for ratio: CGFloat, usable: CGFloat) -> CGFloat? {
+        guard usable > 0 else { return nil }
+        let threshold = magneticSnapDistance / usable
+        var target: CGFloat?
+        var closest = threshold
+        for snap in magneticSnapRatios {
+            let distance = abs(ratio - snap)
+            if distance < closest {
+                closest = distance
+                target = snap
+            }
+        }
+        return target
+    }
+
+    /// Fire a single alignment haptic when the divider enters a new snap zone,
+    /// matching macOS's feel when window edges align.
+    private func emitSnapFeedbackIfNeeded(_ target: CGFloat?) {
+        guard target != activeMagneticSnap else { return }
+        activeMagneticSnap = target
+        if target != nil {
+            NSHapticFeedbackManager.defaultPerformer.perform(
+                .alignment, performanceTime: .drawCompleted)
+        }
     }
 
     private func clamp(_ value: CGFloat) -> CGFloat {
