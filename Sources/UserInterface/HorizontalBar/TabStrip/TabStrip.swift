@@ -3763,7 +3763,37 @@ extension TabStrip: TabStripDragDelegate {
                     currentGroupRuns().first(where: { $0.token == token })
                 }
 
-                browserState.moveNormalTabLocally(from: originalIndex, to: toIndex)
+                // A bookmark-opened tab keeps its bookmark guid as
+                // `guidInLocalDB`, which marks it Phi-managed and barred from
+                // tab groups. When this drop will hand the tab to the
+                // `moveBookmarkIntoGroup` auto-join below (cursor-gated
+                // leading/trailing edge, or a sandwich strictly between two
+                // members of one group at the drop position), that method
+                // graduates the tab and re-seats it in Chromium itself — so
+                // the local move here must NOT also sync the still-blocked tab
+                // to an in-group index. That `bridge.moveTab` would land a
+                // group-less tab inside a group's collection range and crash
+                // Chromium's tab-collection move. Skip the Chromium sync for
+                // that case (the local reorder still runs, so the auto-join's
+                // index math is unaffected); keep it for every other drop.
+                let bookmarkJoinsGroup: Bool = {
+                    guard let dbGuid = tab.guidInLocalDB,
+                          browserState.splitGroup(forTabId: tab.guid) == nil,
+                          let bookmark = browserState.bookmarkManager.bookmark(withGuid: dbGuid),
+                          !bookmark.isFolder else {
+                        return false
+                    }
+                    if context.targetGroupForLeadingJoin != nil { return true }
+                    if context.targetGroupForTrailingJoin != nil { return true }
+                    let order = browserState.normalTabs
+                    guard toIndex - 1 >= 0, toIndex < order.count else { return false }
+                    let leftToken = order[toIndex - 1].groupToken
+                    let rightToken = order[toIndex].groupToken
+                    return leftToken != nil && leftToken == rightToken
+                }()
+
+                browserState.moveNormalTabLocally(from: originalIndex, to: toIndex,
+                                                  syncChromiumOrder: !bookmarkJoinsGroup)
 
                 // Auto-leave: detach when the drop signals "out of
                 // group" intent. THREE disjoint triggers, mirroring
