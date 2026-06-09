@@ -822,17 +822,23 @@ class BrowserState {
     // MARK: - Multi-selection
 
     @MainActor
-    func toggleMultiSelection(for tab: Tab) {
+    @discardableResult
+    func toggleMultiSelection(for tab: Tab) -> Bool {
+        guard TabMultiSelection.isEnabled else {
+            clearMultiSelection()
+            return false
+        }
+
         // Pinned / bookmark-backed tabs do not participate: exit multi-select + activate.
         if tab.isPinned {
             clearMultiSelection()
             openOrFocusPinnedTab(tab)
-            return
+            return true
         }
         if isBookmarkBackedTab(tab) {
             clearMultiSelection()
             focuseTab(tab)
-            return
+            return true
         }
         // A group overview is a separate surface where multi-selection is
         // disabled: a Cmd+click activates the tab (which dismisses the
@@ -840,11 +846,12 @@ class BrowserState {
         if activeGroupOverviewToken != nil {
             clearMultiSelection()
             focuseTab(tab)
-            return
+            return true
         }
         // The active tab is always implicitly included; toggling it is a no-op.
-        if tab.guid == focusingTab?.guid { return }
+        if tab.guid == focusingTab?.guid { return true }
         multiSelection.toggle(tab.guid)
+        return true
     }
 
     func clearMultiSelection() {

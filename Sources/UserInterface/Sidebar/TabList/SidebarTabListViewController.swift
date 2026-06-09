@@ -421,8 +421,9 @@ class SidebarTabListViewController: NSViewController {
         if let item = outlineView.item(atRow: clickedRow) as? SidebarItem {
             // Cmd+click toggles tab multi-selection; the owner decides eligibility.
             let isCommandClick = NSApp.currentEvent?.modifierFlags.contains(.command) ?? false
-            if isCommandClick, let tab = item as? Tab {
-                browserState.toggleMultiSelection(for: tab)
+            if isCommandClick,
+               let tab = item as? Tab,
+               browserState.toggleMultiSelection(for: tab) {
                 return
             }
             if browserState.multiSelection.isActive {
@@ -3836,8 +3837,9 @@ extension SidebarTabListViewController: SideBarOutlineViewDelegate {
         // action never fires for them), so multi-selection must be handled
         // on this path rather than `outlineViewClicked`.
         let isCommandClick = NSApp.currentEvent?.modifierFlags.contains(.command) ?? false
-        if isCommandClick, let tab = item as? Tab {
-            browserState.toggleMultiSelection(for: tab)
+        if isCommandClick,
+           let tab = item as? Tab,
+           browserState.toggleMultiSelection(for: tab) {
             return
         }
         if browserState.multiSelection.isActive {

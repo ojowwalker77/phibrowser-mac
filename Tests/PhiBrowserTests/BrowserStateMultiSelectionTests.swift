@@ -10,6 +10,11 @@ import XCTest
 final class BrowserStateMultiSelectionTests: XCTestCase {
     private var tempDirectories: [URL] = []
 
+    override func setUpWithError() throws {
+        try super.setUpWithError()
+        try XCTSkipIf(!TabMultiSelection.isEnabled, "Tab multi-selection is disabled.")
+    }
+
     override func tearDownWithError() throws {
         for directory in tempDirectories {
             try? FileManager.default.removeItem(at: directory)

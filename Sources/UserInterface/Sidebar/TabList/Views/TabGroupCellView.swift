@@ -1053,8 +1053,8 @@ extension TabGroupCellView: GroupTabsTableViewDelegate {
         // Cmd+click toggles multi-selection; a plain click clears it first.
         if let state = configuredBrowserState {
             let isCommandClick = NSApp.currentEvent?.modifierFlags.contains(.command) ?? false
-            if isCommandClick {
-                state.toggleMultiSelection(for: tab)
+            if isCommandClick,
+               state.toggleMultiSelection(for: tab) {
                 return
             }
             if state.multiSelection.isActive {

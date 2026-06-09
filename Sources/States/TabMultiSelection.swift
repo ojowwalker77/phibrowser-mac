@@ -10,6 +10,9 @@ import Foundation
 struct TabMultiSelection: Equatable {
     private(set) var guids: Set<Int>
 
+    /// Single feature gate for temporary multi-selection availability.
+    static let isEnabled = false
+
     static let empty = TabMultiSelection(guids: [])
 
     var isActive: Bool { !guids.isEmpty }

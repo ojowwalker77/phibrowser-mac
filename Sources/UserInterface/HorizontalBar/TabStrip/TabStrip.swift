@@ -1871,14 +1871,15 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
             view.onSelect = { [weak self, weak tab] flags in
                 guard let self, let tab else { return }
                 // Cmd+click toggles multi-selection; owner handles pinned/active.
-                if flags.contains(.command) {
-                    self.browserState.toggleMultiSelection(for: tab)
+                if flags.contains(.command),
+                   self.browserState.toggleMultiSelection(for: tab) {
+                    return
                 } else {
                     if self.browserState.multiSelection.isActive {
                         self.browserState.clearMultiSelection()
                     }
-                    self.handleTabSelection(tab: tab)
                 }
+                self.handleTabSelection(tab: tab)
             }
             // Split-merged cells: the right favicon represents the partner
             // pane; clicking that half should focus the partner instead of
