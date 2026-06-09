@@ -1933,7 +1933,11 @@ class BrowserState {
     /// - Parameters:
     ///   - fromIndex: Source index inside `normalTabs`.
     ///   - toIndex: Destination insertion index inside `normalTabs`.
-    func moveNormalTabLocally(from fromIndex: Int, to toIndex: Int) {
+    ///   - syncChromiumOrder: When false, updates Mac order only so callers
+    ///     can change Chromium group membership before mirroring the move.
+    func moveNormalTabLocally(from fromIndex: Int,
+                              to toIndex: Int,
+                              syncChromiumOrder: Bool = true) {
         guard fromIndex >= 0, fromIndex < normalTabOrder.count else { return }
 
         // Split tabs travel as a unit. If the dragged tab is in a split, move
@@ -1980,7 +1984,9 @@ class BrowserState {
             tabs.first { $0.guid == guid }
         }
 
-        syncNormalTabRelativeOrderToChromium(tabId: guid)
+        if syncChromiumOrder {
+            syncNormalTabRelativeOrderToChromium(tabId: guid)
+        }
     }
 
     /// Reorders a contiguous slice of group members in `normalTabOrder`
@@ -2477,6 +2483,12 @@ class BrowserState {
             group.id,
             to: Int32(stripToIndex),
             windowId: windowId.int64Value)
+    }
+
+    func syncNormalTabsRelativeOrderToChromium(tabIds: [Int]) {
+        for tabId in tabIds {
+            syncNormalTabRelativeOrderToChromium(tabId: tabId)
+        }
     }
 
     private func syncNormalTabRelativeOrderToChromium(tabId: Int) {

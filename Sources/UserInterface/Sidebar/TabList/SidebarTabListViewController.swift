@@ -1408,18 +1408,25 @@ extension SidebarTabListViewController: NSOutlineViewDataSource {
                     return browserState.tabs.first(where: { $0.guid == partnerId })
                 }()
 
+                let membershipWillChange = oldToken != newToken
+                let shouldDeferChromiumOrderSync =
+                    membershipWillChange && splitPartner == nil
                 if let oldIdx = oldIdx, oldIdx != targetIdx {
-                    browserState.moveNormalTabLocally(from: oldIdx, to: targetIdx)
+                    browserState.moveNormalTabLocally(
+                        from: oldIdx,
+                        to: targetIdx,
+                        syncChromiumOrder: !shouldDeferChromiumOrderSync)
                 }
-                let memberIds: [NSNumber] = {
-                    var ids: [NSNumber] = [NSNumber(value: Int64(draggedTab.guid))]
+                let memberTabIds: [Int] = {
+                    var ids: [Int] = [draggedTab.guid]
                     if let partner = splitPartner {
-                        ids.append(NSNumber(value: Int64(partner.guid)))
+                        ids.append(partner.guid)
                     }
                     return ids
                 }()
+                let memberIds = memberTabIds.map { NSNumber(value: Int64($0)) }
                 if let bridge = ChromiumLauncher.sharedInstance().bridge,
-                   let old = oldToken, old != newToken {
+                   let old = oldToken, membershipWillChange {
                     AppLogDebug("[TAB_GROUPS][SIDEBAR_DRAG] removeTabsFromGroup " +
                                 "windowId=\(browserState.windowId) tabIds=\(memberIds) " +
                                 "token=\(old)")
@@ -1428,7 +1435,7 @@ extension SidebarTabListViewController: NSOutlineViewDataSource {
                         tabIds: memberIds)
                 }
                 if let bridge = ChromiumLauncher.sharedInstance().bridge,
-                   let new = newToken, new != oldToken {
+                   let new = newToken, membershipWillChange {
                     AppLogDebug("[TAB_GROUPS][SIDEBAR_DRAG] addTabsToGroup " +
                                 "windowId=\(browserState.windowId) tabIds=\(memberIds) " +
                                 "token=\(new)")
@@ -1442,7 +1449,7 @@ extension SidebarTabListViewController: NSOutlineViewDataSource {
                 // Comfortable while `tabJoinedGroup`/`tabLeftGroup` is
                 // still queued on EventBus) doesn't see the
                 // [member, non-member, member] split this drop just made.
-                if oldToken != newToken {
+                if membershipWillChange {
                     var updates: [(tabId: Int, newToken: String?)] =
                         [(draggedTab.guid, newToken)]
                     if let partner = splitPartner {
@@ -1450,6 +1457,10 @@ extension SidebarTabListViewController: NSOutlineViewDataSource {
                     }
                     browserState.applyOptimisticGroupMembership(
                         updates: updates)
+                    if shouldDeferChromiumOrderSync {
+                        browserState.syncNormalTabsRelativeOrderToChromium(
+                            tabIds: memberTabIds)
+                    }
                 }
 
                 setDropFeedback(.none)
@@ -3710,20 +3721,27 @@ extension SidebarTabListViewController: TabGroupCellViewDelegate {
             return browserState.tabs.first(where: { $0.guid == partnerId })
         }()
 
+        let membershipWillChange = oldToken != token
+        let shouldDeferChromiumOrderSync =
+            membershipWillChange && splitPartner == nil
         if let oldIdx, oldIdx != targetIdx {
-            browserState.moveNormalTabLocally(from: oldIdx, to: targetIdx)
+            browserState.moveNormalTabLocally(
+                from: oldIdx,
+                to: targetIdx,
+                syncChromiumOrder: !shouldDeferChromiumOrderSync)
         }
         guard let bridge = ChromiumLauncher.sharedInstance().bridge else {
             return true
         }
-        let memberIds: [NSNumber] = {
-            var ids: [NSNumber] = [NSNumber(value: Int64(tab.guid))]
+        let memberTabIds: [Int] = {
+            var ids: [Int] = [tab.guid]
             if let partner = splitPartner {
-                ids.append(NSNumber(value: Int64(partner.guid)))
+                ids.append(partner.guid)
             }
             return ids
         }()
-        if let old = oldToken, old != token {
+        let memberIds = memberTabIds.map { NSNumber(value: Int64($0)) }
+        if let old = oldToken, membershipWillChange {
             AppLogDebug(
                 "[TAB_GROUPS][SIDEBAR_DRAG] removeTabsFromGroup " +
                 "windowId=\(browserState.windowId) tabIds=\(memberIds) " +
@@ -3733,7 +3751,7 @@ extension SidebarTabListViewController: TabGroupCellViewDelegate {
                 withWindowId: Int64(browserState.windowId),
                 tabIds: memberIds)
         }
-        if oldToken != token {
+        if membershipWillChange {
             AppLogDebug(
                 "[TAB_GROUPS][SIDEBAR_DRAG] addTabsToGroup " +
                 "windowId=\(browserState.windowId) tabIds=\(memberIds) " +
@@ -3747,7 +3765,7 @@ extension SidebarTabListViewController: TabGroupCellViewDelegate {
         // See sibling site (~Line 1057) for rationale: mirror group
         // membership locally so a layout-switch race can't observe the
         // transient split.
-        if oldToken != token {
+        if membershipWillChange {
             var updates: [(tabId: Int, newToken: String?)] =
                 [(tab.guid, token)]
             if let partner = splitPartner {
@@ -3755,6 +3773,10 @@ extension SidebarTabListViewController: TabGroupCellViewDelegate {
             }
             browserState.applyOptimisticGroupMembership(
                 updates: updates)
+            if shouldDeferChromiumOrderSync {
+                browserState.syncNormalTabsRelativeOrderToChromium(
+                    tabIds: memberTabIds)
+            }
         }
         setDropFeedback(.none)
         return true

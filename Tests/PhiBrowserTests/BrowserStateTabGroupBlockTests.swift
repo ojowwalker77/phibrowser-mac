@@ -209,6 +209,24 @@ final class BrowserStateTabGroupBlockTests: XCTestCase {
         XCTAssertEqual(state.normalTabs.map(\.groupToken), ["A", "A", "A", "A"])
     }
 
+    func testApplyOptimisticGroupMembership_crossGroupJoinPreservesInsertionPoint() throws {
+        let state = try makeBrowserState()
+        seed(state: state, tabs: [
+            (guid: 200, url: "https://a1.example", token: "A"),
+            (guid: 201, url: "https://a2.example", token: "A"),
+            (guid: 300, url: "https://b1.example", token: "B"),
+            (guid: 301, url: "https://b2.example", token: "B"),
+        ])
+
+        state.moveNormalTabLocally(from: 0, to: 2, syncChromiumOrder: false)
+        state.applyOptimisticGroupMembership(updates: [
+            (tabId: 200, newToken: "B"),
+        ])
+
+        XCTAssertEqual(state.normalTabs.map(\.guid), [201, 200, 300, 301])
+        XCTAssertEqual(state.normalTabs.map(\.groupToken), ["A", "B", "B", "B"])
+    }
+
     // MARK: - convertGroupToBookmarks
 
     func testConvertGroupToBookmarks_createsFolderAndRewiresOpenTabsToChildBookmarks() throws {
