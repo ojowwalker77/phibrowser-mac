@@ -3514,11 +3514,11 @@ class BrowserState {
         }
 
         if let secondaryURL = realBookmark.secondaryUrl, !secondaryURL.isEmpty {
-            AppLogWarn(
-                "[TAB_GROUPS][SIDEBAR_DRAG] split bookmark group drop unsupported " +
-                "bookmark=\(realBookmark.guid) secondaryURL=\(secondaryURL)"
-            )
-            return false
+            return moveSplitBookmarkIntoGroup(realBookmark,
+                                              primaryURL: url,
+                                              secondaryURL: secondaryURL,
+                                              toGroup: tokenHex,
+                                              normalTabsIndex: normalTabsIndex)
         }
 
         if let chromiumTab = tabs.first(where: { $0.guidInLocalDB == realBookmark.guid }) {
@@ -3550,6 +3550,57 @@ class BrowserState {
         return true
     }
 
+    /// Drops a split-view bookmark into a tab group. A live-bound split folds
+    /// its two existing panes into the group as a unit; a closed bookmark
+    /// re-opens both URLs as a fresh split that joins the group once Chromium
+    /// echoes the panes back. The bookmark is removed in both cases.
+    @discardableResult
+    @MainActor
+    private func moveSplitBookmarkIntoGroup(_ bookmark: Bookmark,
+                                            primaryURL: String,
+                                            secondaryURL: String,
+                                            toGroup tokenHex: String,
+                                            normalTabsIndex: Int) -> Bool {
+        if let splitId = splitBookmarkBindings[bookmark.guid],
+           let group = splits.first(where: { $0.id == splitId }),
+           let primaryLive = tabs.first(where: { $0.guid == group.primaryTabId }),
+           let secondaryLive = tabs.first(where: { $0.guid == group.secondaryTabId }),
+           let bridge = ChromiumLauncher.sharedInstance().bridge {
+            // Drop the binding so the panes stop hiding behind the bookmark
+            // cell, then re-seat them in the visible order. Per-tab Chromium
+            // sync would tear the live SplitTabId, so insert without syncing
+            // and let `addTabsToGroup` perform the strip move as a unit.
+            splitBookmarkBindings.removeValue(forKey: bookmark.guid)
+            applyOptimisticGroupMembership(updates: [
+                (primaryLive.guid, tokenHex),
+                (secondaryLive.guid, tokenHex)
+            ])
+            insertIntoNormalTabOrder(tabGuid: primaryLive.guid,
+                                     at: normalTabsIndex,
+                                     syncChromiumOrder: false)
+            insertIntoNormalTabOrder(tabGuid: secondaryLive.guid,
+                                     at: normalTabsIndex + 1,
+                                     syncChromiumOrder: false)
+            bridge.addTabsToGroup(withWindowId: windowId.int64Value,
+                                  tabIds: [NSNumber(value: Int64(primaryLive.guid)),
+                                           NSNumber(value: Int64(secondaryLive.guid))],
+                                  tokenHex: tokenHex)
+            bookmarkManager.removeBookmark(bookmark)
+            return true
+        }
+
+        // `addTabsToGroup` parks the joining panes at the group's trailing
+        // edge, so pass the drop position through: `handleSplitCreated`
+        // relocates the finished split to it (still inside the group, since
+        // the index falls within the group's run).
+        openTwoURLsAsSplit(primaryURL: primaryURL,
+                           secondaryURL: secondaryURL,
+                           groupToken: tokenHex,
+                           insertionIndex: normalTabsIndex)
+        bookmarkManager.removeBookmark(bookmark)
+        return true
+    }
+
     @discardableResult
     @MainActor
     func movePinnedTabOut(pinnedGuid: String,
@@ -3564,32 +3615,47 @@ class BrowserState {
         }
 
         if let partnerGuid = pinnedTab.splitPartnerGuid, !partnerGuid.isEmpty {
-            guard let partnerPinned = pinnedTabs.first(where: { $0.guidInLocalDB == partnerGuid }),
-                  let handleLive = tabs.first(where: { $0.guidInLocalDB == pinnedGuid }),
-                  let partnerLive = tabs.first(where: { $0.guidInLocalDB == partnerGuid }) else {
-                AppLogWarn(
-                    "[TAB_GROUPS][SIDEBAR_DRAG] unopened pinned split group drop unsupported " +
-                    "pinnedGuid=\(pinnedGuid) partnerGuid=\(partnerGuid)"
-                )
+            guard let partnerPinned = pinnedTabs.first(where: { $0.guidInLocalDB == partnerGuid }) else {
                 return false
             }
 
-            applyOptimisticGroupMembership(updates: [
-                (handleLive.guid, tokenHex),
-                (partnerLive.guid, tokenHex)
-            ])
-            unpinSplitPanesIntoNormalList(handleLive: handleLive,
-                                          partnerLive: partnerLive,
-                                          handlePinned: pinnedTab,
-                                          partnerPinned: partnerPinned,
-                                          insertIndex: normalTabsIndex)
-            let tabIds = [
-                NSNumber(value: Int64(handleLive.guid)),
-                NSNumber(value: Int64(partnerLive.guid))
-            ]
-            bridge.addTabsToGroup(withWindowId: windowId.int64Value,
-                                  tabIds: tabIds,
-                                  tokenHex: tokenHex)
+            if let handleLive = tabs.first(where: { $0.guidInLocalDB == pinnedGuid }),
+               let partnerLive = tabs.first(where: { $0.guidInLocalDB == partnerGuid }) {
+                applyOptimisticGroupMembership(updates: [
+                    (handleLive.guid, tokenHex),
+                    (partnerLive.guid, tokenHex)
+                ])
+                unpinSplitPanesIntoNormalList(handleLive: handleLive,
+                                              partnerLive: partnerLive,
+                                              handlePinned: pinnedTab,
+                                              partnerPinned: partnerPinned,
+                                              insertIndex: normalTabsIndex)
+                let tabIds = [
+                    NSNumber(value: Int64(handleLive.guid)),
+                    NSNumber(value: Int64(partnerLive.guid))
+                ]
+                bridge.addTabsToGroup(withWindowId: windowId.int64Value,
+                                      tabIds: tabIds,
+                                      tokenHex: tokenHex)
+                return true
+            }
+
+            // Unopened pinned split: materialize both URLs as a fresh split
+            // that joins the group when Chromium echoes the panes back, then
+            // drop the pinned records. Mirrors `unpinClosedPinnedSplit`.
+            guard let partnerURL = partnerPinned.url, !partnerURL.isEmpty else {
+                return false
+            }
+            pinnedTab.splitPartnerGuid = nil
+            partnerPinned.splitPartnerGuid = nil
+            localStore.updateTabSplitPartner(pinnedGuid, partnerGuid: nil)
+            localStore.updateTabSplitPartner(partnerGuid, partnerGuid: nil)
+            localStore.removePinnedTab(pinnedTab)
+            localStore.removePinnedTab(partnerPinned)
+            openTwoURLsAsSplit(primaryURL: url,
+                               secondaryURL: partnerURL,
+                               groupToken: tokenHex,
+                               insertionIndex: normalTabsIndex)
             return true
         }
 

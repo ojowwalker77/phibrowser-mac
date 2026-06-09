@@ -588,16 +588,15 @@ class SidebarTabListViewController: NSViewController {
     }
 
     private func canMoveBookmarkToGroup(_ bookmark: Bookmark) -> Bool {
-        !bookmark.isFolder && (bookmark.secondaryUrl ?? "").isEmpty
+        // Split-view bookmarks (non-empty `secondaryUrl`) are allowed too:
+        // `moveBookmarkOut` folds them into the group as a split.
+        !bookmark.isFolder
     }
 
     private func canMovePinnedTabToGroup(pinnedGuid: String) -> Bool {
-        guard let pinnedTab = browserState.pinnedTabs.first(where: {
-            $0.guidInLocalDB == pinnedGuid
-        }) else {
-            return false
-        }
-        return (pinnedTab.splitPartnerGuid ?? "").isEmpty
+        // Pinned splits (non-nil `splitPartnerGuid`) are allowed too:
+        // `movePinnedTabOut` folds the pair into the group as a split.
+        browserState.pinnedTabs.contains { $0.guidInLocalDB == pinnedGuid }
     }
 
     private func canMoveDraggedBookmarkToGroup(from pasteboard: NSPasteboard) -> Bool {

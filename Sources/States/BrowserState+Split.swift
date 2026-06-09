@@ -1351,12 +1351,14 @@ extension BrowserState {
     func openTwoURLsAsSplit(primaryURL: String,
                             secondaryURL: String,
                             bookmarkGuid: String? = nil,
+                            groupToken: String? = nil,
                             insertionIndex: Int? = nil) {
         let pendingGuid = SplitPendingGuid.primary.mint()
         pendingPrimarySplitTargetByGuid[pendingGuid] = PendingPrimarySplit(
             primaryURL: primaryURL,
             secondaryURL: secondaryURL,
             boundBookmarkGuid: bookmarkGuid,
+            groupToken: groupToken,
             insertionIndex: insertionIndex
         )
         createTab("chrome://newtab", customGuid: pendingGuid, focusAfterCreate: true)
@@ -1380,6 +1382,19 @@ extension BrowserState {
         tab.guidInLocalDB = nil
         tab.webContentWrapper?.updateTabCustomValue("")
         tab.webContentWrapper?.navigate(toURL: pending.primaryURL)
+        // Group drop: pull the primary pane into the destination group before
+        // the partner is created. `consumePendingSplitPartner` reads the
+        // partner's (this primary's) group token and folds the new pane into
+        // the same group, so the finished split lands inside the group.
+        if let groupToken = pending.groupToken, !groupToken.isEmpty {
+            ChromiumLauncher.sharedInstance().bridge?.addTabsToGroup(
+                withWindowId: Int64(windowId),
+                tabIds: [NSNumber(value: Int64(tab.guid))],
+                tokenHex: groupToken)
+            MainActor.assumeIsolated {
+                applyOptimisticGroupMembership(tabId: tab.guid, newToken: groupToken)
+            }
+        }
         openNewTabAsSplit(partnerTabId: tab.guid,
                           newTabSlot: .right,
                           partnerNavigateURL: pending.secondaryURL,
@@ -1430,6 +1445,11 @@ struct PendingPrimarySplit {
     /// Optional bookmark guid to rebind to both panes once they settle, so
     /// the originating split bookmark tracks the open split.
     var boundBookmarkGuid: String? = nil
+    /// Optional tab-group token. When set, the primary pane joins the group
+    /// as soon as it's created; the partner pane then inherits the same token
+    /// through `consumePendingSplitPartner`'s partner-group lookup, so the
+    /// finished split materializes inside the group.
+    var groupToken: String? = nil
     /// Optional destination index (in `normalTabs` space) for the finished
     /// split. Threaded through to `PendingSplitPartner.insertionIndex` so the
     /// pair lands at the drop spot instead of the strip's end.
