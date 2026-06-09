@@ -685,6 +685,21 @@ extension Tab: ContextMenuRepresentable {
         return ids
     }
 
+    /// Sheds the bookmark binding from any bookmark-opened member before a
+    /// group op. Chromium's `createGroupFromTabs` / `addTabsToGroup` reject a
+    /// batch that still contains a Phi-managed (`custom_value`) tab, so an
+    /// ungraduated bookmark tab would silently drop the whole request. No-op
+    /// for non-bookmark members.
+    @MainActor
+    private func graduateBookmarkBackedMembers(_ memberIds: [NSNumber], state: BrowserState?) {
+        guard let state else { return }
+        for member in memberIds {
+            if let tab = state.tabs.first(where: { $0.guid == member.intValue }) {
+                state.graduateBookmarkTabToPlainTab(tab)
+            }
+        }
+    }
+
     @MainActor
     @objc private func addToNewTabGroup() {
         guard let bridge = ChromiumLauncher.sharedInstance().bridge else {
@@ -694,6 +709,12 @@ extension Tab: ContextMenuRepresentable {
         let state = MainBrowserWindowControllersManager.shared
             .getBrowserState(for: windowId)
         let tabIds = splitAwareGroupMemberIds(state: state)
+        // A bookmark-opened tab is Phi-managed (its bookmark guid lives in
+        // `custom_value`); Chromium's `createGroupFromTabs` rejects the whole
+        // batch if any member is Phi-managed, so the group would never form.
+        // Graduate any bookmark-backed member into a plain tab first, matching
+        // the drag-into-group path.
+        graduateBookmarkBackedMembers(tabIds, state: state)
         let token = bridge.createGroupFromTabs(withWindowId: Int64(windowId),
                                                tabIds: tabIds,
                                                title: nil,
@@ -744,6 +765,9 @@ extension Tab: ContextMenuRepresentable {
         let state = MainBrowserWindowControllersManager.shared
             .getBrowserState(for: windowId)
         let tabIds = splitAwareGroupMemberIds(state: state)
+        // Graduate any bookmark-opened member into a plain tab first; Chromium's
+        // `addTabsToGroup` rejects the whole batch if any member is Phi-managed.
+        graduateBookmarkBackedMembers(tabIds, state: state)
         bridge.addTabsToGroup(withWindowId: Int64(windowId),
                               tabIds: tabIds,
                               tokenHex: token)

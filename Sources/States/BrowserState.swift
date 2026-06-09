@@ -3610,6 +3610,28 @@ class BrowserState {
         return true
     }
 
+    /// Graduates a bookmark-opened tab into a plain, groupable tab by shedding
+    /// its bookmark identity: clears the `Tab.guidInLocalDB` and the Chromium
+    /// `custom_value` (synchronously) and migrates any AI-chat association. The
+    /// bookmark itself stays in the bar — only the live tab's binding is
+    /// dropped. No-op for tabs not currently bound to a bookmark. Mirrors the
+    /// graduation `moveBookmarkIntoGroup` performs for the drag-into-group
+    /// path, so the right-click "New Tab Group" / "Add to Group" actions can
+    /// put a bookmark-opened tab into a group: Chromium's `createGroupFromTabs`
+    /// / `addTabsToGroup` reject any batch that still contains a Phi-managed
+    /// (non-empty `custom_value`) tab, and an ungraduated bookmark tab would be
+    /// silently dropped.
+    @MainActor
+    func graduateBookmarkTabToPlainTab(_ tab: Tab) {
+        guard let localGuid = tab.guidInLocalDB, !localGuid.isEmpty,
+              bookmarkManager.bookmark(withGuid: localGuid) != nil else {
+            return
+        }
+        migrateAIChatTab(for: tab, toNewIdentifier: nil)
+        tab.guidInLocalDB = nil
+        tab.webContentWrapper?.updateTabCustomValue("")
+    }
+
     /// Drops a split-view bookmark into a tab group. A live-bound split folds
     /// its two existing panes into the group as a unit; a closed bookmark
     /// re-opens both URLs as a fresh split that joins the group once Chromium
