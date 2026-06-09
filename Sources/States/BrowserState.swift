@@ -1723,6 +1723,22 @@ class BrowserState {
     
     func toggleTabPinStatus(_ tabId: Int, guidInDB: String?) {
         if let opennedTab = tabs.first(where: { $0.guid == tabId }) {
+            // A bookmark-backed tab is not pinned yet still carries a non-empty
+            // guidInLocalDB (the bookmark GUID). The branch below treats any
+            // non-empty guidInLocalDB as "already pinned" and would unpin it,
+            // which severs the bookmark binding and leaves the tab neither
+            // pinned nor bookmarked. Pin it like a normal tab instead: a fresh
+            // pinned-record GUID is minted and the live tab retargeted, while
+            // the original bookmark (a separate record keyed by its own GUID)
+            // is left in place.
+            if !opennedTab.isPinned,
+               let bookmarkGuid = opennedTab.guidInLocalDB, !bookmarkGuid.isEmpty,
+               bookmarkManager.bookmark(withGuid: bookmarkGuid) != nil {
+                moveNormalTab(tabId: opennedTab.guid, toPinnd: -1, selectAfterMove: opennedTab.isActive)
+                opennedTab.isPinned = true
+                updateNormalTabs()
+                return
+            }
             if opennedTab.isPinned || opennedTab.guidInLocalDB?.isEmpty == false {
                 // Migrate AI Chat tab association before changing identifier
                 // When unpinning, identifier changes from guidInLocalDB to chromium guid
