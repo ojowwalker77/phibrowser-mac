@@ -3808,6 +3808,9 @@ class BrowserState {
     /// Detaches any live Chromium tab still backed by a bookmark that is about
     /// to be deleted, so the tab survives as a plain normal tab. Without this
     /// the tab keeps a stale `guidInLocalDB`, which keeps it out of tab groups.
+    /// A split-view bookmark binds its live split via `splitBookmarkBindings`
+    /// instead; the binding is dropped so the split moves back into the
+    /// normal tab list rather than staying hidden behind a deleted cell.
     /// For a folder, all descendant bookmarks are processed.
     func detachOpenTabsForRemovedBookmark(_ bookmark: Bookmark) {
         var guids: [String] = []
@@ -3820,11 +3823,24 @@ class BrowserState {
         }
         collect(bookmark)
 
+        var unboundSplit = false
         for guid in guids {
+            if splitBookmarkBindings[guid] != nil {
+                splitBookmarkBindings.removeValue(forKey: guid)
+                syncSplitBookmarkOpenedState(bookmarkGuid: guid)
+                unboundSplit = true
+                continue
+            }
             guard let chromiumTab = tabs.first(where: { $0.guidInLocalDB == guid }) else { continue }
             migrateAIChatTab(for: chromiumTab, toNewIdentifier: nil)
             chromiumTab.guidInLocalDB = nil
             chromiumTab.webContentWrapper?.updateTabCustomValue("")
+        }
+        // The unbound panes were filtered out of the sidebar while bound;
+        // refilter so they reappear as a normal split pair (mirrors
+        // `handleSplitRemoved`).
+        if unboundSplit {
+            updateNormalTabs()
         }
     }
 
