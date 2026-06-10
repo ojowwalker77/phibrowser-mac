@@ -1157,6 +1157,9 @@
     "Something went wrong? " : {
       "comment" : "Retry hint prefix text shown when login fails in onboarding"
     },
+    "Split with Current" : {
+      "comment" : "Tab context menu - Pair this tab with the currently focused tab in a split"
+    },
     "Stop" : {
       "comment" : "Web content header - Accessibility description for stop loading button"
     },

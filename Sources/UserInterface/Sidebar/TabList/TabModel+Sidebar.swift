@@ -190,10 +190,26 @@ extension Tab: ContextMenuRepresentable {
                 // pinned partner to the normal list (leaving an unopened
                 // pinned placeholder behind) before creating the split, so
                 // splits never live inside the pinned strip.
-                let splitItem = NSMenuItem(
-                    title: NSLocalizedString("Open as Split", comment: "Tab context menu - Open a new tab as the second pane in a split with this tab"),
-                    action: #selector(openAsSplit),
-                    keyEquivalent: "")
+                //
+                // When another tab is focused (and isn't itself in a split),
+                // the action pairs this tab with the focused one instead of
+                // opening a blank new-tab pane — surfaced as "Split with
+                // Current". Right-clicking the focused tab itself keeps the
+                // blank-pane "Open as Split".
+                let splitItem: NSMenuItem
+                if let focused = state.focusingTab,
+                   focused.guid != guid,
+                   state.splitGroup(forTabId: focused.guid) == nil {
+                    splitItem = NSMenuItem(
+                        title: NSLocalizedString("Split with Current", comment: "Tab context menu - Pair this tab with the currently focused tab in a split"),
+                        action: #selector(splitWithCurrent),
+                        keyEquivalent: "")
+                } else {
+                    splitItem = NSMenuItem(
+                        title: NSLocalizedString("Open as Split", comment: "Tab context menu - Open a new tab as the second pane in a split with this tab"),
+                        action: #selector(openAsSplit),
+                        keyEquivalent: "")
+                }
                 splitItem.target = self
                 items.append(splitItem)
                 items.append(.separator())
@@ -841,6 +857,34 @@ extension Tab: ContextMenuRepresentable {
             }
         }
         state.openNewTabAsSplit(partnerTabId: guid)
+    }
+
+    /// "Split with Current": pairs this tab with the currently focused tab
+    /// as a vertical split — focused tab stays on the left, this tab takes
+    /// the right pane. Both members are normalized first so the split
+    /// doesn't inherit pinned-ness or a bookmark binding (mirrors the
+    /// drag-onto-page flows in `SplitTabDropContainer`).
+    @MainActor
+    @objc private func splitWithCurrent() {
+        guard let state = MainBrowserWindowControllersManager.shared.activeWindowController?.browserState,
+              let focusedId = state.focusingTab?.guid,
+              state.splitGroup(forTabId: focusedId) == nil else { return }
+        // Unopened pinned cell: `guid` is synthetic, so there is no live tab
+        // to pair. Open the pinned URL as a fresh pane next to the focused
+        // tab and leave the pinned record intact (mirrors
+        // `performSplitDropFromPinned`'s closed-pinned fallback).
+        if !isOpenned, let pinnedDBGuid = guidInLocalDB, !pinnedDBGuid.isEmpty {
+            let pinnedURLString = pinnedUrl ?? url ?? ""
+            guard !pinnedURLString.isEmpty else { return }
+            state.makeTabNormalOpened(tabId: focusedId)
+            state.openNewTabAsSplit(partnerTabId: focusedId,
+                                    partnerNavigateURL: URLProcessor.processUserInput(pinnedURLString))
+            return
+        }
+        guard guid != focusedId else { return }
+        state.makeTabNormalOpened(tabId: guid)
+        state.makeTabNormalOpened(tabId: focusedId)
+        state.createSplit(leftTabId: focusedId, rightTabId: guid, layout: .vertical)
     }
 
     @MainActor
