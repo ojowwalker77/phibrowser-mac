@@ -52,15 +52,16 @@ class PinnedExtensionItem: NSCollectionViewItem {
         model = nil
     }
 
-    /// `dynamicIcon` is the extension's current setIcon/declarative icon (looked
-    /// up by the data source); it overrides the model's static icon. The badge
-    /// is a self-observing SwiftUI overlay hosted over the icon, so badge changes
+    /// `icon` is the resolved display icon (dynamic setIcon/declarative override
+    /// plus disabled graying, see ExtensionManager.iconImage); the model's static
+    /// icon is the fallback when no manager was available. The badge is a
+    /// self-observing SwiftUI overlay hosted over the icon, so badge changes
     /// update without reloading the item.
     func configure(with model: PinnedTabItemModel,
-                   dynamicIcon: NSImage?,
+                   icon: NSImage?,
                    manager: ExtensionManager?) {
         self.model = model
-        iconImageView.image = dynamicIcon ?? model.icon ?? defaultIcon()
+        iconImageView.image = icon ?? model.icon ?? defaultIcon()
         view.toolTip = model.tooltip ?? model.title
         if let manager {
             installBadgeOverlay(manager: manager, extensionId: model.id)

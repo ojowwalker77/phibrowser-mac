@@ -313,11 +313,10 @@ private struct PinnedExtensionButton: View {
             EmptyView()
         } else {
             // Dynamic action icon (setIcon / declarative) overrides the static
-            // manifest icon when present.
-            let image = manager.dynamicIcons[ext.id]
-                ?? ext.icon
-                ?? NSImage(systemSymbolName: "puzzlepiece.extension", accessibilityDescription: nil)
-                ?? NSImage()
+            // manifest icon; a grayed action (disabled + no page interaction)
+            // comes back desaturated. Re-renders on any badges change via the
+            // observed manager.
+            let image = manager.iconImage(extensionId: ext.id, staticIcon: ext.icon)
 
             CircularIconButton(
                 image: image,
@@ -325,6 +324,17 @@ private struct PinnedExtensionButton: View {
                 action: {
                     let point = anchorView.flatMap(ExtensionPopupAnchor.pointBelowView)
                         ?? ExtensionPopupAnchor.mouseFallback()
+                    // A disabled action doesn't run; fall back to the context
+                    // menu like Chrome (ExecuteUserAction). Read live state —
+                    // the closure may outlive this render.
+                    if manager.badges[ext.id]?.enabled == false {
+                        ChromiumLauncher.sharedInstance().bridge?.triggerExtensionContextMenu(
+                            withId: ext.id,
+                            pointInScreen: point,
+                            windowId: windowId
+                        )
+                        return
+                    }
                     ChromiumLauncher.sharedInstance().bridge?.triggerExtension(
                         withId: ext.id,
                         pointInScreen: point,

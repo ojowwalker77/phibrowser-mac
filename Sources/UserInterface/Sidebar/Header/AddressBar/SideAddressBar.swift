@@ -195,12 +195,13 @@ class SideAddressBar: NSView {
             }
             .store(in: &cancellables)
 
-        // Rebuild only when the set of hidden (visible == false) extensions
-        // changes — a page action shown/hidden on the current tab — so the icon
-        // appears/disappears in step with the header. Gated on the id set so a
-        // rapid badge-text tick (e.g. a blocked-count) does NOT trigger a rebuild.
+        // Rebuild only when an extension's render state flips — a page action
+        // hidden/shown (icon appears/disappears in step with the header) or an
+        // action disabled/enabled (icon re-baked grayed out). Gated on the
+        // render-state set so a rapid badge-text tick (e.g. a blocked-count)
+        // does NOT trigger a rebuild.
         browserState.extensionManager.$badges
-            .map { badges in Set(badges.compactMap { $0.value.visible ? nil : $0.key }) }
+            .map(ExtensionManager.actionRenderStates)
             .removeDuplicates()
             .dropFirst()
             .receive(on: DispatchQueue.main)
@@ -328,6 +329,16 @@ class SideAddressBar: NSView {
         let point = ExtensionPopupAnchor.pointBelowView(sender)
             ?? ExtensionPopupAnchor.mouseFallback()
 
+        // A disabled action doesn't run; fall back to the context menu like
+        // Chrome (ExecuteUserAction).
+        if unsafeBrowserState?.extensionManager.badges[extensionId]?.enabled == false {
+            ChromiumLauncher.sharedInstance().bridge?.triggerExtensionContextMenu(
+                withId: extensionId,
+                pointInScreen: point,
+                windowId: unsafeBrowserState?.windowId.int64Value ?? 0
+            )
+            return
+        }
         ChromiumLauncher.sharedInstance().bridge?.triggerExtension(
             withId: extensionId,
             pointInScreen: point,

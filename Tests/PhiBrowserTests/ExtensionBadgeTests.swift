@@ -35,11 +35,22 @@ final class ExtensionBadgeTests: XCTestCase {
     // MARK: - ExtensionManager.badgeState(from:)
 
     func test_badgeState_fullyDefault_isRemoved() {
-        // Empty text, visible, enabled => no entry (nil).
+        // Empty text, visible, enabled, not grayed => no entry (nil).
         XCTAssertNil(ExtensionManager.badgeState(from: ["badgeText": ""]))
         XCTAssertNil(ExtensionManager.badgeState(from: [
-            "badgeText": "", "visible": true, "enabled": true,
+            "badgeText": "", "visible": true, "enabled": true, "grayscale": false,
         ]))
+    }
+
+    func test_badgeState_grayscaleWithEmptyText_isKept() {
+        // A grayed action (disabled + no page interaction) with no badge text
+        // must retain grayscale=true so the icon faces can gray it.
+        let state = ExtensionManager.badgeState(from: [
+            "badgeText": "", "visible": true, "enabled": false, "grayscale": true,
+        ])
+        XCTAssertNotNil(state)
+        XCTAssertEqual(state?.grayscale, true)
+        XCTAssertEqual(state?.enabled, false)
     }
 
     func test_badgeState_nonEmptyText_isKept() {
@@ -78,5 +89,64 @@ final class ExtensionBadgeTests: XCTestCase {
         let state = ExtensionManager.badgeState(from: ["badgeText": "5"])
         XCTAssertEqual(state?.visible, true)
         XCTAssertEqual(state?.enabled, true)
+        XCTAssertEqual(state?.grayscale, false)
+    }
+
+    // MARK: - ExtensionManager.actionRenderStates(_:)
+
+    func test_actionRenderStates_ignoresDefaultRenderAndBadgeText() {
+        // Badge-text ticks and click-only state (enabled) render default —
+        // they must not gate a rebuild.
+        let badges: [String: ExtensionManager.BadgeState] = [
+            "a": .init(text: "12", backgroundColor: .red, textColor: .white,
+                       visible: true, enabled: true, grayscale: false),
+            "b": .init(text: "", backgroundColor: .clear, textColor: .clear,
+                       visible: true, enabled: false, grayscale: false),
+        ]
+        XCTAssertTrue(ExtensionManager.actionRenderStates(badges).isEmpty)
+    }
+
+    func test_actionRenderStates_distinguishesHiddenFromGrayed() {
+        func gate(visible: Bool, grayscale: Bool) -> Set<ExtensionManager.ActionRenderState> {
+            ExtensionManager.actionRenderStates([
+                "a": .init(text: "", backgroundColor: .clear, textColor: .clear,
+                           visible: visible, enabled: false, grayscale: grayscale),
+            ])
+        }
+        let hidden = gate(visible: false, grayscale: false)
+        let grayed = gate(visible: true, grayscale: true)
+        XCTAssertEqual(hidden.count, 1)
+        XCTAssertEqual(grayed.count, 1)
+        // A hidden↔grayed transition must change the gate value so the icon
+        // faces rebuild (the grayed icon is baked at rebuild time).
+        XCTAssertNotEqual(hidden, grayed)
+    }
+
+    // MARK: - NSImage.disabledActionVariant
+
+    func test_disabledActionVariant_desaturatesAndLightens() {
+        let red = NSImage(size: NSSize(width: 8, height: 8), flipped: false) { rect in
+            NSColor.red.setFill()
+            rect.fill()
+            return true
+        }
+        let variant = red.disabledActionVariant
+        XCTAssertEqual(variant.size, red.size)
+        guard let cg = variant.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
+            return XCTFail("variant not drawable")
+        }
+        let rep = NSBitmapImageRep(cgImage: cg)
+        guard let pixel = rep.colorAt(x: rep.pixelsWide / 2, y: rep.pixelsHigh / 2)?
+            .usingColorSpace(.sRGB) else {
+            return XCTFail("center pixel unreadable")
+        }
+        // Desaturated: channels converge. Lightened ~20% toward white
+        // (Chrome's HSL {-1, 0, 0.6}): red's luma ≈ 0.21 → ≈ 0.37. Alpha is
+        // untouched (Chrome does not dim disabled icons).
+        XCTAssertEqual(pixel.redComponent, pixel.greenComponent, accuracy: 0.06)
+        XCTAssertEqual(pixel.greenComponent, pixel.blueComponent, accuracy: 0.06)
+        XCTAssertGreaterThan(pixel.redComponent, 0.2)
+        XCTAssertLessThan(pixel.redComponent, 0.55)
+        XCTAssertGreaterThan(pixel.alphaComponent, 0.9)
     }
 }

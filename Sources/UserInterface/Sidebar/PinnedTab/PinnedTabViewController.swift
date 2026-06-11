@@ -41,13 +41,14 @@ class PinnedTabViewController: NSViewController {
                 guard let pinnedItem = collectionView.makeItem(withIdentifier: PinnedExtensionItem.reuseIdentifier, for: indexPath) as? PinnedExtensionItem else {
                     return NSCollectionViewItem()
                 }
-                // Dynamic icon looked up by id (overrides the model's static
-                // icon). The badge is a self-observing overlay in the cell, so it
+                // Resolved icon (dynamic override + disabled graying) looked up
+                // by id. The badge is a self-observing overlay in the cell, so it
                 // updates without reloading; reloadItems is only needed for icon
-                // changes (see the $dynamicIcons subscription).
+                // changes (see the $dynamicIcons and render-state subscriptions).
                 let manager = browserState?.extensionManager
                 pinnedItem.configure(with: model,
-                                     dynamicIcon: manager?.dynamicIcons[model.id],
+                                     icon: manager?.iconImage(extensionId: model.id,
+                                                              staticIcon: model.icon),
                                      manager: manager)
                 pinnedItem.itemClicked = { [weak self] model, view in
                     self?.handleExtensionClicked(model, anchor: view)
@@ -373,19 +374,22 @@ class PinnedTabViewController: NSViewController {
             }
             .store(in: &cancellables)
 
-        // Re-apply the snapshot when the set of hidden (visible == false)
-        // extensions changes — a page action shown/hidden on the current tab —
-        // so the cell appears/disappears in step with the header. Gated on the
-        // id set so a rapid badge-text tick (e.g. a blocked-count) does NOT
+        // React when an extension's render state flips. A page action hidden/
+        // shown changes the displayed set (snapshot re-apply); an action
+        // disabled/enabled keeps the set identical — the id-only model equality
+        // means the snapshot won't reconfigure cells — so also reload the
+        // extension items to re-bake the (grayed) icon. Gated on the render-
+        // state set so a rapid badge-text tick (e.g. a blocked-count) does NOT
         // rebuild (that would be the deferred rebuild-all churn).
         browserState.extensionManager.$badges
-            .map { badges in Set(badges.compactMap { $0.value.visible ? nil : $0.key }) }
+            .map(ExtensionManager.actionRenderStates)
             .removeDuplicates()
             .dropFirst()
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
                 guard let self else { return }
                 self.handlePinnedExtensionsUpdate(self.currentPinnedExtensionsForDisplay())
+                self.reloadExtensionItems()
             }
             .store(in: &cancellables)
 
@@ -717,6 +721,12 @@ class PinnedTabViewController: NSViewController {
     }
 
     private func handleExtensionClicked(_ item: PinnedTabItemModel, anchor view: NSView) {
+        // A disabled action doesn't run; fall back to the context menu like
+        // Chrome (ExecuteUserAction).
+        if browserState?.extensionManager.badges[item.id]?.enabled == false {
+            handleExtensionSecondaryClicked(item)
+            return
+        }
         let point = ExtensionPopupAnchor.pointBelowView(view)
             ?? ExtensionPopupAnchor.mouseFallback()
         let windowId = MainBrowserWindowControllersManager.shared.activeWindowController?.browserState.windowId

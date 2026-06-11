@@ -6,6 +6,7 @@
 import Foundation
 import Combine
 import AppKit
+import CoreImage
 
 class ExtensionManager: ObservableObject {
     struct BadgeState: Equatable {
@@ -14,6 +15,7 @@ class ExtensionManager: ObservableObject {
         var textColor: NSColor
         var visible: Bool
         var enabled: Bool
+        var grayscale: Bool
     }
 
     @Published var extensions: [Extension] = []
@@ -92,16 +94,17 @@ class ExtensionManager: ObservableObject {
     }
 
     /// Parses a badge-info dictionary into a `BadgeState`, or `nil` when the
-    /// action is fully default (no badge text, visible, enabled) and the entry
-    /// should be removed. A hidden page action or a disabled action commonly has
-    /// empty badge text, so removal keys on text *and* visible *and* enabled —
-    /// otherwise the renderer would lose the state it needs to hide / grayscale.
-    /// Pure; exposed for unit testing.
+    /// action is fully default (no badge text, visible, enabled, not grayed)
+    /// and the entry should be removed. A hidden page action or a disabled
+    /// action commonly has empty badge text, so removal keys on text *and* the
+    /// state flags — otherwise the renderer would lose the state it needs to
+    /// hide / gray / downgrade clicks. Pure; exposed for unit testing.
     static func badgeState(from info: [AnyHashable: Any]) -> BadgeState? {
         let text = info["badgeText"] as? String ?? ""
         let visible = info["visible"] as? Bool ?? true
         let enabled = info["enabled"] as? Bool ?? true
-        if text.isEmpty && visible && enabled {
+        let grayscale = info["grayscale"] as? Bool ?? false
+        if text.isEmpty && visible && enabled && !grayscale {
             return nil
         }
         return BadgeState(
@@ -109,7 +112,29 @@ class ExtensionManager: ObservableObject {
             backgroundColor: NSColor.fromRGBAString(info["backgroundColor"] as? String ?? ""),
             textColor: NSColor.fromRGBAString(info["textColor"] as? String ?? ""),
             visible: visible,
-            enabled: enabled)
+            enabled: enabled,
+            grayscale: grayscale)
+    }
+
+    /// Gate value for the icon faces' rebuild subscriptions: the ids whose
+    /// action *renders* non-default, with the (visible, grayscale) pair baked
+    /// in so a hidden↔grayed transition also changes the set, while a
+    /// badge-text tick (e.g. a blocked-count) does not. `enabled` is excluded:
+    /// it only affects click handling, which reads the live badge state.
+    struct ActionRenderState: Hashable {
+        let id: String
+        let visible: Bool
+        let grayscale: Bool
+    }
+
+    static func actionRenderStates(
+        _ badges: [String: BadgeState]
+    ) -> Set<ActionRenderState> {
+        Set(badges.compactMap { id, state in
+            (state.visible && !state.grayscale)
+                ? nil
+                : ActionRenderState(id: id, visible: state.visible, grayscale: state.grayscale)
+        })
     }
 
     func handleIconInfo(_ info: [AnyHashable: Any]) {
@@ -180,14 +205,45 @@ extension NSColor {
 extension ExtensionManager {
     /// The icon to display for `extensionId`: the dynamic action icon (setIcon /
     /// declarative) if set, else the static manifest icon, else a puzzlepiece
-    /// fallback. The badge is NOT composited here — it is drawn as an overlay
-    /// (`extensionBadgeOverlay` in SwiftUI, `BadgeCornerOverlay` hosted on AppKit
-    /// surfaces) anchored to the icon's bottom-right corner.
+    /// fallback. A grayed action (disabled with no page interaction, see the
+    /// bridge contract) renders desaturated + lightened, mirroring Chrome's
+    /// toolbar; a hidden page action is instead removed by the faces' layout
+    /// filters. The badge is NOT composited here — it is drawn as an overlay
+    /// (`extensionBadgeOverlay` in SwiftUI, `BadgeCornerOverlay` hosted on
+    /// AppKit surfaces) anchored to the icon's bottom-right corner.
     func iconImage(extensionId: String, staticIcon: NSImage?) -> NSImage {
-        dynamicIcons[extensionId]
+        let icon = dynamicIcons[extensionId]
             ?? staticIcon
             ?? NSImage(systemSymbolName: "puzzlepiece.extension", accessibilityDescription: nil)
             ?? NSImage()
+        return badges[extensionId]?.grayscale == true ? icon.disabledActionVariant : icon
+    }
+}
+
+extension NSImage {
+    /// Grayed variant used for a disabled extension action icon. Matches
+    /// Chrome's IconWithBadgeImageSource grayscale: HSL shift {-1, 0, 0.6} =
+    /// full desaturation + lightness 0.6, i.e. each channel blended 20% toward
+    /// white (out = 0.8·in + 0.2), with alpha untouched. Falls back to the
+    /// original image if the bitmap can't be filtered.
+    var disabledActionVariant: NSImage {
+        guard let tiff = tiffRepresentation,
+              let ciImage = CIImage(data: tiff),
+              let filter = CIFilter(name: "CIColorControls") else { return self }
+        filter.setValue(ciImage, forKey: kCIInputImageKey)
+        filter.setValue(0.0, forKey: kCIInputSaturationKey)
+        guard let output = filter.outputImage else { return self }
+        let grayscale = NSImage(size: size)
+        grayscale.addRepresentation(NSCIImageRep(ciImage: output))
+        // Resolution-independent wrapper: draws lazily at the destination's
+        // backing scale, so the 2x detail survives the point-size `size`.
+        // sourceAtop confines the white lightening to the icon's own alpha.
+        return NSImage(size: size, flipped: false) { rect in
+            grayscale.draw(in: rect)
+            NSColor(white: 1.0, alpha: 0.2).setFill()
+            rect.fill(using: .sourceAtop)
+            return true
+        }
     }
 }
 

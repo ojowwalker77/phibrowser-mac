@@ -230,6 +230,12 @@ struct ExtensionList<Manager: ExtensionManagerProtocol>: View {
     }
 
     private func triggerExtension(_ ext: Extension, anchor: NSView) {
+        // A disabled action doesn't run; fall back to the context menu like
+        // Chrome (ExecuteUserAction).
+        if extensionManager.badges[ext.id]?.enabled == false {
+            triggerExtensionContextMenu(ext)
+            return
+        }
         // Dismiss the SwiftUI popover BEFORE triggering the Chromium popup so
         // the popover's fade-out animation runs in parallel with the popup's
         // appearance instead of overlapping it visually.
@@ -340,9 +346,12 @@ struct ExtensionGridItem: View {
                     .fill(isHovered ? Color(.sidebarTabHoveredColorEmphasized) : Color(.sidebarTabHovered))
 
                 // Extension icon (dynamic setIcon icon overrides the static one).
-                // Badge anchors to the icon's bottom-right corner.
+                // Badge anchors to the icon's bottom-right corner. A grayed
+                // action uses the same desaturate+lighten treatment as the
+                // toolbar faces.
+                let isGrayed = badge?.grayscale == true
                 if let icon = dynamicIcon ?? ext.icon {
-                    Image(nsImage: icon)
+                    Image(nsImage: isGrayed ? icon.disabledActionVariant : icon)
                         .resizable()
                         .frame(width: iconSize, height: iconSize)
                         .extensionBadgeOverlay(badge)
@@ -351,6 +360,7 @@ struct ExtensionGridItem: View {
                         .resizable()
                         .frame(width: iconSize, height: iconSize)
                         .foregroundColor(.secondary)
+                        .opacity(isGrayed ? 0.5 : 1)
                         .extensionBadgeOverlay(badge)
                 }
             }
