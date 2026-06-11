@@ -82,6 +82,70 @@ final class TabItemViewSplitLayoutTests: XCTestCase {
             "At the active-split width floor the cell must keep the per-pane layout (divider visible).")
     }
 
+    /// Guards the mute-wins rule against over-triggering: with no audio on
+    /// either pane, a hovered merged cell keeps both per-pane close buttons.
+    func test_hoveredMergedSplitCellShowsPerPaneCloseButtons() {
+        let partner = Tab(guid: 2, url: "https://partner.example", isActive: false, index: 1)
+        let view = makeMergedSplitView(width: 140, partner: partner)
+        view.mouseEntered(with: makeHoverEvent())
+
+        let frames = visibleFrames(of: view)
+        let closeSize = TabStripMetrics.Content.closeButtonSize
+        // half = 70 → left close x = 70 - 4 - 24 = 42; right x = 140 - 28 = 112.
+        XCTAssertTrue(frames.contains(CGRect(x: 42, y: 4, width: closeSize.width, height: closeSize.height)),
+            "Hovering a merged cell with no audio must show the left pane close button.")
+        XCTAssertTrue(frames.contains(CGRect(x: 112, y: 4, width: closeSize.width, height: closeSize.height)),
+            "Hovering a merged cell with no audio must show the right pane close button.")
+    }
+
+    func test_compactMergedSplitCellExposesPerPaneToolTips() {
+        let primary = Tab(guid: 1, url: "https://a.example", isActive: false, index: 0, title: "Alpha")
+        let partner = Tab(guid: 2, url: "https://b.example", isActive: false, index: 1, title: "Beta")
+        let view = TabItemView()
+        view.configure(with: TabRenderData(
+            id: "tab-1",
+            title: "Alpha",
+            url: "https://a.example",
+            isActive: false,
+            isPinned: false,
+            isSplitGroupActive: false,
+            pinnedSplitPartner: partner,
+            sourceTab: primary
+        ))
+        view.frame = CGRect(x: 0, y: 0, width: 100, height: TabStripMetrics.Strip.tabHeight)
+        view.layout()
+
+        XCTAssertEqual(view.paneToolTipTags.count, 2,
+            "A compact merged cell must cover each half with its own tooltip rect.")
+        XCTAssertEqual(
+            view.view(view, stringForToolTip: view.paneToolTipTags[0], point: NSPoint(x: 20, y: 16), userData: nil),
+            "Alpha")
+        XCTAssertEqual(
+            view.view(view, stringForToolTip: view.paneToolTipTags[1], point: NSPoint(x: 80, y: 16), userData: nil),
+            "Beta")
+
+        // Growing past the split threshold returns tooltip duty to the
+        // per-pane title views.
+        view.frame = CGRect(x: 0, y: 0, width: 140, height: TabStripMetrics.Strip.tabHeight)
+        view.layout()
+        XCTAssertTrue(view.paneToolTipTags.isEmpty,
+            "A merged cell in per-pane mode must drop the half tooltip rects.")
+    }
+
+    private func makeHoverEvent() -> NSEvent {
+        NSEvent.enterExitEvent(
+            with: .mouseEntered,
+            location: .zero,
+            modifierFlags: [],
+            timestamp: 0,
+            windowNumber: 0,
+            context: nil,
+            eventNumber: 0,
+            trackingNumber: 0,
+            userData: nil
+        )!
+    }
+
     func test_singleTabKeepsSingleTabCompactThreshold() {
         let view = TabItemView()
         view.configure(with: TabRenderData(

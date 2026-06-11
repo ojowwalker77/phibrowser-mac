@@ -68,7 +68,8 @@ enum TabStripMetrics {
             DefaultColors.separator.color(for: appearance)
         }
 
-        // FaviconLeading 6 + FaviconSize 16 + titleToCloseButton 14 + CloseButtonSize 24 + CloseButtonTrailing 4
+        // FaviconLeading 6 + FaviconSize 16 + titleToCloseButton 6
+        // + CloseButtonSize 24 + CloseButtonTrailing 4 = 56, with 8pt slack.
         static let compactModeThreshold: CGFloat = 64
         // Split-merged cells lay that same content out once per pane, so the
         // compact cutoff doubles: below this, the per-pane hover close

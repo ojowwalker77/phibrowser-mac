@@ -451,20 +451,31 @@ final class TabItemView: NSView {
             if pinnedSplitPartner != nil {
                 let half = bounds.width / 2
                 let closeY = (bounds.height - metrics.closeButtonSize.height) / 2
-                closeButtonHostingView.isHidden = !shouldShowCloseButton
-                closeButtonHostingView.frame = CGRect(
+                let leftCloseFrame = CGRect(
                     x: half - metrics.closeButtonTrailing - metrics.closeButtonSize.width,
                     y: closeY,
                     width: metrics.closeButtonSize.width,
                     height: metrics.closeButtonSize.height
                 )
-                secondaryCloseButtonHostingView.isHidden = !shouldShowCloseButton
-                secondaryCloseButtonHostingView.frame = CGRect(
+                let rightCloseFrame = CGRect(
                     x: bounds.width - metrics.closeButtonTrailing - metrics.closeButtonSize.width,
                     y: closeY,
                     width: metrics.closeButtonSize.width,
                     height: metrics.closeButtonSize.height
                 )
+                // A pane too narrow for both controls drops its close
+                // button in favor of the mute toggle — stacked on top of
+                // the speaker glyph, a "mute" click would close the pane.
+                let showLeftClose = shouldShowCloseButton
+                    && (muteButtonHostingView.isHidden
+                        || leftCloseFrame.minX >= muteButtonHostingView.frame.maxX)
+                let showRightClose = shouldShowCloseButton
+                    && (secondaryMuteButtonHostingView.isHidden
+                        || rightCloseFrame.minX >= secondaryMuteButtonHostingView.frame.maxX)
+                closeButtonHostingView.isHidden = !showLeftClose
+                closeButtonHostingView.frame = leftCloseFrame
+                secondaryCloseButtonHostingView.isHidden = !showRightClose
+                secondaryCloseButtonHostingView.frame = rightCloseFrame
 
                 // Titles: each pane's title is clipped against its own
                 // close button when hovered. When a pane carries a mute
@@ -473,8 +484,8 @@ final class TabItemView: NSView {
                 let leftTitleStart: CGFloat = muteButtonHostingView.isHidden
                     ? faviconHostingView.frame.maxX + metrics.titleToFavicon
                     : muteButtonHostingView.frame.maxX + metrics.titleToFavicon
-                let leftTitleMax: CGFloat = shouldShowCloseButton
-                    ? closeButtonHostingView.frame.minX - metrics.titleToCloseButton
+                let leftTitleMax: CGFloat = showLeftClose
+                    ? leftCloseFrame.minX - metrics.titleToCloseButton
                     : half - metrics.titleTrailing
                 titleHostingView.isHidden = false
                 titleHostingView.frame = CGRect(
@@ -486,8 +497,8 @@ final class TabItemView: NSView {
                 let rightTitleStart: CGFloat = secondaryMuteButtonHostingView.isHidden
                     ? secondaryFaviconHostingView.frame.maxX + metrics.titleToFavicon
                     : secondaryMuteButtonHostingView.frame.maxX + metrics.titleToFavicon
-                let rightTitleMax: CGFloat = shouldShowCloseButton
-                    ? secondaryCloseButtonHostingView.frame.minX - metrics.titleToCloseButton
+                let rightTitleMax: CGFloat = showRightClose
+                    ? rightCloseFrame.minX - metrics.titleToCloseButton
                     : bounds.width - metrics.titleTrailing
                 secondaryTitleHostingView.isHidden = false
                 secondaryTitleHostingView.frame = CGRect(
@@ -518,6 +529,8 @@ final class TabItemView: NSView {
                 )
             }
         }
+
+        updatePaneToolTips(mode: mode)
     }
 
     private func hideContentForEmptyBounds() {
@@ -536,6 +549,7 @@ final class TabItemView: NSView {
             view.isHidden = true
             view.frame = .zero
         }
+        removePaneToolTips()
     }
 
     // MARK: - Appearance
@@ -706,6 +720,40 @@ final class TabItemView: NSView {
         }
         toolTip = nil
         secondaryTitleHostingView.toolTip = secondaryFaviconViewModel.displayTitle
+    }
+
+    // MARK: - Pane ToolTips
+
+    /// Tags for the merged cell's per-half tooltip rects. Installed in
+    /// compact/pinned modes, where the per-pane title views that normally
+    /// carry the pane tooltips are hidden.
+    private(set) var paneToolTipTags: [NSView.ToolTipTag] = []
+
+    private func removePaneToolTips() {
+        for tag in paneToolTipTags { removeToolTip(tag) }
+        paneToolTipTags.removeAll()
+    }
+
+    private func updatePaneToolTips(mode: LayoutMode) {
+        removePaneToolTips()
+        guard pinnedSplitPartner != nil, mode != .normal else { return }
+        let leftHalf = CGRect(x: 0, y: 0, width: bounds.width / 2, height: bounds.height)
+        let rightHalf = CGRect(x: leftHalf.maxX, y: 0,
+                               width: bounds.width - leftHalf.width, height: bounds.height)
+        paneToolTipTags = [
+            addToolTip(leftHalf, owner: self, userData: nil),
+            addToolTip(rightHalf, owner: self, userData: nil),
+        ]
+    }
+
+    /// `NSViewToolTipOwner` — resolves each half of a merged compact cell
+    /// to its own pane's title at hover time, so the strings stay current
+    /// without re-installing the rects on every title change.
+    @objc func view(_ view: NSView, stringForToolTip tag: NSView.ToolTipTag,
+                    point: NSPoint, userData data: UnsafeMutableRawPointer?) -> String {
+        point.x > bounds.midX
+            ? secondaryFaviconViewModel.displayTitle
+            : viewModel.displayTitle
     }
 
     func setDragHighlighted(_ highlighted: Bool) {
