@@ -25,6 +25,11 @@ enum TabStripMetrics {
         static let idealWidth: CGFloat = 180
         static let minWidth: CGFloat = 36
         static let activeMinWidth: CGFloat = 100
+        // Protected width when the active cell is a split-merged pair: it
+        // must clear `Content.splitCompactModeThreshold`, otherwise the
+        // focused split would degrade to the two-favicon compact rendering
+        // and lose its per-pane close buttons.
+        static let activeSplitMinWidth: CGFloat = Content.splitCompactModeThreshold
         static let cornerRadius: CGFloat = 8
         static let inverseCornerRadius: CGFloat = cornerRadius
     }
@@ -65,6 +70,10 @@ enum TabStripMetrics {
 
         // FaviconLeading 6 + FaviconSize 16 + titleToCloseButton 14 + CloseButtonSize 24 + CloseButtonTrailing 4
         static let compactModeThreshold: CGFloat = 64
+        // Split-merged cells lay that same content out once per pane, so the
+        // compact cutoff doubles: below this, the per-pane hover close
+        // buttons (at halfWidth - 28) would overlap the pane favicons.
+        static let splitCompactModeThreshold: CGFloat = compactModeThreshold * 2
     }
 
     enum NewTabButton {

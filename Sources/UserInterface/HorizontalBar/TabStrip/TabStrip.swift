@@ -1641,6 +1641,13 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
         }
 
         let activeIndex = tabs.firstIndex { isTabActive($0, activeTab: activeTab) }
+        // A merged split cell hosts two panes, so when it is the active
+        // cell its protected width must clear the split compact cutoff —
+        // at the single-tab minimum it would fall back to the two-favicon
+        // compact rendering and lose the per-pane close buttons.
+        let activeTabWidth = (activeIndex.map { wideIndices.contains($0) } ?? false)
+            ? TabStripMetrics.Tab.activeSplitMinWidth
+            : TabStripMetrics.Tab.activeMinWidth
         let runs = currentGroupRuns()
         // `gapBeforeRunStartChip` is a per-layout hint the engine
         // uses ONLY when the gap actually lands at a run's
@@ -1667,7 +1674,7 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
             spacing: TabStripMetrics.Tab.spacing,
             idealTabWidth: TabStripMetrics.Tab.idealWidth,
             minTabWidth: TabStripMetrics.Tab.minWidth,
-            activeTabWidth: TabStripMetrics.Tab.activeMinWidth,
+            activeTabWidth: activeTabWidth,
             tabHeight: TabStripMetrics.Strip.tabHeight,
             excludedTabIndex: excludedIndex,
             excludedGroupRange: isPinned ? nil : excludedGroupRange,
@@ -1827,12 +1834,14 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
                     // Mirror `performLayout`'s split-secondary exclusion so
                     // the recomputed separator positions match the frames
                     // actually on screen.
+                    let splitCollapse = self.normalSplitCollapseInfo()
                     let output = self.calculateLayout(
                         containerWidth: self.normalContainer.bounds.width,
                         tabs: self.browserState.normalTabs,
                         activeTab: self.visibleActiveTabForChrome(),
                         isPinned: false,
-                        excludedIndices: self.normalSplitCollapseInfo().collapsedIndices
+                        excludedIndices: splitCollapse.collapsedIndices,
+                        wideIndices: splitCollapse.wideIndices
                     )
                     // Re-render separators because hover state affects visibility.
                     self.updateSeparators(
@@ -2037,12 +2046,14 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
                     // (in `chipRightSeparatorViews`) react to the change.
                     // Mirror `performLayout`'s split-secondary exclusion so
                     // the recomputed positions match the on-screen frames.
+                    let splitCollapse = self.normalSplitCollapseInfo()
                     let output = self.calculateLayout(
                         containerWidth: self.normalContainer.bounds.width,
                         tabs: self.browserState.normalTabs,
                         activeTab: self.visibleActiveTabForChrome(),
                         isPinned: false,
-                        excludedIndices: self.normalSplitCollapseInfo().collapsedIndices
+                        excludedIndices: splitCollapse.collapsedIndices,
+                        wideIndices: splitCollapse.wideIndices
                     )
                     self.updateSeparators(
                         in: self.normalContainer,

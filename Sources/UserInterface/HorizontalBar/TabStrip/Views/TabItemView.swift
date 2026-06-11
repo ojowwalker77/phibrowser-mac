@@ -188,7 +188,10 @@ final class TabItemView: NSView {
 
     private var layoutMode: LayoutMode {
         if isPinned { return .pinned }
-        if bounds.width < TabStripMetrics.Content.compactModeThreshold { return .compact }
+        let compactThreshold = pinnedSplitPartner == nil
+            ? TabStripMetrics.Content.compactModeThreshold
+            : TabStripMetrics.Content.splitCompactModeThreshold
+        if bounds.width < compactThreshold { return .compact }
         return .normal
     }
 
