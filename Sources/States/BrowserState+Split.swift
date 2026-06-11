@@ -1137,17 +1137,18 @@ extension BrowserState {
         return true
     }
 
-    /// Opens a fresh new-tab-page tab and, once Chromium echoes it back,
-    /// pairs it with `partnerTabId` into a vertical split.
+    /// Opens a fresh tab (on `partnerNavigateURL` when given, else a
+    /// new-tab page) and, once Chromium echoes it back, pairs it with
+    /// `partnerTabId` into a vertical split.
     /// - Parameters:
     ///   - newTabSlot: Where the new tab should end up. Defaults to `.right`
     ///     (right-click "Open as Split" — right-clicked tab stays on the
     ///     left, new tab opens on the right). Pass `.left` to drop the new
     ///     tab on the left and leave the partner on the right.
-    ///   - partnerNavigateURL: When non-nil, the new pane is navigated to
-    ///     this URL after the customGuid marker is cleared. Used by the
-    ///     split-bookmark open path so the second pane lands on its saved
-    ///     URL instead of remaining a new-tab page.
+    ///   - partnerNavigateURL: When non-nil, the new pane is created directly
+    ///     on this URL instead of landing on a new-tab page first, so the
+    ///     NTP never flashes before the real page. Used by the
+    ///     open-link-as-split and split-bookmark paths.
     ///   - boundBookmarkGuid: When non-nil, the resulting split's id is
     ///     registered in `splitBookmarkBindings` under this bookmark guid so
     ///     a subsequent click on the bookmark activates the existing split.
@@ -1167,7 +1168,6 @@ extension BrowserState {
         pendingSplitPartnerByCustomGuid[pendingGuid] = PendingSplitPartner(
             partnerTabId: partnerTabId,
             newTabSlot: newTabSlot,
-            navigateURL: partnerNavigateURL,
             boundBookmarkGuid: boundBookmarkGuid,
             insertionIndex: insertionIndex
         )
@@ -1182,7 +1182,16 @@ extension BrowserState {
         ChromiumLauncher.sharedInstance().bridge?
             .markPendingSplitPartner(withTabId: partnerTabId.int64Value,
                                      windowId: windowId.int64Value)
-        createTab("chrome://newtab", customGuid: pendingGuid, focusAfterCreate: true)
+        // Create the pane directly on the target URL when one was supplied —
+        // parking it on NTP and navigating after the echo flashes the
+        // new-tab page first. The initial load of a fresh tab cannot trip
+        // CrossDomainNewTabNavigationThrottle even though the customGuid
+        // marker is still set: a brand-new WebContents has no committed URL
+        // and the load has no initiator origin, so the throttle's source-URL
+        // check never passes.
+        let createURL =
+            (partnerNavigateURL?.isEmpty == false) ? partnerNavigateURL! : "chrome://newtab"
+        createTab(createURL, customGuid: pendingGuid, focusAfterCreate: true)
         // Timeout cleanup: if the new tab never arrives (Chromium failure,
         // partner closed mid-flight, etc.), drop the pending record and clear
         // the visibility-skip mark so the partner can hide normally again.
@@ -1242,12 +1251,6 @@ extension BrowserState {
             ChromiumLauncher.sharedInstance().bridge?
                 .clearPendingSplitPartner(withTabId: pending.partnerTabId.int64Value,
                                           windowId: self.windowId.int64Value)
-        }
-        // For split-bookmark opens the new pane needs to land on the saved
-        // secondary URL rather than staying on NTP. The throttle-avoidance
-        // marker is already cleared above, so the navigation is safe here.
-        if let navigateURL = pending.navigateURL, !navigateURL.isEmpty {
-            tab.webContentWrapper?.navigate(toURL: navigateURL)
         }
         guard pending.partnerTabId != tab.guid,
               splitGroup(forTabId: pending.partnerTabId) == nil else {
@@ -1353,24 +1356,23 @@ extension BrowserState {
         return tabs.first(where: { $0.guid == evictedTabId })?.isNTP != true
     }
 
-    /// Opens a fresh tab and, once Chromium echoes it back, swaps it into the
-    /// given split slot via `swapTabInSplit(..., swap: true)` so the evicted
-    /// pane lands right next to the split. Used by the drag-onto-split-pane
-    /// flow for the bookmark and closed-pinned sources, which have no live
-    /// tab id to swap directly. The tab is opened as NTP with a throttle-
-    /// avoidance marker (same trick as `openNewTabAsSplit`); `url` is loaded
-    /// once the marker is cleared in `consumePendingSplitSlotSwap`.
+    /// Opens a fresh tab directly on `url` and, once Chromium echoes it back,
+    /// swaps it into the given split slot via `swapTabInSplit(..., swap: true)`
+    /// so the evicted pane lands right next to the split. Used by the
+    /// drag-onto-split-pane flow for the bookmark and closed-pinned sources,
+    /// which have no live tab id to swap directly. Creating the tab on `url`
+    /// (instead of NTP plus a deferred navigate) is throttle-safe — see the
+    /// initial-load note in `openNewTabAsSplit`.
     func openTabAsPaneReplacement(splitId: String, slotIndex: Int, url: String) {
         guard splitGroup(forId: splitId) != nil, !url.isEmpty else { return }
         let pendingGuid = SplitPendingGuid.swapSlot.mint()
         pendingSplitSlotSwapByCustomGuid[pendingGuid] = PendingSplitSlotSwap(
             splitId: splitId,
-            slotIndex: slotIndex,
-            navigateURL: url
+            slotIndex: slotIndex
         )
-        // Open in the background: focusing the NTP would flash it full-screen
-        // over the split before the swap pulls it into the pane.
-        createTab("chrome://newtab", customGuid: pendingGuid, focusAfterCreate: false)
+        // Open in the background: focusing the new tab would flash it
+        // full-screen over the split before the swap pulls it into the pane.
+        createTab(url, customGuid: pendingGuid, focusAfterCreate: false)
         // Timeout cleanup: if the new tab never arrives, drop the pending
         // record so it can't fire a stale swap later.
         DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
@@ -1383,8 +1385,8 @@ extension BrowserState {
     }
 
     /// Called from `handleNewTabFromChromium`. If the arriving tab matches a
-    /// pending pane-replacement request keyed by its customGuid, navigate it
-    /// to the saved URL and swap it into the recorded split slot now.
+    /// pending pane-replacement request keyed by its customGuid, swap it
+    /// into the recorded split slot now.
     func consumePendingSplitSlotSwap(for tab: Tab) {
         guard let customGuid = tab.guidInLocalDB,
               SplitPendingGuid.swapSlot.matches(customGuid) else {
@@ -1400,9 +1402,6 @@ extension BrowserState {
         tab.webContentWrapper?.updateTabCustomValue("")
         guard let pending = pendingSplitSlotSwapByCustomGuid.removeValue(forKey: customGuid) else {
             return
-        }
-        if let navigateURL = pending.navigateURL, !navigateURL.isEmpty {
-            tab.webContentWrapper?.navigate(toURL: navigateURL)
         }
         // The split may have been dismantled between the open and the echo
         // (pane closed, window torn off). Re-validate before swapping.
@@ -1425,14 +1424,12 @@ extension BrowserState {
     /// Used by the bookmark "Open as Split" menu.
     func openURLAsSplit(url: String) {
         let pendingGuid = SplitPendingGuid.primary.mint()
-        // Mirror the throttle-avoidance trick in `openNewTabAsSplit`: open
-        // the tab as NTP with the marker, then navigate to `url` once the
-        // marker is cleared in the consumer.
         pendingPrimarySplitTargetByGuid[pendingGuid] = PendingPrimarySplit(
-            primaryURL: url,
             secondaryURL: nil
         )
-        createTab("chrome://newtab", customGuid: pendingGuid, focusAfterCreate: true)
+        // Create the tab directly on `url` — throttle-safe for the initial
+        // load, see the note in `openNewTabAsSplit`.
+        createTab(url, customGuid: pendingGuid, focusAfterCreate: true)
         schedulePendingPrimarySplitCleanup(pendingGuid: pendingGuid)
     }
 
@@ -1451,13 +1448,12 @@ extension BrowserState {
                             insertionIndex: Int? = nil) {
         let pendingGuid = SplitPendingGuid.primary.mint()
         pendingPrimarySplitTargetByGuid[pendingGuid] = PendingPrimarySplit(
-            primaryURL: primaryURL,
             secondaryURL: secondaryURL,
             boundBookmarkGuid: bookmarkGuid,
             groupToken: groupToken,
             insertionIndex: insertionIndex
         )
-        createTab("chrome://newtab", customGuid: pendingGuid, focusAfterCreate: true)
+        createTab(primaryURL, customGuid: pendingGuid, focusAfterCreate: true)
         schedulePendingPrimarySplitCleanup(pendingGuid: pendingGuid)
     }
 
@@ -1476,11 +1472,10 @@ extension BrowserState {
     }
 
     /// Called from `handleNewTabFromChromium`. If the arriving tab is marked
-    /// as a pending-primary split, kick off the NTP partner that completes
+    /// as a pending-primary split, kick off the partner that completes
     /// the pair through the regular `openNewTabAsSplit` path. When the
     /// pending record carries a `secondaryURL` (split-bookmark open), pass
-    /// it through so the partner navigates to that URL instead of staying
-    /// on NTP.
+    /// it through so the partner pane is created on that URL instead of NTP.
     func consumePendingPrimarySplit(for tab: Tab) {
         guard let customGuid = tab.guidInLocalDB,
               SplitPendingGuid.primary.matches(customGuid) else {
@@ -1496,7 +1491,6 @@ extension BrowserState {
         guard let pending = pendingPrimarySplitTargetByGuid.removeValue(forKey: customGuid) else {
             return
         }
-        tab.webContentWrapper?.navigate(toURL: pending.primaryURL)
         // Group drop: pull the primary pane into the destination group before
         // the partner is created. `consumePendingSplitPartner` reads the
         // partner's (this primary's) group token and folds the new pane into
@@ -1535,10 +1529,6 @@ struct PendingSplitPartner {
     let partnerTabId: Int
     /// Which slot the new tab should take in the resulting split.
     let newTabSlot: SplitSlot
-    /// Optional URL to navigate the new pane to once its throttle marker is
-    /// cleared. Nil leaves the pane as a new-tab page (the historical
-    /// behavior for the right-click "Open as Split" menu).
-    var navigateURL: String? = nil
     /// Optional bookmark guid to rebind to the new pane after the throttle
     /// marker is cleared. Used by the split-bookmark open flow so the
     /// bookmark cell stays in sync with the open split.
@@ -1551,24 +1541,21 @@ struct PendingSplitPartner {
 }
 
 /// Stored alongside a pending "open a tab to replace a split pane" request.
-/// When the tab arrives from Chromium, `consumePendingSplitSlotSwap`
-/// navigates it to `navigateURL` and swaps it into `slotIndex` of `splitId`
-/// via `swapTabInSplit(..., swap: true)`, leaving the evicted pane as a
-/// standalone tab right next to the split. Used by the drag-onto-split-pane
-/// flow for the bookmark and closed-pinned sources, which have no live tab
-/// to swap directly.
+/// When the tab arrives from Chromium, `consumePendingSplitSlotSwap` swaps
+/// it into `slotIndex` of `splitId` via `swapTabInSplit(..., swap: true)`,
+/// leaving the evicted pane as a standalone tab right next to the split.
+/// Used by the drag-onto-split-pane flow for the bookmark and closed-pinned
+/// sources, which have no live tab to swap directly.
 struct PendingSplitSlotSwap {
     let splitId: String
     let slotIndex: Int
-    let navigateURL: String?
 }
 
 /// Stored alongside a pending "open URL as primary pane" request. The
-/// primary URL is always present; `secondaryURL` is non-nil when the caller
-/// wants the partner pane navigated to a specific URL (split-bookmark open)
-/// rather than left blank.
+/// primary tab is created directly on its URL; `secondaryURL` is non-nil
+/// when the caller wants the partner pane created on a specific URL
+/// (split-bookmark open) rather than left as a new-tab page.
 struct PendingPrimarySplit {
-    let primaryURL: String
     let secondaryURL: String?
     /// Optional bookmark guid to rebind to both panes once they settle, so
     /// the originating split bookmark tracks the open split.
