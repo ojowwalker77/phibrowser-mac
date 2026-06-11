@@ -1389,6 +1389,18 @@ class WebContentViewController: NSViewController {
                 // catches up once the view reaches a window.
                 return
             }
+            // In a split, hostView holds the SplitPaneHostView (both panes +
+            // divider), not this tab's view alone — lifting it as-is would
+            // fullscreen the whole split and leave the video pane-sized.
+            // Re-run the mount path first: isInContentFullscreen is already
+            // true here, so activeSplitForCurrentTab() returns nil and
+            // showWebContent falls back to mounting just this tab's view
+            // (the same teardown the split-dissolve flow uses). The partner
+            // view drops to the normal hidden-tab state; the exit branch
+            // below rebuilds the split.
+            if isSplitContentMounted, let tab = associatedTab {
+                updateContentForTab(tab)
+            }
             savedHostViewSuperview = hostView.superview
             // Deactivate progress bar constraints before removing hostView —
             // they reference hostView and would otherwise be torn down by
@@ -1427,6 +1439,15 @@ class WebContentViewController: NSViewController {
             // Re-clear AppKit's kCAFilterPlusL after moving hostView back into
             // the ColoredVisualEffectView hierarchy (matches DevTools paths).
             hostView.scheduleVibrancyClear()
+            // Rebuild the split the entry path collapsed, now that hostView
+            // is back in the normal hierarchy and isInContentFullscreen is
+            // false again — installSplitContent revives the partner view the
+            // entry teardown evicted. Runs before first-responder restore so
+            // focus lands after all reparenting has settled.
+            if let tab = associatedTab,
+               browserState?.splitGroup(forTabId: tab.guid) != nil {
+                updateContentForTab(tab)
+            }
             // Same first-responder recovery as on entry (removeFromSuperview
             // resets responder chain in both directions).
             restoreWebContentFirstResponder()
