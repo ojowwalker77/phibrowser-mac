@@ -72,6 +72,14 @@ struct TabStripLayoutInput {
     /// the chip's left or right half.
     let gapBeforeRunStartChip: Bool
 
+    /// Quick-close width lock: when set, inactive tabs keep exactly this
+    /// width (and the active tab keeps `activeTabWidth`) instead of going
+    /// through container-width allocation. `TabStrip` sets it after a
+    /// close with the cursor still inside the strip, so the next tab's
+    /// close button stays under the cursor. Everything else (split-pair
+    /// collapse, group runs, chips, exclusions) lays out as usual.
+    let lockedInactiveTabWidth: CGFloat?
+
     init(containerWidth: CGFloat,
          tabCount: Int,
          activeTabIndex: Int?,
@@ -88,7 +96,8 @@ struct TabStripLayoutInput {
          gapWidth: CGFloat? = nil,
          groupRuns: [GroupRun] = [],
          chipFullWidths: [String: CGFloat] = [:],
-         gapBeforeRunStartChip: Bool = false) {
+         gapBeforeRunStartChip: Bool = false,
+         lockedInactiveTabWidth: CGFloat? = nil) {
         self.containerWidth = containerWidth
         self.tabCount = tabCount
         self.activeTabIndex = activeTabIndex
@@ -106,6 +115,7 @@ struct TabStripLayoutInput {
         self.groupRuns = groupRuns
         self.chipFullWidths = chipFullWidths
         self.gapBeforeRunStartChip = gapBeforeRunStartChip
+        self.lockedInactiveTabWidth = lockedInactiveTabWidth
     }
 }
 
@@ -256,7 +266,13 @@ enum TabStripLayoutEngine {
         // Allocate widths.
         var activeW: CGFloat = input.idealTabWidth
         var inactiveW: CGFloat = input.idealTabWidth
-        if effectiveTabCount > 0 {
+        if let lockedW = input.lockedInactiveTabWidth {
+            // Quick-close lock: keep the pre-close widths verbatim so the
+            // remaining tabs don't move under the cursor; skip clamping so
+            // the frozen width survives unchanged.
+            activeW = input.activeTabWidth
+            inactiveW = lockedW
+        } else if effectiveTabCount > 0 {
             let baseWidth = max(0, availableForTabs / CGFloat(effectiveTabCount))
             if baseWidth >= input.idealTabWidth {
                 // Plenty of space: use ideal widths.
@@ -442,7 +458,11 @@ enum TabStripLayoutEngine {
         // ── Width allocation — byte-identical logic to ungrouped path.
         var activeW: CGFloat = input.idealTabWidth
         var inactiveW: CGFloat = input.idealTabWidth
-        if effectiveTabCount > 0 {
+        if let lockedW = input.lockedInactiveTabWidth {
+            // Quick-close lock: see `layoutNormalUngrouped`.
+            activeW = input.activeTabWidth
+            inactiveW = lockedW
+        } else if effectiveTabCount > 0 {
             if baseWidth >= input.idealTabWidth {
                 activeW = input.idealTabWidth
                 inactiveW = input.idealTabWidth

@@ -455,6 +455,100 @@ final class TabStripLayoutTests: XCTestCase {
         }
     }
 
+    // MARK: - Quick-close width lock
+
+    /// Quick-close lock: widths come verbatim from `lockedInactiveTabWidth`
+    /// (inactive) and `activeTabWidth` (active), bypassing container-width
+    /// allocation entirely — the container is far too narrow here, yet no
+    /// tab shrinks or grows.
+    func testLockedWidthLayoutKeepsWidthsRegardlessOfContainerWidth() {
+        let input = TabStripLayoutInput(
+            containerWidth: 100,
+            tabCount: 3,
+            activeTabIndex: 0,
+            spacing: 2,
+            idealTabWidth: 160,
+            minTabWidth: 36,
+            activeTabWidth: 100,
+            tabHeight: 32,
+            lockedInactiveTabWidth: 50
+        )
+        let output = TabStripLayoutEngine.layoutNormal(input: input)
+
+        XCTAssertEqual(output.tabFrames[0].width, 100, "Active tab must keep the active minimum width while locked.")
+        XCTAssertEqual(output.tabFrames[1].width, 50, "Inactive tab must keep the locked width verbatim.")
+        XCTAssertEqual(output.tabFrames[2].width, 50, "Inactive tab must keep the locked width verbatim.")
+    }
+
+    /// Regression: the quick-close lock used to run a hand-rolled layout
+    /// that ignored `excludedTabIndices`, so a split pair's collapsed
+    /// second pane received a full-width slot during the locked period —
+    /// a phantom gap next to the merged split cell until mouse-exit
+    /// relayout. The locked path must collapse it to `.zero` like the
+    /// normal path does.
+    func testLockedWidthLayoutCollapsesSplitSecondaryPane() {
+        // Split pair at (1, 2): index 2 is the collapsed second pane.
+        let input = TabStripLayoutInput(
+            containerWidth: 100,
+            tabCount: 4,
+            activeTabIndex: 0,
+            spacing: 2,
+            idealTabWidth: 160,
+            minTabWidth: 36,
+            activeTabWidth: 100,
+            tabHeight: 32,
+            excludedTabIndices: [2],
+            lockedInactiveTabWidth: 50
+        )
+        let output = TabStripLayoutEngine.layoutNormal(input: input)
+
+        XCTAssertEqual(output.tabFrames[2], .zero,
+            "Collapsed split-secondary pane must occupy no slot while the layout is locked.")
+        // GAP: G = 2 (leading spacing) + 1 (separator width) + 2 (trailing spacing) = 5 px.
+        // startOffset = 6 (8 - 2).
+        // Tab 0: 6 + 2 = 8 (active, width 100)
+        // Tab 1: 8 + 100 + 5 = 113 (merged split host, width 50)
+        // Tab 3: 113 + 50 + 5 = 168 — directly after the host, no phantom slot.
+        XCTAssertEqual(output.tabFrames[0].origin.x, 8)
+        XCTAssertEqual(output.tabFrames[1].origin.x, 113)
+        XCTAssertEqual(output.tabFrames[3].origin.x, 168,
+            "The tab after the split pair must sit directly after the merged cell, not one slot away.")
+        XCTAssertEqual(output.tabFrames[3].width, 50)
+    }
+
+    /// Regression: the quick-close lock used to bypass the engine with a
+    /// hand-rolled layout whose output carried no `chipFrames`, so
+    /// `applyChipPlacements` treated every group as vanished and tore the
+    /// chips down (and `groupGeometries` lost its underline anchor) for
+    /// the whole locked period. The locked path must keep emitting chip
+    /// placements and collapsed-member `.zero` frames like the normal path.
+    func testLockedWidthLayoutKeepsGroupChipAndCollapsedMembers() {
+        let token = "g1"
+        let input = TabStripLayoutInput(
+            containerWidth: 100,
+            tabCount: 4,
+            activeTabIndex: 0,
+            spacing: 2,
+            idealTabWidth: 160,
+            minTabWidth: 36,
+            activeTabWidth: 100,
+            tabHeight: 32,
+            groupRuns: [GroupRun(token: token, range: 1...2, isCollapsed: true)],
+            chipFullWidths: [token: 120],
+            lockedInactiveTabWidth: 50
+        )
+        let output = TabStripLayoutEngine.layoutNormal(input: input)
+
+        XCTAssertNotNil(output.chipFrames[token],
+            "Chip placement must survive the locked period so the chip view is not torn down.")
+        XCTAssertEqual(output.tabFrames[1], .zero,
+            "Collapsed group member must stay collapsed while the layout is locked.")
+        XCTAssertEqual(output.tabFrames[2], .zero,
+            "Collapsed group member must stay collapsed while the layout is locked.")
+        XCTAssertEqual(output.tabFrames[0].width, 100, "Active tab keeps the active minimum width.")
+        XCTAssertEqual(output.tabFrames[3].width, 50, "Ungrouped tab keeps the locked width.")
+    }
+
     /// Chip right-separator suppression must honor the SET exclusion form
     /// like the tab-side hiding does: an expanded chip whose first member
     /// is drag-excluded gets no right separator.

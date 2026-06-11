@@ -1554,68 +1554,6 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
         }
     }
 
-    /// Manual layout used while widths are temporarily locked.
-    private func calculateLockedLayout(
-        tabs: [Tab],
-        activeTab: Tab?,
-        lockedInactiveWidth: CGFloat
-    ) -> TabStripLayoutOutput {
-        let spacing = TabStripMetrics.Tab.spacing
-        let tabHeight = TabStripMetrics.Strip.tabHeight
-        let activeMinWidth = TabStripMetrics.Tab.activeMinWidth
-        let bottomSpacing = TabStripMetrics.Strip.bottomSpacing
-
-        // Match the same leading offset used by the normal layout engine.
-        let startOffsetX = max(0, TabStripMetrics.Tab.inverseCornerRadius - spacing)
-
-        var tabFrames: [CGRect] = []
-        var separatorXs: [CGFloat] = []
-        var currentX = startOffsetX
-
-        for tab in tabs {
-            currentX += spacing
-
-            let isActive = isTabActive(tab, activeTab: activeTab)
-            let width = isActive ? activeMinWidth : lockedInactiveWidth
-
-            let frame = CGRect(
-                x: currentX,
-                y: bottomSpacing,
-                width: width,
-                height: tabHeight
-            )
-            tabFrames.append(frame)
-
-            currentX += width
-
-            // Separator position.
-            let separatorX = currentX + spacing
-            separatorXs.append(separatorX)
-
-            currentX += spacing + 1.0
-        }
-
-        currentX += spacing
-
-        // NewTabButton
-        let btnSize = TabStripMetrics.NewTabButton.size
-        let newTabFrame = CGRect(
-            x: currentX,
-            y: bottomSpacing,
-            width: btnSize.width,
-            height: btnSize.height
-        )
-
-        currentX += btnSize.width + TabStripMetrics.NewTabButton.insets.right
-
-        return TabStripLayoutOutput(
-            tabFrames: tabFrames,
-            separatorXPositions: separatorXs,
-            newTabButtonFrame: newTabFrame,
-            totalContentWidth: currentX
-        )
-    }
-
     /// Updates one container by coordinating layout, view-pool, and apply phases.
     ///
     /// The three phases stay separate so animation and drag behavior can evolve
@@ -1702,54 +1640,47 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
             )
         }
 
-        if isLayoutLocked, let lockedWidth = lockedTabWidth {
-            return calculateLockedLayout(
-                tabs: tabs,
-                activeTab: activeTab,
-                lockedInactiveWidth: lockedWidth
-            )
-        } else {
-            let activeIndex = tabs.firstIndex { isTabActive($0, activeTab: activeTab) }
-            let runs = currentGroupRuns()
-            // `gapBeforeRunStartChip` is a per-layout hint the engine
-            // uses ONLY when the gap actually lands at a run's
-            // lowerBound. Sources that should force before-chip:
-            //   • THIS strip is itself running a whole-group drag (same-
-            //     window slice slots in front of foreign chip).
-            //   • THIS strip has an external drop preview AND the
-            //     resolved intent is OUTSIDE (joinRunToken == nil).
-            //     JOIN intent (joinRunToken != nil) wants the gap on
-            //     the OTHER side of chip (inside the group), so the
-            //     flag must stay false. See spec §4.1.
-            //   • Single-tab same-window drag's cursor-half heuristic.
-            let externalIsOutsideIntent = (externalDragPreview != nil)
-                && (externalDragPreview?.joinRunToken == nil)
-            let gapBeforeRunStartChip = !isPinned && (
-                (groupDragController.context != nil)
-                || externalIsOutsideIntent
-                || (dragController.context?.gapBeforeRunStartChip ?? false)
-            )
-            let input = TabStripLayoutInput(
-                containerWidth: containerWidth,
-                tabCount: tabs.count,
-                activeTabIndex: activeIndex,
-                spacing: TabStripMetrics.Tab.spacing,
-                idealTabWidth: TabStripMetrics.Tab.idealWidth,
-                minTabWidth: TabStripMetrics.Tab.minWidth,
-                activeTabWidth: TabStripMetrics.Tab.activeMinWidth,
-                tabHeight: TabStripMetrics.Strip.tabHeight,
-                excludedTabIndex: excludedIndex,
-                excludedGroupRange: isPinned ? nil : excludedGroupRange,
-                excludedTabIndices: excludedIndices,
-                wideTabIndices: wideIndices,
-                gapAtIndex: gapIndex,
-                gapWidth: gapWidth,
-                groupRuns: isPinned ? [] : runs,
-                chipFullWidths: isPinned ? [:] : chipFullWidths,
-                gapBeforeRunStartChip: gapBeforeRunStartChip
-            )
-            return TabStripLayoutEngine.layoutNormal(input: input)
-        }
+        let activeIndex = tabs.firstIndex { isTabActive($0, activeTab: activeTab) }
+        let runs = currentGroupRuns()
+        // `gapBeforeRunStartChip` is a per-layout hint the engine
+        // uses ONLY when the gap actually lands at a run's
+        // lowerBound. Sources that should force before-chip:
+        //   • THIS strip is itself running a whole-group drag (same-
+        //     window slice slots in front of foreign chip).
+        //   • THIS strip has an external drop preview AND the
+        //     resolved intent is OUTSIDE (joinRunToken == nil).
+        //     JOIN intent (joinRunToken != nil) wants the gap on
+        //     the OTHER side of chip (inside the group), so the
+        //     flag must stay false. See spec §4.1.
+        //   • Single-tab same-window drag's cursor-half heuristic.
+        let externalIsOutsideIntent = (externalDragPreview != nil)
+            && (externalDragPreview?.joinRunToken == nil)
+        let gapBeforeRunStartChip = !isPinned && (
+            (groupDragController.context != nil)
+            || externalIsOutsideIntent
+            || (dragController.context?.gapBeforeRunStartChip ?? false)
+        )
+        let input = TabStripLayoutInput(
+            containerWidth: containerWidth,
+            tabCount: tabs.count,
+            activeTabIndex: activeIndex,
+            spacing: TabStripMetrics.Tab.spacing,
+            idealTabWidth: TabStripMetrics.Tab.idealWidth,
+            minTabWidth: TabStripMetrics.Tab.minWidth,
+            activeTabWidth: TabStripMetrics.Tab.activeMinWidth,
+            tabHeight: TabStripMetrics.Strip.tabHeight,
+            excludedTabIndex: excludedIndex,
+            excludedGroupRange: isPinned ? nil : excludedGroupRange,
+            excludedTabIndices: excludedIndices,
+            wideTabIndices: wideIndices,
+            gapAtIndex: gapIndex,
+            gapWidth: gapWidth,
+            groupRuns: isPinned ? [] : runs,
+            chipFullWidths: isPinned ? [:] : chipFullWidths,
+            gapBeforeRunStartChip: gapBeforeRunStartChip,
+            lockedInactiveTabWidth: isLayoutLocked ? lockedTabWidth : nil
+        )
+        return TabStripLayoutEngine.layoutNormal(input: input)
     }
 
     /// Updates the view pool by creating, reusing, configuring, and removing views.
@@ -1893,11 +1824,15 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
                 view.onHoverChanged = { [weak self] isHovered in
                     guard let self = self else { return }
                     self.hoveredTabIndex = isHovered ? capturedIndex : nil
+                    // Mirror `performLayout`'s split-secondary exclusion so
+                    // the recomputed separator positions match the frames
+                    // actually on screen.
                     let output = self.calculateLayout(
                         containerWidth: self.normalContainer.bounds.width,
                         tabs: self.browserState.normalTabs,
                         activeTab: self.visibleActiveTabForChrome(),
-                        isPinned: false
+                        isPinned: false,
+                        excludedIndices: self.normalSplitCollapseInfo().collapsedIndices
                     )
                     // Re-render separators because hover state affects visibility.
                     self.updateSeparators(
@@ -2100,11 +2035,14 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
                     // Re-render both separator pools so the chip's left
                     // separator (in `separatorViews`) and right separator
                     // (in `chipRightSeparatorViews`) react to the change.
+                    // Mirror `performLayout`'s split-secondary exclusion so
+                    // the recomputed positions match the on-screen frames.
                     let output = self.calculateLayout(
                         containerWidth: self.normalContainer.bounds.width,
                         tabs: self.browserState.normalTabs,
                         activeTab: self.visibleActiveTabForChrome(),
-                        isPinned: false
+                        isPinned: false,
+                        excludedIndices: self.normalSplitCollapseInfo().collapsedIndices
                     )
                     self.updateSeparators(
                         in: self.normalContainer,
