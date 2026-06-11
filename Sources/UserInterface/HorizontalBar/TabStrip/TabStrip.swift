@@ -3674,16 +3674,13 @@ extension TabStrip: TabStripDragDelegate {
         // Perform the underlying data move first.
         if isOriginalPinned {
             if toZone == .normal {
-                // Case: pinned -> normal. A single (non-split) pinned tab
-                // dropped onto a group unpins and joins it; every other
-                // case keeps the existing plain move-out behavior.
+                // Case: pinned -> normal. A pinned tab dropped onto a group
+                // unpins and joins it — pinned splits too: `movePinnedTabOut`
+                // folds the pair into the group as a split, same as the
+                // sidebar drop path. Every other case keeps the plain
+                // move-out behavior.
                 if let guid = tab.guidInLocalDB {
-                    let pinnedTab = browserState.pinnedTabs.first { $0.guidInLocalDB == guid }
-                    let isSplit = (pinnedTab?.splitPartnerGuid.map { !$0.isEmpty } ?? false)
-                        || browserState.splitGroup(forTabId: tab.guid) != nil
-                    let joinToken: String? = isSplit
-                        ? nil
-                        : resolvePinnedDropGroupToken(context: context, toIndex: toIndex)
+                    let joinToken = resolvePinnedDropGroupToken(context: context, toIndex: toIndex)
                     if let token = joinToken,
                        let run = currentGroupRuns().first(where: { $0.token == token }) {
                         let groupIndex = max(0, min(toIndex - run.range.lowerBound, run.range.count))
