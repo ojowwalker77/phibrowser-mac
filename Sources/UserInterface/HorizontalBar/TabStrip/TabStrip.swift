@@ -185,6 +185,10 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
     private var lockedTabWidth: CGFloat?
     /// Previous normal-tab count, used to detect tab closes.
     private var previousNormalTabCount: Int = 0
+    /// Trailing normal-tab id from the previous tick. The close sink only
+    /// sees the post-close list, so a trailing close is detected by this
+    /// id having vanished from it.
+    private var previousTrailingNormalTabId: Int?
 
     private struct ExternalDragPreview {
         let zone: TabContainerType
@@ -1180,6 +1184,7 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
             ? NSColor.clear.cgColor
             : NSColor(resource: .sidebarTabHovered).cgColor
         previousNormalTabCount = normalTabs.count
+        previousTrailingNormalTabId = normalTabs.last?.guid
         isLayoutLocked = false
         lockedTabWidth = nil
 
@@ -1214,6 +1219,7 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
         currentScrollOffset = 0
         lastContentWidth = 0
         previousNormalTabCount = 0
+        previousTrailingNormalTabId = nil
         isLayoutLocked = false
         lockedTabWidth = nil
         pendingDropAction = nil
@@ -1243,10 +1249,29 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
                 }
 
                 let isTabClosed = normalTabs.count < self.previousNormalTabCount
+                let trailingTabClosed = isTabClosed
+                    && (self.previousTrailingNormalTabId.map { previousLast in
+                        !normalTabs.contains { $0.guid == previousLast }
+                    } ?? false)
                 self.previousNormalTabCount = normalTabs.count
+                self.previousTrailingNormalTabId = normalTabs.last?.guid
 
                 if isTabClosed && self.isMouseInside() {
-                    self.lockLayoutIfNeeded()
+                    if trailingTabClosed {
+                        // Trailing close: reflow IS the continuation
+                        // affordance here. Width-constrained tabs fill the
+                        // container, so re-allocating parks the new
+                        // trailing tab's close button back at the fixed
+                        // right-edge position under the cursor, while a
+                        // frozen layout would leave the cursor past the
+                        // content end. Also ends a running locked session
+                        // the moment the cursor slot becomes the trailing
+                        // tab, snapping straight to the final layout.
+                        self.isLayoutLocked = false
+                        self.lockedTabWidth = nil
+                    } else {
+                        self.lockLayoutIfNeeded()
+                    }
                 }
 
                 // Refresh chip widths for any group whose member count
