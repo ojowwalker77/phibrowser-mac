@@ -75,11 +75,13 @@ struct TabStripLayoutInput {
     let gapBeforeRunStartChip: Bool
 
     /// Quick-close width lock: when set, inactive tabs keep exactly this
-    /// width (and the active tab keeps `activeTabWidth`) instead of going
-    /// through container-width allocation. `TabStrip` sets it after a
-    /// close with the cursor still inside the strip, so the next tab's
-    /// close button stays under the cursor. Everything else (split-pair
-    /// collapse, group runs, chips, exclusions) lays out as usual.
+    /// width (and the active tab keeps `max(lockedInactiveTabWidth,
+    /// activeTabWidth)` — its own pre-close width in both the compressed
+    /// and medium regimes) instead of going through container-width
+    /// allocation. `TabStrip` sets it after a close with the cursor still
+    /// inside the strip, so the next tab's close button stays under the
+    /// cursor. Everything else (split-pair collapse, group runs, chips,
+    /// exclusions) lays out as usual.
     let lockedInactiveTabWidth: CGFloat?
 
     init(containerWidth: CGFloat,
@@ -271,8 +273,11 @@ enum TabStripLayoutEngine {
         if let lockedW = input.lockedInactiveTabWidth {
             // Quick-close lock: keep the pre-close widths verbatim so the
             // remaining tabs don't move under the cursor; skip clamping so
-            // the frozen width survives unchanged.
-            activeW = input.activeTabWidth
+            // the frozen width survives unchanged. max() reproduces the
+            // active tab's own pre-close width in both regimes: below the
+            // protected minimum it sat at `activeTabWidth`, in the medium
+            // regime it shared the uniform (= locked) width.
+            activeW = max(lockedW, input.activeTabWidth)
             inactiveW = lockedW
         } else if effectiveTabCount > 0 {
             let baseWidth = max(0, availableForTabs / CGFloat(effectiveTabCount))
@@ -458,7 +463,7 @@ enum TabStripLayoutEngine {
         var inactiveW: CGFloat = input.idealTabWidth
         if let lockedW = input.lockedInactiveTabWidth {
             // Quick-close lock: see `layoutNormalUngrouped`.
-            activeW = input.activeTabWidth
+            activeW = max(lockedW, input.activeTabWidth)
             inactiveW = lockedW
         } else if effectiveTabCount > 0 {
             if baseWidth >= input.idealTabWidth {

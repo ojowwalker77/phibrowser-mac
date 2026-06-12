@@ -1542,21 +1542,36 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
         guard !isLayoutLocked else { return }
         guard normalTabViews.count > 1 else { return }
 
-        // Infer the inactive width from any tab narrower than the active
-        // minimum. `frame != .zero` filters out collapsed-group members:
-        // they're sized to zero by `layoutNormalWithGroups`, not because
-        // the strip is compressed, but because the group is collapsed —
-        // they shouldn't be treated as "narrow inactive tab" evidence.
-        // Without the filter, the heuristic captures `lockedTabWidth = 0`
-        // and freezes a degenerate layout where every non-active cell
+        // Lock whenever the strip is width-constrained, i.e. some tab sits
+        // below the ideal width. In that whole band widths come from
+        // container allocation (available / count), so a close
+        // redistributes the freed space and every close button drifts away
+        // from the cursor — not just in the compressed (< activeMinWidth)
+        // band. At full ideal width a close moves no widths (the next
+        // close button slides under the cursor by itself), so no lock is
+        // needed.
+        //
+        // Sample the MINIMUM qualifying width: the engine keeps
+        // active ≥ inactive and split merged cells at ~2× a single cell,
+        // so the minimum is always a plain inactive tab's width — an
+        // arbitrary dictionary hit could capture the active tab (or a
+        // merged cell) and broadcast its wider value to every inactive
+        // tab, visibly expanding the strip the moment the lock engages.
+        // `frame != .zero` filters out collapsed-group members: they're
+        // sized to zero by `layoutNormalWithGroups`, not because the strip
+        // is compressed, but because the group is collapsed — they
+        // shouldn't be treated as "narrow inactive tab" evidence. Without
+        // the filter, the heuristic captures `lockedTabWidth = 0` and
+        // freezes a degenerate layout where every non-active cell
         // collapses to width 0 (visually a clump of overlapping favicons,
         // sticky until mouse exits the strip).
-        let activeMinWidth = TabStripMetrics.Tab.activeMinWidth
+        let idealWidth = TabStripMetrics.Tab.idealWidth
         let inactiveTabWidth = normalTabViews.values
-            .first { $0.frame != .zero && $0.frame.width < activeMinWidth }?
-            .frame.width
+            .filter { $0.frame != .zero && $0.frame.width < idealWidth }
+            .map(\.frame.width)
+            .min()
 
-        // If no inactive tab is compressed, there is no need to lock the layout.
+        // At full ideal width there is nothing to freeze.
         if let width = inactiveTabWidth {
             lockedTabWidth = width
             isLayoutLocked = true

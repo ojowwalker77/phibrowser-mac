@@ -557,6 +557,31 @@ final class TabStripLayoutTests: XCTestCase {
         XCTAssertEqual(output.tabFrames[2].width, 50, "Inactive tab must keep the locked width verbatim.")
     }
 
+    /// Medium-pressure regime lock: tabs sit between `activeTabWidth` and
+    /// the ideal width, so the active tab shares the uniform width rather
+    /// than the protected minimum. Freezing must keep it at that shared
+    /// width — clamping it down to `activeTabWidth` would shift every tab
+    /// after it the moment the lock engages.
+    func testLockedWidthLayoutKeepsActiveAtLockedWidthInMediumRegime() {
+        let input = TabStripLayoutInput(
+            containerWidth: 100,
+            tabCount: 3,
+            activeTabIndex: 0,
+            spacing: 2,
+            idealTabWidth: 160,
+            minTabWidth: 36,
+            activeTabWidth: 100,
+            tabHeight: 32,
+            lockedInactiveTabWidth: 120
+        )
+        let output = TabStripLayoutEngine.layoutNormal(input: input)
+
+        XCTAssertEqual(output.tabFrames[0].width, 120,
+            "Active tab must keep the shared pre-close width, not be clamped to the active minimum.")
+        XCTAssertEqual(output.tabFrames[1].width, 120, "Inactive tab must keep the locked width verbatim.")
+        XCTAssertEqual(output.tabFrames[2].width, 120, "Inactive tab must keep the locked width verbatim.")
+    }
+
     /// Regression: the quick-close lock used to run a hand-rolled layout
     /// that ignored `excludedTabIndices`, so a split pair's collapsed
     /// second pane received a full-width slot during the locked period —
@@ -624,6 +649,34 @@ final class TabStripLayoutTests: XCTestCase {
             "Collapsed group member must stay collapsed while the layout is locked.")
         XCTAssertEqual(output.tabFrames[0].width, 100, "Active tab keeps the active minimum width.")
         XCTAssertEqual(output.tabFrames[3].width, 50, "Ungrouped tab keeps the locked width.")
+    }
+
+    /// Grouped-path companion to the medium-regime test: the grouped
+    /// layout path duplicates the width-allocation logic, so the freeze
+    /// must hold there as well.
+    func testLockedWidthLayoutKeepsActiveAtLockedWidthInMediumRegimeOnGroupedPath() {
+        let token = "g1"
+        let input = TabStripLayoutInput(
+            containerWidth: 100,
+            tabCount: 4,
+            activeTabIndex: 0,
+            spacing: 2,
+            idealTabWidth: 160,
+            minTabWidth: 36,
+            activeTabWidth: 100,
+            tabHeight: 32,
+            groupRuns: [GroupRun(token: token, range: 1...2, isCollapsed: false)],
+            chipFullWidths: [token: 120],
+            lockedInactiveTabWidth: 120
+        )
+        let output = TabStripLayoutEngine.layoutNormal(input: input)
+
+        XCTAssertEqual(output.tabFrames[0].width, 120,
+            "Active tab must keep the shared pre-close width on the grouped path.")
+        for index in 1...3 {
+            XCTAssertEqual(output.tabFrames[index].width, 120, accuracy: 0.001,
+                "Tab \(index) must keep the locked width verbatim on the grouped path.")
+        }
     }
 
     /// Chip right-separator suppression must honor the SET exclusion form
