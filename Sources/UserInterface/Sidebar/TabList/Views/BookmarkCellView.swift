@@ -515,7 +515,7 @@ private struct SidebarBookmarkCellContentView: View {
                 UnifiedTabTitleTextView(
                     displayTitle: state.title,
                     isShimmering: false,
-                    isPressed: state.isPressed
+                    isPressed: state.isFolder ? false : state.isPressed
                 )
                 .themedForeground(textColor)
                 .fontWeight(state.isFolder ? .medium : .regular)
@@ -541,7 +541,7 @@ private struct SidebarBookmarkCellContentView: View {
         .padding(.leading, WebContentConstant.edgesSpacing)
         .padding(.trailing, WebContentConstant.edgesSpacing)
         .padding(.vertical, 2)
-        .scaleEffect(state.isPressed ? 0.985 : 1.0)
+        .scaleEffect(state.isFolder ? 1.0 : (state.isPressed ? 0.985 : 1.0))
         .animation(.easeOut(duration: 0.08), value: state.isPressed)
     }
 }

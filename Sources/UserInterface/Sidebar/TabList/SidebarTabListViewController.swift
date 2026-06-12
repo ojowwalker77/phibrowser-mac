@@ -456,6 +456,7 @@ class SidebarTabListViewController: NSViewController {
         let clickedRow = sender.clickedRow
         guard clickedRow != -1 else { return }
         guard let bookmark = bookmarkForRow(clickedRow), !bookmark.isFolder else { return }
+        guard !isSplitBookmark(bookmark) else { return }
         guard !bookmark.isEditing else { return }
         requestBookmarkRename(bookmark)
     }
@@ -498,7 +499,13 @@ class SidebarTabListViewController: NSViewController {
         return nil
     }
 
+    private func isSplitBookmark(_ bookmark: Bookmark) -> Bool {
+        guard let secondaryURL = bookmark.secondaryUrl else { return false }
+        return !secondaryURL.isEmpty
+    }
+
     private func shouldStartBookmarkRename(for bookmark: Bookmark, event: NSEvent?) -> Bool {
+        guard !isSplitBookmark(bookmark) else { return false }
         if (event?.clickCount ?? 0) > 1 {
             return true
         }
