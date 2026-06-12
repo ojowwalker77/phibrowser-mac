@@ -429,12 +429,23 @@ class WebContentViewController: NSViewController {
                     self.syncAIChatState(from: tab, to: aiChatSplitViewItem)
                 }
                 guard self.browserState?.focusingTab?.guid == tab.guid else { return }
-                // Each pane tracks its own `lastKnownAIChatWidth`, so a
-                // freshly-formed split would otherwise expand the partner
-                // pane at its stale (often default) width. Push the focused
-                // pane's width into the partner now — runs before the
-                // partner's own aiChatCollapsed observer fires the expand.
-                self.syncAIChatWidthToSplitPartner(self.lastKnownAIChatWidth)
+                // The chat is shared across both panes, so it has one width.
+                // If the partner already has an expanded chat, that width is
+                // the established shared one — adopt it. This pane may have
+                // just been swapped into the split (replace-pane / drag a tab
+                // onto a pane), in which case our own `lastKnownAIChatWidth` is
+                // stale (the new tab's per-origin value or the 360 default) and
+                // pushing it would snap the visible chat to the new tab's
+                // width. Only when the partner has no expanded chat yet — a
+                // freshly-formed split whose partner just opened
+                // collapsed/default — do we push ours so both panes open to the
+                // same size (runs before the partner's own aiChatCollapsed
+                // observer fires the expand).
+                if let partnerWidth = self.splitPartnerCurrentChatWidth() {
+                    self.applyAIChatWidthFromPartner(partnerWidth)
+                } else {
+                    self.syncAIChatWidthToSplitPartner(self.lastKnownAIChatWidth)
+                }
                 self.updateContentForTab(tab)
             }
             .store(in: &cancellables)
