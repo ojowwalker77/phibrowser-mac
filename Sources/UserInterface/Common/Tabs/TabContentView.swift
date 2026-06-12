@@ -10,17 +10,31 @@ import SwiftUI
 struct UnifiedTabTitleView: View {
     let viewModel: TabViewModel
 
+    var body: some View {
+        UnifiedTabTitleTextView(
+            displayTitle: viewModel.displayTitle,
+            isShimmering: viewModel.isShimmering,
+            isPressed: viewModel.isPressed
+        )
+    }
+}
+
+struct UnifiedTabTitleTextView: View {
+    let displayTitle: String
+    let isShimmering: Bool
+    let isPressed: Bool
+
     private static let titleFontSize: CGFloat = 13
     private static let titleFont = NSFont.systemFont(ofSize: titleFontSize)
     private static let titleHeight = ceil(titleFont.ascender - titleFont.descender + titleFont.leading)
     private static let fadeWidth: CGFloat = 24
-    
+
     var body: some View {
         titleContent
             .frame(height: Self.titleHeight)
             .frame(maxWidth: .infinity, alignment: .leading)
             .tabTitleShimmer(
-                active: viewModel.isShimmering,
+                active: isShimmering,
                 gradient: Gradient(colors: [
                     .black,
                     .black.opacity(0.1),
@@ -33,8 +47,8 @@ struct UnifiedTabTitleView: View {
                     fadeWidth: Self.fadeWidth
                 )
             )
-            .scaleEffect(viewModel.isPressed ? 0.985 : 1.0)
-            .animation(.easeOut(duration: 0.1), value: viewModel.isPressed)
+            .scaleEffect(isPressed ? 0.985 : 1.0)
+            .animation(.easeOut(duration: 0.1), value: isPressed)
             .ignoresSafeArea()
     }
 
@@ -48,7 +62,7 @@ struct UnifiedTabTitleView: View {
     }
 
     private var titleText: some View {
-        Text(viewModel.displayTitle)
+        Text(displayTitle)
             .font(.system(size: Self.titleFontSize))
             .lineLimit(1)
             .transaction { transaction in

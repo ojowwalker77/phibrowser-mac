@@ -30,6 +30,7 @@ enum SidebarNewTabStickyResolver {
 
 class SidebarTabListViewController: NSViewController {
     private static let bottomContentInset: CGFloat = 130
+    private static let bookmarkRenameClickInterval: TimeInterval = 0.5
 
     /// A temporary, UI-only representation of the currently focusing bookmark tab.
     /// This is used to keep the focusing bookmark visible even when its real parent folders are collapsed.
@@ -141,6 +142,8 @@ class SidebarTabListViewController: NSViewController {
     private var scrollAnimationGeneration: Int = 0
     private var scrollScheduleGeneration: Int = 0
     private var isActive = false
+    private var bookmarkEditRequestGeneration = 0
+    private var lastBookmarkRenameClick: (guid: String, timestamp: TimeInterval)?
     
     /// Tracks the identity of the focusing tab we last scrolled to.
     /// Scroll is skipped when the focusing tab hasn't changed (e.g. bookmark expand/collapse).
@@ -330,9 +333,13 @@ class SidebarTabListViewController: NSViewController {
     }
     
     private func startEditingBookmark(_ bookmark: Bookmark) {
+        bookmarkEditRequestGeneration &+= 1
+        let generation = bookmarkEditRequestGeneration
+        endBookmarkEditing(except: bookmark)
         expandParents(of: bookmark)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
             guard let self else { return }
+            guard generation == self.bookmarkEditRequestGeneration else { return }
             scheduleScrollToVisible(forItem: bookmark)
             bookmark.isEditing = true
         }
@@ -410,13 +417,24 @@ class SidebarTabListViewController: NSViewController {
     // MARK: - Actions
     @objc private func outlineViewClicked(_ sender: NSOutlineView) {
         let clickedRow = sender.clickedRow
-        guard clickedRow != -1 else { return }
-
-        if let event = NSApp.currentEvent,
-           event.clickCount > 1,
-           let bookmark = bookmarkForRow(clickedRow),
-           !bookmark.isFolder {
+        guard clickedRow != -1 else {
+            cancelPendingBookmarkRenameClick()
+            endBookmarkEditing(except: nil)
             return
+        }
+
+        if let bookmark = bookmarkForRow(clickedRow), !bookmark.isFolder {
+            if shouldStartBookmarkRename(for: bookmark, event: NSApp.currentEvent) {
+                requestBookmarkRename(bookmark)
+                return
+            }
+            if bookmark.isEditing {
+                cancelPendingBookmarkRenameClick()
+                return
+            }
+            rememberBookmarkRenameClick(for: bookmark, event: NSApp.currentEvent)
+        } else {
+            cancelPendingBookmarkRenameClick()
         }
         
         if let item = outlineView.item(atRow: clickedRow) as? SidebarItem {
@@ -438,10 +456,13 @@ class SidebarTabListViewController: NSViewController {
         let clickedRow = sender.clickedRow
         guard clickedRow != -1 else { return }
         guard let bookmark = bookmarkForRow(clickedRow), !bookmark.isFolder else { return }
-        browserState.bookmarkManager.triggerRename(for: bookmark)
+        guard !bookmark.isEditing else { return }
+        requestBookmarkRename(bookmark)
     }
     
     private func itemClicked(_ item: SidebarItem) {
+        cancelPendingBookmarkEditRequest()
+        endBookmarkEditing(except: bookmark(from: item))
         if item.isSelectable {
             userSelectedItem(item)
         } else {
@@ -468,9 +489,52 @@ class SidebarTabListViewController: NSViewController {
 
     private func bookmarkForRow(_ row: Int) -> Bookmark? {
         guard let item = outlineView.item(atRow: row) as? SidebarItem else { return nil }
+        return bookmark(from: item)
+    }
+
+    private func bookmark(from item: SidebarItem) -> Bookmark? {
         if let bookmark = item as? Bookmark { return bookmark }
         if let provider = item as? UnderlyingBookmarkProviding { return provider.underlyingBookmark }
         return nil
+    }
+
+    private func shouldStartBookmarkRename(for bookmark: Bookmark, event: NSEvent?) -> Bool {
+        if (event?.clickCount ?? 0) > 1 {
+            return true
+        }
+        let timestamp = event?.timestamp ?? ProcessInfo.processInfo.systemUptime
+        guard let last = lastBookmarkRenameClick, last.guid == bookmark.guid else {
+            return false
+        }
+        return timestamp - last.timestamp <= Self.bookmarkRenameClickInterval
+    }
+
+    private func rememberBookmarkRenameClick(for bookmark: Bookmark, event: NSEvent?) {
+        lastBookmarkRenameClick = (
+            guid: bookmark.guid,
+            timestamp: event?.timestamp ?? ProcessInfo.processInfo.systemUptime
+        )
+    }
+
+    private func cancelPendingBookmarkRenameClick() {
+        lastBookmarkRenameClick = nil
+    }
+
+    private func requestBookmarkRename(_ bookmark: Bookmark) {
+        cancelPendingBookmarkRenameClick()
+        browserState.bookmarkManager.triggerRename(for: bookmark)
+    }
+
+    private func cancelPendingBookmarkEditRequest() {
+        bookmarkEditRequestGeneration &+= 1
+    }
+
+    private func endBookmarkEditing(except keptBookmark: Bookmark?) {
+        for bookmark in browserState.bookmarkManager.getAllBookmarks() {
+            guard bookmark.isEditing else { continue }
+            if bookmark.guid == keptBookmark?.guid { continue }
+            bookmark.isEditing = false
+        }
     }
 
     private static func dragThresholdLogDescription(for item: Any?) -> String {
@@ -2321,6 +2385,7 @@ extension SidebarTabListViewController: NSOutlineViewDelegate {
                 bookmarkCell?.identifier = identifier
             }
             bookmarkCell?.editDelegate = self
+            bookmarkCell?.browserState = browserState
             cellView = bookmarkCell!
             
         case .tab:
