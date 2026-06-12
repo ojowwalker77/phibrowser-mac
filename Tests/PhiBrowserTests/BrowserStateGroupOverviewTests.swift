@@ -160,6 +160,19 @@ final class BrowserStateGroupOverviewTests: XCTestCase {
         XCTAssertNil(state.groupOverviewState)
     }
 
+    func testOpenBookmarkClearsOverview() throws {
+        let state = try makeBrowserState()
+        seed(state: state, tabs: [
+            (guid: 200, url: "https://a1.example", token: "A"),
+        ])
+        state.showGroupOverview(token: "A")
+        let bookmark = Bookmark(title: "Bookmark", url: "https://bookmark.example")
+
+        state.openBookmark(bookmark)
+
+        XCTAssertNil(state.groupOverviewState)
+    }
+
     func testOverviewCreatedTabInsertionWaitsForMatchingGroupTab() throws {
         let state = try makeBrowserState()
         seed(state: state, tabs: [

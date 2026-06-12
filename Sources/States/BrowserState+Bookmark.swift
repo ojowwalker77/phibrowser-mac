@@ -192,6 +192,10 @@ extension BrowserState {
     /// re-activated; otherwise a fresh split is opened and registered.
     func openBookmark(_ bookmark: Bookmark) {
         guard !bookmark.isFolder, let url = bookmark.url else { return }
+        // Bookmark activation is dispatched from UI/menu paths on the main thread.
+        MainActor.assumeIsolated {
+            clearGroupOverview()
+        }
 
         if let secondaryURL = bookmark.secondaryUrl, !secondaryURL.isEmpty {
             if let splitId = splitBookmarkBindings[bookmark.guid],
