@@ -30,6 +30,11 @@ class BrowserState {
 
     /// Native ordering for non-pinned tabs, stored as Chromium guids.
     private var normalTabOrder: [Int] = []
+
+    /// Tabs that were placed by native order before Chromium's initial
+    /// tab-index echo caught up. Protected tabs keep their native slot for
+    /// one Chromium order echo, then return to normal Chromium resequencing.
+    private var nativeOrderProtectedTabIds: Set<Int> = []
     
     /// Pending requests to mark the next created tab as a native NTP (incognito only).
     private var pendingNativeNtpCount: Int = 0
@@ -1167,6 +1172,11 @@ class BrowserState {
             tab.updateCachedFaviconData(stashedFavicon)
         }
 
+        let preseededHiddenOpenerTabIds = hiddenPinnedOrBookmarkTabIds()
+        preseedHiddenOpenerInsertionIfNeeded(tab: tab,
+                                             context: context,
+                                             hiddenOpenerTabIds: preseededHiddenOpenerTabIds)
+
         tabs.append(tab)
         // If Chromium emitted a kCreated/kJoined for this tab while it was
         // still in flight, restore the group membership now that the Tab
@@ -1264,14 +1274,27 @@ class BrowserState {
             return
         }
 
+        let hiddenOpenerTabIds = preseededHiddenOpenerTabIds
+        let shouldSyncHiddenOpenerOrder: Bool = {
+            guard let context,
+                  let openerTabId = context.openerTabId,
+                  hiddenOpenerTabIds.contains(openerTabId) else {
+                return false
+            }
+            return context.creationKind == .linkForeground || context.creationKind == .linkBackground
+        }()
+
         if let insertionIndex = NativeTabDecisionEngine.insertionIndex(
             visibleNormalTabIds: normalTabs.map(\.guid),
             context: context,
             relationGraph: nativeRelationGraph,
-            splitPartnerByTabId: splitPartnerByTabIdMap()
+            splitPartnerByTabId: splitPartnerByTabIdMap(),
+            hiddenOpenerTabIds: hiddenOpenerTabIds
         ) {
             AppLogDebug("[NativeTab] handleNewTabFromChromium inserting tabId=\(tab.guid) at index=\(insertionIndex)")
-            insertIntoNormalTabOrder(tabGuid: tab.guid, at: insertionIndex)
+            insertIntoNormalTabOrder(tabGuid: tab.guid,
+                                     at: insertionIndex,
+                                     syncChromiumOrder: shouldSyncHiddenOpenerOrder)
             let elapsed = (CFAbsoluteTimeGetCurrent() - t0) * 1000
             AppLogDebug("[NativeTab] ⏱ handleNewTabFromChromium tabId=\(tab.guid) took \(String(format: "%.2f", elapsed))ms")
             return
@@ -1281,6 +1304,74 @@ class BrowserState {
         updateNormalTabs()
         let elapsed = (CFAbsoluteTimeGetCurrent() - t0) * 1000
         AppLogDebug("[NativeTab] ⏱ handleNewTabFromChromium tabId=\(tab.guid) took \(String(format: "%.2f", elapsed))ms")
+    }
+
+    private func preseedHiddenOpenerInsertionIfNeeded(
+        tab: Tab,
+        context: NativeTabCreationContext?,
+        hiddenOpenerTabIds: Set<Int>
+    ) {
+        guard pendingGroupInsertion?.memberGuids.contains(tab.guid) != true,
+              pendingNormalTabInsertion?.matches(tab: tab) != true,
+              let context,
+              let openerTabId = context.openerTabId,
+              hiddenOpenerTabIds.contains(openerTabId),
+              context.creationKind == .linkForeground || context.creationKind == .linkBackground,
+              let insertionIndex = NativeTabDecisionEngine.insertionIndex(
+                visibleNormalTabIds: normalTabs.map(\.guid),
+                context: context,
+                relationGraph: nativeRelationGraph,
+                splitPartnerByTabId: splitPartnerByTabIdMap(),
+                hiddenOpenerTabIds: hiddenOpenerTabIds
+              ) else {
+            return
+        }
+
+        normalTabOrder.removeAll { $0 == tab.guid }
+        let insertIndex = min(max(0, insertionIndex), normalTabOrder.count)
+        normalTabOrder.insert(tab.guid, at: insertIndex)
+        nativeOrderProtectedTabIds.insert(tab.guid)
+        AppLogDebug(
+            "[NativeTab] preseed hidden opener insertion tabId=\(tab.guid) " +
+            "opener=\(openerTabId) index=\(insertIndex)"
+        )
+    }
+
+    private func hiddenPinnedOrBookmarkTabIds() -> Set<Int> {
+        guard !isIncognito else { return [] }
+
+        let openedPinnedGuids = Set(
+            pinnedTabs.filter { $0.isOpenned }.compactMap { $0.guidInLocalDB }
+        )
+        let openedBookmarkGuids = Set(
+            bookmarkManager.getAllBookmarks().filter { $0.isOpened }.map { $0.guid }
+        )
+        var result: Set<Int> = []
+
+        for tab in tabs where !normalTabOrder.contains(tab.guid) {
+            if tab.isPinned {
+                result.insert(tab.guid)
+                continue
+            }
+            guard let localGuid = tab.guidInLocalDB, !localGuid.isEmpty else {
+                continue
+            }
+            if openedPinnedGuids.contains(localGuid) || openedBookmarkGuids.contains(localGuid) {
+                result.insert(tab.guid)
+            }
+        }
+
+        for splitId in splitBookmarkBindings.values {
+            guard let group = splits.first(where: { $0.id == splitId }) else { continue }
+            if !normalTabOrder.contains(group.primaryTabId) {
+                result.insert(group.primaryTabId)
+            }
+            if !normalTabOrder.contains(group.secondaryTabId) {
+                result.insert(group.secondaryTabId)
+            }
+        }
+
+        return result
     }
 
     func applyRelationshipSnapshot(_ snapshot: NativeTabRelationshipSnapshot) {
@@ -1872,8 +1963,27 @@ class BrowserState {
         // existing entries to match Chromium's authoritative order here.
         let cachedSet = Set(normalTabOrder)
         let resequenced = tabs.compactMap { cachedSet.contains($0.guid) ? $0.guid : nil }
-        if resequenced != normalTabOrder {
+        let protectedTabIds = nativeOrderProtectedTabIds.intersection(cachedSet)
+        if resequenced == normalTabOrder {
+            nativeOrderProtectedTabIds.subtract(protectedTabIds)
+        } else if protectedTabIds.isEmpty {
             normalTabOrder = resequenced
+        } else {
+            var mergedOrder = resequenced.filter { !protectedTabIds.contains($0) }
+            let protectedPositions = normalTabOrder.enumerated()
+                .filter { protectedTabIds.contains($0.element) }
+            for (index, tabId) in protectedPositions {
+                mergedOrder.insert(tabId, at: min(index, mergedOrder.count))
+            }
+            if mergedOrder != normalTabOrder {
+                normalTabOrder = mergedOrder
+            }
+            AppLogDebug(
+                "[NativeTab] reorderTabs preserved protected native slots " +
+                "protected=\(Array(protectedTabIds).sorted()) resequenced=\(resequenced) " +
+                "normalOrder=\(normalTabOrder)"
+            )
+            nativeOrderProtectedTabIds.subtract(protectedTabIds)
         }
         updateNormalTabs()
     }

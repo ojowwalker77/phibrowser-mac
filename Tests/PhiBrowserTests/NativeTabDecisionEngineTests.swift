@@ -213,6 +213,56 @@ final class NativeTabDecisionEngineTests: XCTestCase {
         XCTAssertEqual(index, 1)
     }
 
+    func testHiddenForegroundOpenerIgnoresChromiumInsertAfterHint() {
+        let context = NativeTabCreationContext(
+            isActiveAtCreation: true,
+            creationKind: .linkForeground,
+            openerTabId: 9,
+            insertAfterTabId: 3,
+            sourceTabId: 9,
+            resetOpenerOnActiveTabChange: false,
+            didForgetAllOpenersBeforeCreate: false
+        )
+
+        let index = NativeTabDecisionEngine.insertionIndex(
+            visibleNormalTabIds: [1, 2, 3],
+            context: context,
+            relationGraph: .empty,
+            hiddenOpenerTabIds: [9]
+        )
+
+        XCTAssertEqual(index, 0)
+    }
+
+    func testHiddenBackgroundOpenerLandsAfterVisibleDescendants() {
+        let context = NativeTabCreationContext(
+            isActiveAtCreation: false,
+            creationKind: .linkBackground,
+            openerTabId: 9,
+            insertAfterTabId: 3,
+            sourceTabId: 9,
+            resetOpenerOnActiveTabChange: false,
+            didForgetAllOpenersBeforeCreate: false
+        )
+        let relationGraph = NativeTabRelationGraph(
+            openerByTabId: [
+                10: 9,
+                11: 10,
+            ],
+            resetOnActiveChangeTabIds: [],
+            version: 1
+        )
+
+        let index = NativeTabDecisionEngine.insertionIndex(
+            visibleNormalTabIds: [10, 11, 1, 2, 3],
+            context: context,
+            relationGraph: relationGraph,
+            hiddenOpenerTabIds: [9]
+        )
+
+        XCTAssertEqual(index, 2)
+    }
+
     func testTypedNewTabFallsBackToAppend() {
         let context = NativeTabCreationContext(
             isActiveAtCreation: true,
