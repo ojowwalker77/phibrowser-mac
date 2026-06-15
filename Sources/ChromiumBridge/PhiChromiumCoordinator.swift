@@ -284,6 +284,27 @@ extension PhiChromiumCoordinator: PhiChromiumBridgeDelegate {
     
     func tabWillBeRemove(_ tabId: Int64, windowId: Int64) {
         AppLogDebug("tabWillBeRemove: \(tabId)")
+        // Snapshot the closing active tab SYNCHRONOUSLY, before the async EventBus
+        // close dispatch. This bridge callback runs on the UI/main thread inside
+        // Chromium's synchronous close turn while the WebContents is still alive;
+        // the EventBus close (Task { @MainActor }) runs only AFTER Chromium has
+        // destroyed it, when CGWindowList would capture blank. MainActor.assumeIsolated
+        // mirrors windowDidEnterPlaceholderMode's synchronous-detach pattern.
+        // The contract above holds today (BrowserThread::UI = the AppKit main thread =
+        // MainActor), but it isn't type-enforced. Assert it; if Chromium ever delivers
+        // this off-main, skip the best-effort mask rather than trapping — the EventBus
+        // close below must still fire.
+        if Thread.isMainThread {
+            MainActor.assumeIsolated {
+                // nil window (already torn down) → skip silently; the mask is best-effort.
+                MainBrowserWindowControllersManager.shared
+                    .controller(for: windowId.intValue)?
+                    .mainSplitViewController.webContentContainerViewController
+                    .maskClosingTab(tabId: tabId.intValue)
+            }
+        } else {
+            assertionFailure("tabWillBeRemove off the main thread; skipping best-effort close mask")
+        }
         EventBus.shared
             .send(TabEvent(browserId: windowId.intValue,
                            action: .closeTab(tabId.intValue)))

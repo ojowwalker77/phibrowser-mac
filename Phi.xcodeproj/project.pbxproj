@@ -170,6 +170,7 @@
 		8E4C949A2F10D01500B09A80 /* TabStripLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E4C94992F10D01500B09A80 /* TabStripLayout.swift */; };
 		8E4C949C2F10DA5800B09A80 /* NewTabButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E4C949B2F10DA5800B09A80 /* NewTabButton.swift */; };
 		8E4FD9BF2EF7D98C007D97A4 /* ZeroSafeAreaHostingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E4FD9BE2EF7D98C007D97A4 /* ZeroSafeAreaHostingView.swift */; };
+		8E5D8B012FDFFAD30039CBE3 /* WebContentSnapshotter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E5D8B002FDFFAD30039CBE3 /* WebContentSnapshotter.swift */; };
 		8E6145822F753114001919BA /* LayoutSelectionViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E6145802F753114001919BA /* LayoutSelectionViewController.swift */; };
 		8E6145BE2F753469001919BA /* ImportDataTypeViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E6145BD2F753469001919BA /* ImportDataTypeViewController.swift */; };
 		8E762C192F15F5AE00631087 /* TabDragContext.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E762C172F15F5AE00631087 /* TabDragContext.swift */; };
@@ -568,6 +569,7 @@
 		8E4C94992F10D01500B09A80 /* TabStripLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TabStripLayout.swift; sourceTree = "<group>"; };
 		8E4C949B2F10DA5800B09A80 /* NewTabButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewTabButton.swift; sourceTree = "<group>"; };
 		8E4FD9BE2EF7D98C007D97A4 /* ZeroSafeAreaHostingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZeroSafeAreaHostingView.swift; sourceTree = "<group>"; };
+		8E5D8B002FDFFAD30039CBE3 /* WebContentSnapshotter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebContentSnapshotter.swift; sourceTree = "<group>"; };
 		8E6145802F753114001919BA /* LayoutSelectionViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LayoutSelectionViewController.swift; sourceTree = "<group>"; };
 		8E6145BD2F753469001919BA /* ImportDataTypeViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportDataTypeViewController.swift; sourceTree = "<group>"; };
 		8E762C172F15F5AE00631087 /* TabDragContext.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TabDragContext.swift; sourceTree = "<group>"; };
@@ -1753,6 +1755,7 @@
 		CCEF2CF22E57075700FDDEB2 /* WebContent */ = {
 			isa = PBXGroup;
 			children = (
+				8E5D8B002FDFFAD30039CBE3 /* WebContentSnapshotter.swift */,
 				8E21BB692FC5503D00378ABE /* PlaceholderShellViewController.swift */,
 				376CE2F12F2722480093D937 /* NativeNTP */,
 				8E0B00092FC0000000000001 /* GroupOverview */,
@@ -2252,6 +2255,7 @@
 				CC288A8A2E5333CC004A6C1C /* main.m in Sources */,
 				CCBF8FA52E69915200B9A99E /* ApplicationState.swift in Sources */,
 				37C1B2F72EE2882400DD4496 /* OverlayToastViewModel.swift in Sources */,
+				8E5D8B012FDFFAD30039CBE3 /* WebContentSnapshotter.swift in Sources */,
 				376CE4122F2897D30093D937 /* AirbyteResponse.swift in Sources */,
 				376195452F5149ED0094A78E /* WebContentHeaderView.swift in Sources */,
 				376CE4132F2897D30093D937 /* Connector.swift in Sources */,
