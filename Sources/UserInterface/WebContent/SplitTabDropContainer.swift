@@ -839,6 +839,30 @@ final class SplitTabDropContainer: NSView {
         )
     }
 
+    /// Corner radius the hint card should draw for the given mode. Create-mode
+    /// cards float inside the page with their own rounded look; replace-mode
+    /// cards cover a pane edge-to-edge, so they must trace the pane's own
+    /// radius (`SplitPaneHostView`'s pane container) instead of bulging past
+    /// its rounded corners.
+    private func hintCornerRadius(for mode: Mode) -> CGFloat {
+        switch mode {
+        case .create:
+            return Self.dropHintCornerRadius
+        case .replace:
+            return LiquidGlassCompatible.webContentInnerComponentsCornerRadius
+        }
+    }
+
+    /// Applies the corner radius to both the backing layer and, on macOS 26+,
+    /// the `NSGlassEffectView`'s own `cornerRadius` (which clips the Liquid
+    /// Glass material independently of the layer).
+    private func applyHintCornerRadius(_ radius: CGFloat, to glass: NSView) {
+        if #available(macOS 26.0, *), let glassEffect = glass as? NSGlassEffectView {
+            glassEffect.cornerRadius = radius
+        }
+        glass.layer?.cornerRadius = radius
+    }
+
     private func updateDropHintFrame(glass: NSView,
                                      highlight: CAGradientLayer,
                                      border: CAShapeLayer,
@@ -866,11 +890,13 @@ final class SplitTabDropContainer: NSView {
             width: max(0, zoneRect.width - horizontalInset * 2),
             height: max(0, zoneRect.height - verticalInset * 2)
         )
+        let cornerRadius = hintCornerRadius(for: activeMode)
         glass.frame = hintRect
+        applyHintCornerRadius(cornerRadius, to: glass)
         let path = CGPath(
             roundedRect: hintRect,
-            cornerWidth: Self.dropHintCornerRadius,
-            cornerHeight: Self.dropHintCornerRadius,
+            cornerWidth: cornerRadius,
+            cornerHeight: cornerRadius,
             transform: nil
         )
         CATransaction.begin()
