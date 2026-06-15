@@ -791,9 +791,14 @@ extension BrowserState {
             let group = splits[index]
             let primaryGuidInDB = tabs.first(where: { $0.guid == group.primaryTabId })?.guidInLocalDB
             let secondaryGuidInDB = tabs.first(where: { $0.guid == group.secondaryTabId })?.guidInLocalDB
-            splits[index].isPinned = false
-            toggleTabPinStatus(group.primaryTabId, guidInDB: primaryGuidInDB)
-            toggleTabPinStatus(group.secondaryTabId, guidInDB: secondaryGuidInDB)
+            let activePane = tabs.first { group.contains(tabId: $0.guid) && $0.isActive }
+            if let pinnedGuid = primaryGuidInDB ?? secondaryGuidInDB {
+                movePinnedTabOut(pinnedGuid: pinnedGuid,
+                                 to: normalTabs.count,
+                                 selectAfterMove: activePane?.isActive == true)
+            } else {
+                splits[index].isPinned = false
+            }
             return
         }
         // Pinning: delegate to the chained-anchor path so the secondary

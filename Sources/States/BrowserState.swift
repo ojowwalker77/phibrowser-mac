@@ -1847,6 +1847,15 @@ class BrowserState {
                 return
             }
             if opennedTab.isPinned || opennedTab.guidInLocalDB?.isEmpty == false {
+                if let pinnedGuid = opennedTab.guidInLocalDB,
+                   let pinnedTab = pinnedTabs.first(where: { $0.guidInLocalDB == pinnedGuid }),
+                   pinnedSplitDBPair(forPinnedTab: pinnedTab) != nil {
+                    movePinnedTabOut(pinnedGuid: pinnedGuid,
+                                     to: normalTabOrder.count,
+                                     selectAfterMove: opennedTab.isActive)
+                    return
+                }
+
                 // Migrate AI Chat tab association before changing identifier
                 // When unpinning, identifier changes from guidInLocalDB to chromium guid
                 migrateAIChatTab(for: opennedTab, toNewIdentifier: nil)
@@ -1858,7 +1867,9 @@ class BrowserState {
                     wrapper.updateTabCustomValue("")
                 }
                 opennedTab.isPinned = false
-                updateNormalTabs()
+                insertIntoNormalTabOrder(tabGuid: opennedTab.guid,
+                                         at: normalTabOrder.count,
+                                         syncChromiumOrder: true)
             } else {
                 // create Local tab
                 // Note: moveNormalTab already handles AI Chat tab migration
@@ -3975,6 +3986,9 @@ class BrowserState {
             migrateAIChatTab(for: chromiumTab, toNewIdentifier: nil)
             chromiumTab.guidInLocalDB = nil
             chromiumTab.webContentWrapper?.updateTabCustomValue("")
+            insertIntoNormalTabOrder(tabGuid: chromiumTab.guid,
+                                     at: normalTabOrder.count,
+                                     syncChromiumOrder: true)
         }
         // The unbound panes were filtered out of the sidebar while bound;
         // refilter so they reappear as a normal split pair (mirrors

@@ -210,4 +210,87 @@ final class BrowserStateHiddenOpenerInsertionTests: XCTestCase {
 
         XCTAssertEqual(state.normalTabs.map(\.guid), [10, 1, 2, 3])
     }
+
+    func testDeletedOpenBookmarkTabReturnsToEndOfNormalTabs() throws {
+        let state = try makeState()
+        seedNormalTabs(state)
+
+        let bookmark = Bookmark(guid: "bookmark-p",
+                                title: "Bookmark P",
+                                url: "https://p.example")
+        bookmark.isOpened = true
+        state.bookmarkManager.rootFolder.addChild(bookmark)
+
+        let bookmarkLiveTab = Tab(guid: 9,
+                                  url: "https://p.example",
+                                  isActive: true,
+                                  index: 1,
+                                  customGuid: bookmark.guid)
+        state.tabs.insert(bookmarkLiveTab, at: 1)
+        state.updateNormalTabs()
+
+        XCTAssertEqual(state.normalTabs.map(\.guid), [1, 2, 3])
+
+        state.detachOpenTabsForRemovedBookmark(bookmark)
+
+        XCTAssertNil(bookmarkLiveTab.guidInLocalDB)
+        XCTAssertEqual(state.normalTabs.map(\.guid), [1, 2, 3, 9])
+    }
+
+    func testToggleSplitPinStatusUnpinsOpenPinnedSplitOnce() throws {
+        let state = try makeState()
+        seedNormalTabs(state)
+
+        let leftPinned = Tab(guid: 100,
+                             url: "https://left.example",
+                             isActive: true,
+                             index: 0,
+                             customGuid: "pinned-left")
+        let rightPinned = Tab(guid: 101,
+                              url: "https://right.example",
+                              isActive: false,
+                              index: 1,
+                              customGuid: "pinned-right")
+        leftPinned.isOpenned = true
+        rightPinned.isOpenned = true
+        leftPinned.splitPartnerGuid = "pinned-right"
+        rightPinned.splitPartnerGuid = "pinned-left"
+        state.pinnedTabs = [leftPinned, rightPinned]
+
+        let leftLive = Tab(guid: 100,
+                           url: "https://left.example",
+                           isActive: true,
+                           index: 3,
+                           customGuid: "pinned-left")
+        let rightLive = Tab(guid: 101,
+                            url: "https://right.example",
+                            isActive: false,
+                            index: 4,
+                            customGuid: "pinned-right")
+        leftLive.isPinned = true
+        rightLive.isPinned = true
+        state.tabs.append(contentsOf: [leftLive, rightLive])
+        state.splits = [
+            SplitGroup(id: "split-100-101",
+                       primaryTabId: 100,
+                       secondaryTabId: 101,
+                       layout: .vertical,
+                       ratio: 0.5,
+                       isPinned: true)
+        ]
+        state.updateNormalTabs()
+
+        XCTAssertEqual(state.normalTabs.map(\.guid), [1, 2, 3])
+
+        state.toggleSplitPinStatus("split-100-101")
+
+        XCTAssertEqual(state.normalTabs.map(\.guid), [1, 2, 3, 100, 101])
+        XCTAssertEqual(state.splits.first?.primaryTabId, 100)
+        XCTAssertEqual(state.splits.first?.secondaryTabId, 101)
+        XCTAssertEqual(state.splits.first?.isPinned, false)
+        XCTAssertNil(leftLive.guidInLocalDB)
+        XCTAssertNil(rightLive.guidInLocalDB)
+        XCTAssertFalse(leftLive.isPinned)
+        XCTAssertFalse(rightLive.isPinned)
+    }
 }
