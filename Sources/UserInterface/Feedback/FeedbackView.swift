@@ -20,6 +20,18 @@ struct FeedbackView: View {
 
     private let attachmentRowHeight: CGFloat = 24
     private let attachmentRowSpacing: CGFloat = 6
+
+    private var windowBackgroundColor: Color {
+        Color(NSColor.windowBackgroundColor)
+    }
+
+    private var controlBackgroundColor: Color {
+        Color(NSColor.controlBackgroundColor)
+    }
+
+    private var separatorColor: Color {
+        Color(NSColor.separatorColor)
+    }
     
     private var legalText: AttributedString {
         var string = AttributedString(NSLocalizedString("Some account and system information may be sent to Phinomenon. We will use the information you give us to help address technical issues and to improve our services, subject to our Privacy Policy and Terms of Service.", comment: "Feedback form - Legal disclaimer text explaining data usage, contains links to Privacy Policy and Terms of Service"))
@@ -75,7 +87,7 @@ struct FeedbackView: View {
         }
         .frame(width: 520)
         .frame(maxHeight: .infinity)
-        .background(Color.white)
+        .background(windowBackgroundColor)
         .background(FeedbackPasteImageMonitor { image in
             viewModel.addPastedImage(image)
         })
@@ -133,11 +145,11 @@ struct FeedbackView: View {
                 .font(.body)
                 .frame(height: 144)
                 .padding(4)
-                .background(Color(NSColor.black.withAlphaComponent(0.02)))
+                .background(controlBackgroundColor)
                 .clipShape(.rect(cornerRadius: 8))
                 .overlay(
                     RoundedRectangle(cornerRadius: 8)
-                        .stroke(Color(NSColor.separatorColor), lineWidth: 1)
+                        .stroke(separatorColor, lineWidth: 1)
                 )
                 .onChange(of: viewModel.descriptionText, { _, newValue in
                     if newValue.count > maxDescriptionLength {
@@ -162,13 +174,13 @@ struct FeedbackView: View {
             VStack(spacing: 11) {
                 HStack {
                     Text(NSLocalizedString("URL", comment: "Feedback form - Label for URL input field"))
-                        .foregroundColor(.primary)
+                        .foregroundStyle(.primary)
                     Spacer()
                     TextField("URL", text: $urlString)
                         .textFieldStyle(.plain)
                         .focusEffectDisabled()
                         .multilineTextAlignment(.trailing)
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .truncationMode(.middle)
                 }
@@ -183,11 +195,11 @@ struct FeedbackView: View {
                 }
             }
             .padding()
-            .background(Color(NSColor.black.withAlphaComponent(0.02)))
+            .background(controlBackgroundColor)
             .clipShape(.rect(cornerRadius: 8))
             .overlay(
                 RoundedRectangle(cornerRadius: 8)
-                    .stroke(Color(NSColor.separatorColor), lineWidth: 1)
+                    .stroke(separatorColor, lineWidth: 1)
             )
         }
     }
@@ -195,7 +207,7 @@ struct FeedbackView: View {
     private var legalSection: some View {
         Text(legalText)
             .font(.system(size: 11, weight: .regular))
-            .foregroundColor(.secondary)
+            .foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)
             .environment(\.openURL, OpenURLAction { url in
                 if url.absoluteString == "privacy" {
@@ -225,7 +237,7 @@ struct FeedbackView: View {
             .padding(.horizontal, 24)
             .padding(.vertical, 14)
             .frame(maxWidth: .infinity)
-            .background(Color.white)
+            .background(windowBackgroundColor)
         }
         .frame(maxWidth: .infinity)
     }

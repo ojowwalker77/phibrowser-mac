@@ -45,9 +45,7 @@ class FeedbackViewController: NSViewController {
     }
     
     override func loadView() {
-        view = NSView()
-        view.wantsLayer = true
-        view.layer?.backgroundColor = NSColor.white.cgColor
+        view = FeedbackBackgroundView()
     }
     
     override func viewDidLoad() {
@@ -126,5 +124,30 @@ class FeedbackViewController: NSViewController {
     
     private func closeWindow() {
         view.window?.close()
+    }
+}
+
+private final class FeedbackBackgroundView: NSView {
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        updateBackgroundAppearance()
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        wantsLayer = true
+        updateBackgroundAppearance()
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        updateBackgroundAppearance()
+    }
+
+    private func updateBackgroundAppearance() {
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+        }
     }
 }
