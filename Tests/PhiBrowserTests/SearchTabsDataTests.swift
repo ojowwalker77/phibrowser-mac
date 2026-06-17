@@ -424,4 +424,351 @@ final class SearchTabsDataTests: XCTestCase {
         XCTAssertEqual(try XCTUnwrap(snapshot.bookmarks.first).secondary?.title, "https://calendar.example")
         XCTAssertEqual(try XCTUnwrap(snapshot.bookmarks.last).secondary?.title, "https://tasks.example")
     }
+
+    func testAggregatorKeepsOpenedTabAndMatchingNativePinAndRanksOpenedFirst() throws {
+        let chromium = SearchTabsChromiumSnapshot(
+            openTabs: [
+                makeOpenTab(
+                    tabId: 42,
+                    windowId: 7,
+                    title: "GitHub",
+                    url: "https://github.com",
+                    active: false,
+                    pinned: true,
+                    hostWindow: true,
+                    lastActiveElapsedMs: 10
+                ),
+            ],
+            closedTabs: []
+        )
+        let native = SearchTabsNativeSnapshot(
+            pins: [
+                nativeEntry(
+                    id: "pin:github",
+                    guid: "github",
+                    kind: .pin,
+                    title: "GitHub",
+                    url: "https://github.com",
+                    isOpen: true
+                ),
+            ],
+            bookmarks: [],
+            bookmarkRoot: nil
+        )
+
+        let snapshot = SearchTabsAggregator.aggregate(
+            query: "git",
+            profileId: "profile-1",
+            windowId: 7,
+            chromium: chromium,
+            native: native
+        )
+
+        XCTAssertEqual(snapshot.items.map(\.kind), [.openedtab, .pin])
+        XCTAssertEqual(snapshot.items.first?.action, .activateChromiumTab(tabId: 42, windowId: 7))
+        XCTAssertTrue(try XCTUnwrap(snapshot.items.last).state.isOpen)
+    }
+
+    func testAggregatorEmptyQueryShowsBookmarkRootButNotClosedBookmarks() {
+        let native = SearchTabsNativeSnapshot(
+            pins: [],
+            bookmarks: [
+                nativeEntry(
+                    id: "bookmark:closed",
+                    guid: "closed",
+                    kind: .bookmark,
+                    title: "Closed Bookmark",
+                    url: "https://closed.example",
+                    isOpen: false
+                ),
+            ],
+            bookmarkRoot: nativeEntry(
+                id: "bookmark-root:profile-1",
+                guid: nil,
+                kind: .bookmarkRoot,
+                title: "Bookmarks",
+                url: nil,
+                isOpen: false,
+                displayMode: .bookmarkMenuRoot,
+                action: .showBookmarkMenuRoot(profileId: "profile-1"),
+                providerOrder: Int.max
+            )
+        )
+
+        let snapshot = SearchTabsAggregator.aggregate(
+            query: "",
+            profileId: "profile-1",
+            windowId: 7,
+            chromium: SearchTabsChromiumSnapshot(openTabs: [], closedTabs: []),
+            native: native
+        )
+
+        XCTAssertEqual(snapshot.items.map(\.kind), [.bookmarkRoot])
+    }
+
+    func testAggregatorSortsOpenedTabsByHostActiveThenElapsedAscending() {
+        let chromium = SearchTabsChromiumSnapshot(
+            openTabs: [
+                makeOpenTab(tabId: 1, windowId: 7, title: "Host Older", hostWindow: true, lastActiveElapsedMs: 500),
+                makeOpenTab(tabId: 2, windowId: 8, title: "Other Recent", hostWindow: false, lastActiveElapsedMs: 1),
+                makeOpenTab(tabId: 3, windowId: 7, title: "Host Active", active: true, hostWindow: true, lastActiveElapsedMs: 200),
+                makeOpenTab(tabId: 4, windowId: 7, title: "Host Recent", hostWindow: true, lastActiveElapsedMs: 20),
+            ],
+            closedTabs: []
+        )
+
+        let snapshot = SearchTabsAggregator.aggregate(
+            query: "",
+            profileId: "profile-1",
+            windowId: 7,
+            chromium: chromium,
+            native: SearchTabsNativeSnapshot(pins: [], bookmarks: [], bookmarkRoot: nil)
+        )
+
+        XCTAssertEqual(snapshot.items.map(\.primary.chromiumTabId), [3, 4, 1, 2])
+    }
+
+    func testAggregatorSortsOpenedTabTieByChromiumIndex() {
+        let chromium = SearchTabsChromiumSnapshot(
+            openTabs: [
+                makeOpenTab(tabId: 2, windowId: 7, index: 2, title: "Docs Second", hostWindow: true, lastActiveElapsedMs: 10),
+                makeOpenTab(tabId: 1, windowId: 7, index: 1, title: "Docs First", hostWindow: true, lastActiveElapsedMs: 10),
+            ],
+            closedTabs: []
+        )
+
+        let snapshot = SearchTabsAggregator.aggregate(
+            query: "docs",
+            profileId: "profile-1",
+            windowId: 7,
+            chromium: chromium,
+            native: SearchTabsNativeSnapshot(pins: [], bookmarks: [], bookmarkRoot: nil)
+        )
+
+        XCTAssertEqual(snapshot.items.map(\.primary.chromiumTabId), [1, 2])
+    }
+
+    func testAggregatorSortsClosedTabsByElapsedBeforeTimestamp() {
+        let chromium = SearchTabsChromiumSnapshot(
+            openTabs: [],
+            closedTabs: [
+                makeClosedTab(
+                    sessionId: 1,
+                    title: "Docs Older Activity",
+                    lastActiveTimeMs: 2_000,
+                    lastActiveElapsedMs: 500,
+                    providerOrder: 0
+                ),
+                makeClosedTab(
+                    sessionId: 2,
+                    title: "Docs Recent Activity",
+                    lastActiveTimeMs: 1_000,
+                    lastActiveElapsedMs: 10,
+                    providerOrder: 1
+                ),
+            ]
+        )
+
+        let snapshot = SearchTabsAggregator.aggregate(
+            query: "docs",
+            profileId: "profile-1",
+            windowId: 7,
+            chromium: chromium,
+            native: SearchTabsNativeSnapshot(pins: [], bookmarks: [], bookmarkRoot: nil)
+        )
+
+        XCTAssertEqual(snapshot.items.map(\.action), [
+            .restoreClosedTab(sessionId: 2, sourceEntrySessionId: 2, sourceEntryType: "tab"),
+            .restoreClosedTab(sessionId: 1, sourceEntrySessionId: 1, sourceEntryType: "tab"),
+        ])
+    }
+
+    func testAggregatorExcludesUnmatchedItemsForNonEmptyQuery() {
+        let chromium = SearchTabsChromiumSnapshot(
+            openTabs: [
+                makeOpenTab(tabId: 1, windowId: 7, title: "Mail", lastActiveElapsedMs: 10),
+            ],
+            closedTabs: [
+                makeClosedTab(sessionId: 1, title: "Calendar", lastActiveTimeMs: 1_000, lastActiveElapsedMs: 20),
+            ]
+        )
+        let native = SearchTabsNativeSnapshot(
+            pins: [
+                nativeEntry(id: "pin:notes", guid: "notes", kind: .pin, title: "Notes", url: "https://notes.example", isOpen: false),
+            ],
+            bookmarks: [
+                nativeEntry(id: "bookmark:tasks", guid: "tasks", kind: .bookmark, title: "Tasks", url: "https://tasks.example", isOpen: true),
+            ],
+            bookmarkRoot: nativeEntry(
+                id: "bookmark-root:profile-1",
+                guid: nil,
+                kind: .bookmarkRoot,
+                title: "Bookmarks",
+                url: nil,
+                isOpen: false,
+                displayMode: .bookmarkMenuRoot,
+                action: .showBookmarkMenuRoot(profileId: "profile-1"),
+                providerOrder: Int.max
+            )
+        )
+
+        let snapshot = SearchTabsAggregator.aggregate(
+            query: "git",
+            profileId: "profile-1",
+            windowId: 7,
+            chromium: chromium,
+            native: native
+        )
+
+        XCTAssertTrue(snapshot.items.isEmpty)
+    }
+
+    func testAggregatorKeepsLiveSplitOpenedTabsAsSingleDisplayItems() throws {
+        let chromium = SearchTabsChromiumSnapshot(
+            openTabs: [
+                makeOpenTab(
+                    tabId: 42,
+                    windowId: 7,
+                    title: "Split Docs",
+                    split: true,
+                    lastActiveElapsedMs: 10
+                ),
+            ],
+            closedTabs: []
+        )
+
+        let snapshot = SearchTabsAggregator.aggregate(
+            query: "",
+            profileId: "profile-1",
+            windowId: 7,
+            chromium: chromium,
+            native: SearchTabsNativeSnapshot(pins: [], bookmarks: [], bookmarkRoot: nil)
+        )
+        let item = try XCTUnwrap(snapshot.items.first)
+
+        XCTAssertEqual(item.displayMode, .single)
+        XCTAssertTrue(item.state.isSplit)
+        XCTAssertNil(item.splitRelation)
+    }
+
+    func testDataControllerReleasedStateUsesDefaultProfileAndWindowZero() {
+        let controller = SearchTabsDataController(
+            browserState: nil,
+            chromiumProvider: SearchTabsChromiumProvider(fetchData: { _ in [:] })
+        )
+
+        let snapshot = controller.snapshot(query: "git")
+
+        XCTAssertEqual(snapshot.profileId, LocalStore.defaultProfileId)
+        XCTAssertEqual(snapshot.windowId, 0)
+        XCTAssertTrue(snapshot.items.isEmpty)
+    }
+
+    private func makeOpenTab(
+        tabId: Int64,
+        windowId: Int64,
+        index: Int = 0,
+        title: String,
+        url: String = "https://example.com",
+        active: Bool = false,
+        pinned: Bool = false,
+        split: Bool = false,
+        hostWindow: Bool = false,
+        lastActiveElapsedMs: Int64
+    ) -> ChromiumSearchOpenTab {
+        ChromiumSearchOpenTab(
+            tabId: tabId,
+            windowId: windowId,
+            index: index,
+            title: title,
+            url: url,
+            groupIdHex: "",
+            active: active,
+            pinned: pinned,
+            split: split,
+            hostWindow: hostWindow,
+            lastActiveElapsedMs: lastActiveElapsedMs,
+            lastActiveElapsedText: ""
+        )
+    }
+
+    private func makeClosedTab(
+        sessionId: Int64,
+        sourceEntrySessionId: Int64? = nil,
+        sourceEntryType: String = "tab",
+        title: String,
+        url: String = "https://example.com",
+        lastActiveTimeMs: Int64,
+        lastActiveElapsedMs: Int64,
+        providerOrder: Int = 0
+    ) -> ChromiumSearchClosedTab {
+        ChromiumSearchClosedTab(
+            sessionId: sessionId,
+            sourceEntrySessionId: sourceEntrySessionId ?? sessionId,
+            sourceEntryType: sourceEntryType,
+            title: title,
+            url: url,
+            groupIdHex: "",
+            lastActiveTimeMs: lastActiveTimeMs,
+            lastActiveElapsedMs: lastActiveElapsedMs,
+            lastActiveElapsedText: "",
+            providerOrder: providerOrder
+        )
+    }
+
+    private func nativeEntry(
+        id: String,
+        guid: String?,
+        kind: SearchTabsKind,
+        title: String,
+        url: String?,
+        isOpen: Bool,
+        displayMode: SearchTabsDisplayMode = .single,
+        action: SearchTabsActionTarget? = nil,
+        providerOrder: Int = 0
+    ) -> NativeSearchEntry {
+        let localGuid = kind == .bookmarkRoot ? nil : guid
+        let resolvedAction = action ?? {
+            switch kind {
+            case .pin:
+                return .openPinned(localGuid: guid ?? "", preferredPaneGuid: nil)
+            case .bookmark:
+                return .openBookmark(localGuid: guid ?? "", preferredPaneGuid: nil)
+            case .bookmarkRoot:
+                return .showBookmarkMenuRoot(profileId: "profile-1")
+            case .openedtab, .closedtab:
+                return .showBookmarkMenuRoot(profileId: "profile-1")
+            }
+        }()
+
+        return NativeSearchEntry(
+            id: id,
+            guid: guid,
+            kind: kind,
+            displayMode: displayMode,
+            primary: SearchTabsPane(
+                title: title,
+                url: url,
+                faviconData: nil,
+                faviconURL: nil,
+                localGuid: localGuid,
+                chromiumTabId: nil,
+                windowId: 7
+            ),
+            secondary: nil,
+            state: SearchTabsItemState(
+                isOpen: isOpen,
+                isActive: false,
+                isHostWindow: true,
+                isPinnedInChromium: false,
+                isSplit: false,
+                lastSeen: nil,
+                lastActiveElapsedMs: nil,
+                lastActiveElapsedText: nil
+            ),
+            action: resolvedAction,
+            secondaryAction: nil,
+            providerOrder: providerOrder
+        )
+    }
 }
