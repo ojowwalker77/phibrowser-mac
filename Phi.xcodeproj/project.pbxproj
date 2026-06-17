@@ -206,6 +206,8 @@
 		AA10000000000000000000B3 /* TabSwitchCellView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA10000000000000000000F3 /* TabSwitchCellView.swift */; };
 		AA10000000000000000000B4 /* TabSwitchWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA10000000000000000000F4 /* TabSwitchWindowController.swift */; };
 		AA10000000000000000000B5 /* TabSwitchManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA10000000000000000000F5 /* TabSwitchManager.swift */; };
+		5EA17ABC0000000000000100 /* SearchTabsModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EA17ABC0000000000000110 /* SearchTabsModels.swift */; };
+		5EA17ABC0000000000000101 /* SearchTabsQueryMatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EA17ABC0000000000000111 /* SearchTabsQueryMatcher.swift */; };
 		AB1000000000000000000FA1 /* TabMultiSelection.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB1000000000000000000FA2 /* TabMultiSelection.swift */; };
 		AB1000000000000000000FB1 /* TabMultiSelectionMenu.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB1000000000000000000FB2 /* TabMultiSelectionMenu.swift */; };
 		AE00FFFE0000000000000002 /* PhiAgentEndpointResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE00FFFE0000000000000001 /* PhiAgentEndpointResolver.swift */; };
@@ -605,6 +607,8 @@
 		AA10000000000000000000F3 /* TabSwitchCellView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TabSwitchCellView.swift; sourceTree = "<group>"; };
 		AA10000000000000000000F4 /* TabSwitchWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TabSwitchWindowController.swift; sourceTree = "<group>"; };
 		AA10000000000000000000F5 /* TabSwitchManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TabSwitchManager.swift; sourceTree = "<group>"; };
+		5EA17ABC0000000000000110 /* SearchTabsModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchTabsModels.swift; sourceTree = "<group>"; };
+		5EA17ABC0000000000000111 /* SearchTabsQueryMatcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchTabsQueryMatcher.swift; sourceTree = "<group>"; };
 		AB1000000000000000000FA2 /* TabMultiSelection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TabMultiSelection.swift; sourceTree = "<group>"; };
 		AB1000000000000000000FB2 /* TabMultiSelectionMenu.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TabMultiSelectionMenu.swift; sourceTree = "<group>"; };
 		AE00FFFE0000000000000001 /* PhiAgentEndpointResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhiAgentEndpointResolver.swift; sourceTree = "<group>"; };
@@ -1256,6 +1260,15 @@
 			path = TabSwitch;
 			sourceTree = "<group>";
 		};
+		5EA17ABC0000000000000120 /* SearchTabs */ = {
+			isa = PBXGroup;
+			children = (
+				5EA17ABC0000000000000110 /* SearchTabsModels.swift */,
+				5EA17ABC0000000000000111 /* SearchTabsQueryMatcher.swift */,
+			);
+			path = SearchTabs;
+			sourceTree = "<group>";
+		};
 		B02586F42E42FD97001B08FC /* Sources */ = {
 			isa = PBXGroup;
 			children = (
@@ -1368,6 +1381,7 @@
 				CC24EEF32E8662AC00CE9DD7 /* Onboarding */,
 				37C1B2F32EE287CB00DD4496 /* OverlayWindowToast */,
 				CC6B000C2E77DEA900D4F133 /* Preferences */,
+				5EA17ABC0000000000000120 /* SearchTabs */,
 				CC288A652E4F121E004A6C1C /* Sidebar */,
 				AA10000000000000000000G1 /* TabSwitch */,
 				CCEF2CF22E57075700FDDEB2 /* WebContent */,
@@ -2048,6 +2062,8 @@
 				AA10000000000000000000B3 /* TabSwitchCellView.swift in Sources */,
 				AA10000000000000000000B4 /* TabSwitchWindowController.swift in Sources */,
 				AA10000000000000000000B5 /* TabSwitchManager.swift in Sources */,
+				5EA17ABC0000000000000100 /* SearchTabsModels.swift in Sources */,
+				5EA17ABC0000000000000101 /* SearchTabsQueryMatcher.swift in Sources */,
 				CCBF8F4D2E6543E800B9A99E /* TabSectionController.swift in Sources */,
 				373D84032F3C801B00430BE6 /* AuthManagerExternalBrowserWebAuthUserAgent.swift in Sources */,
 				373D84052F9D500100000001 /* AuthManager+Reauthentication.swift in Sources */,
