@@ -7,7 +7,11 @@ import Foundation
 import Security
 
 extension Notification.Name {
+    #if NIGHTLY_BUILD
+    static let sharedAuthTokenDidChange = Notification.Name("com.phibrowser.canary.sharedAuthTokenDidChange")
+    #else
     static let sharedAuthTokenDidChange = Notification.Name("com.phibrowser.sharedAuthTokenDidChange")
+    #endif
 }
 
 struct SharedAuthToken: Codable {

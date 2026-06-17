@@ -88,7 +88,7 @@ struct WebContentHeaderView: View {
 
                 HeaderTrailingArea(
                     availableWidth: max(0, totalHeaderWidth - leadingButtonsWidth - addressBarReservedWidth),
-                    pinnedExtensions: extensionsModel.pinnedExtensions,
+                    pinnedExtensions: extensionsModel.visiblePinnedExtensions,
                     showDownload: state.showDownloadButton,
                     showMemory: state.showMemoryButton,
                     showFeedback: state.showFeedbackButton,

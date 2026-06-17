@@ -20,6 +20,8 @@ class BookmarkItemView: NSView {
     let bookmark: Bookmark
     private var cancellables = Set<AnyCancellable>()
     private var themeObservation: AnyObject?
+    private var faviconLoadHandle: ProfileScopedFaviconLoadHandle?
+    private var secondaryFaviconLoadHandle: ProfileScopedFaviconLoadHandle?
     // Reports the clicked bookmark to the container view.
     var onClick: ((Bookmark) -> Void)?
 
@@ -79,10 +81,24 @@ class BookmarkItemView: NSView {
         setupUI()
         bindData()
         bindTheme()
+        // Expose each bar item to UI testing as a button; the bookmark bar
+        // otherwise has no stable query surface for the test reset to clear.
+        setAccessibilityElement(true)
+        setAccessibilityRole(.button)
+        setAccessibilityIdentifier(BookmarkItemView.accessibilityIdentifier)
+        setAccessibilityLabel(bookmark.title)
     }
+
+    /// Identifier stamped on every bookmark-bar item.
+    static let accessibilityIdentifier = "bookmarkBarItem"
 
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+
+    deinit {
+        faviconLoadHandle?.cancel()
+        secondaryFaviconLoadHandle?.cancel()
     }
 
     // MARK: - Data Binding
@@ -99,9 +115,29 @@ class BookmarkItemView: NSView {
         }
 
         bookmark.$url
+            .removeDuplicates()
             .receive(on: DispatchQueue.main)
             .sink { [weak self] url in
-                self?.faviconImageView.loadFavicon(from: url, cornerRadius: 4)
+                guard let self else { return }
+                self.updateFavicon(bookmark: self.bookmark, pageUrl: url)
+            }
+            .store(in: &cancellables)
+
+        bookmark.$liveFaviconData
+            .removeDuplicates()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                guard let self else { return }
+                self.updateFavicon(bookmark: self.bookmark, pageUrl: self.bookmark.url)
+            }
+            .store(in: &cancellables)
+
+        bookmark.$cachedFaviconData
+            .removeDuplicates()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                guard let self else { return }
+                self.updateFavicon(bookmark: self.bookmark, pageUrl: self.bookmark.url)
             }
             .store(in: &cancellables)
 
@@ -114,9 +150,11 @@ class BookmarkItemView: NSView {
                                   bookmark.$url)
             .receive(on: DispatchQueue.main)
             .sink { [weak self] primaryTitle, secondaryUrl, secondaryTitle, _ in
-                self?.applySplitState(primaryTitle: primaryTitle,
-                                      secondaryUrl: secondaryUrl,
-                                      secondaryTitle: secondaryTitle)
+                guard let self else { return }
+                self.applySplitState(bookmark: self.bookmark,
+                                     primaryTitle: primaryTitle,
+                                     secondaryUrl: secondaryUrl,
+                                     secondaryTitle: secondaryTitle)
             }
             .store(in: &cancellables)
     }
@@ -126,23 +164,36 @@ class BookmarkItemView: NSView {
     /// non-split bookmarks lay out as before.
     private var isShowingSecondaryFavicon = false
 
+    private func updateFavicon(bookmark: Bookmark, pageUrl: String?) {
+        faviconLoadHandle?.cancel()
+        faviconLoadHandle = nil
+
+        faviconLoadHandle = BookmarkFaviconLoader.loadPrimaryFavicon(for: bookmark,
+                                                                     pageURLString: pageUrl) { [weak self] image in
+            self?.faviconImageView.image = image
+        }
+    }
+
     /// Joins both pane names into a single bookmark-bar label and toggles the
     /// secondary favicon. Falls back to the secondary URL's host when no
     /// explicit secondary title is stored (e.g. legacy split bookmarks saved
     /// before the title field existed).
-    private func applySplitState(primaryTitle: String,
+    private func applySplitState(bookmark: Bookmark,
+                                 primaryTitle: String,
                                  secondaryUrl: String?,
                                  secondaryTitle: String?) {
         guard let secondaryUrl, !secondaryUrl.isEmpty else {
             // Plain single-URL bookmark.
             setSecondaryFavicon(visible: false)
+            secondaryFaviconLoadHandle?.cancel()
+            secondaryFaviconLoadHandle = nil
             secondaryFaviconImageView.image = nil
             titleLabel.stringValue = primaryTitle
             invalidateIntrinsicContentSize()
             return
         }
         setSecondaryFavicon(visible: true)
-        secondaryFaviconImageView.loadFavicon(from: secondaryUrl, cornerRadius: 4)
+        loadSecondaryFavicon(bookmark: bookmark, pageUrl: secondaryUrl)
         let resolvedSecondary = Self.displayName(forSecondaryTitle: secondaryTitle, url: secondaryUrl)
         // "•" separates the two pane names so the bookmark bar makes the
         // split nature visible without taking much extra width.
@@ -166,6 +217,15 @@ class BookmarkItemView: NSView {
         secondaryFaviconImageView.isHidden = !visible
         secondaryFaviconImageView.snp.updateConstraints { make in
             make.width.equalTo(visible ? self.faviconSize : 0)
+        }
+    }
+
+    private func loadSecondaryFavicon(bookmark: Bookmark, pageUrl: String) {
+        secondaryFaviconLoadHandle?.cancel()
+        secondaryFaviconLoadHandle = nil
+        secondaryFaviconLoadHandle = BookmarkFaviconLoader.loadFavicon(profileId: bookmark.profileId,
+                                                                       pageURLString: pageUrl) { [weak self] result in
+            self?.secondaryFaviconImageView.image = result.image
         }
     }
 

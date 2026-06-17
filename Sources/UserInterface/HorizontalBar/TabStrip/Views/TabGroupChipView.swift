@@ -118,15 +118,10 @@ final class TabGroupChipView: NSView {
     private var pendingAction: PendingChipAction = .idle
     private var pendingClickTarget: PendingClickTarget = .overview
     private var mouseDownLocation: CGPoint = .zero
-    private var pendingSingleClickWorkItem: DispatchWorkItem?
 
     /// Horizontal pixel threshold to promote click → drag. Matches
     /// `TabGroupDragController.dragActivationThreshold`.
     private static let dragActivationThreshold: CGFloat = 4
-    /// Shorter than the system double-click interval so overview still
-    /// feels responsive while quick double-clicks can cancel the pending
-    /// single-click action.
-    private static let singleClickConfirmationDelay: TimeInterval = 0.1
 
     // MARK: - Data
 
@@ -214,10 +209,6 @@ final class TabGroupChipView: NSView {
 
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
-    }
-
-    deinit {
-        cancelPendingSingleClick()
     }
 
     // MARK: - Configuration
@@ -506,9 +497,6 @@ final class TabGroupChipView: NSView {
             pendingClickTarget = .overview
         }
         pendingAction = .click
-        if event.clickCount > 1 || pendingClickTarget != .overview {
-            cancelPendingSingleClick()
-        }
     }
 
     override func mouseDragged(with event: NSEvent) {
@@ -518,7 +506,6 @@ final class TabGroupChipView: NSView {
         case .click:
             guard pendingClickTarget == .overview else { return }
             if abs(dx) >= Self.dragActivationThreshold {
-                cancelPendingSingleClick()
                 pendingAction = .drag
                 onDragStart?(token, event.locationInWindow)
             }
@@ -548,19 +535,15 @@ final class TabGroupChipView: NSView {
                 guard mosaicExpandRect().contains(p) else { return }
                 onCollapseToggle?(token)
             case .overview:
-                if event.clickCount > 1 {
-                    cancelPendingSingleClick()
-                    onCollapseToggle?(token)
-                } else if event.modifierFlags.contains(.command) {
+                if event.modifierFlags.contains(.command) {
                     // Cmd+click never opens the overview: a collapsed group
                     // expands, an expanded group does nothing (in particular
                     // it must not clear an active multi-selection).
-                    cancelPendingSingleClick()
                     if isCollapsed {
                         onCollapseToggle?(token)
                     }
                 } else {
-                    scheduleOverviewClick(for: token)
+                    onClick?(token)
                 }
             }
         case .drag:
@@ -572,26 +555,6 @@ final class TabGroupChipView: NSView {
 
     override func menu(for event: NSEvent) -> NSMenu? {
         return onMenuRequest?(token)
-    }
-
-    private func scheduleOverviewClick(for token: String) {
-        cancelPendingSingleClick()
-        let workItem = DispatchWorkItem { [weak self] in
-            guard let self else { return }
-            self.pendingSingleClickWorkItem = nil
-            guard self.token == token else { return }
-            self.onClick?(token)
-        }
-        pendingSingleClickWorkItem = workItem
-        DispatchQueue.main.asyncAfter(
-            deadline: .now() + Self.singleClickConfirmationDelay,
-            execute: workItem
-        )
-    }
-
-    private func cancelPendingSingleClick() {
-        pendingSingleClickWorkItem?.cancel()
-        pendingSingleClickWorkItem = nil
     }
 
     // MARK: - Accessibility

@@ -189,6 +189,19 @@ extension PhiChromiumCoordinator: PhiChromiumBridgeDelegate {
             EventBus.shared.send(ExtensionEvent(browserId: windowId.intValue, action: .extensionChanged(info: extensions)))
         }
     }
+
+    // Explicit @objc so the optional-protocol selectors are guaranteed visible
+    // to the ObjC bridge's respondsToSelector: dispatch (matches the codebase's
+    // tabRelationshipSnapshotChanged precedent).
+    @objc func badgeInfoChanged(_ info: [AnyHashable : Any]) {
+        let windowId = (info["windowId"] as? NSNumber)?.intValue ?? 0
+        EventBus.shared.send(ExtensionEvent(browserId: windowId, action: .badgeChanged(info: info)))
+    }
+
+    @objc func actionIconChanged(_ info: [AnyHashable : Any]) {
+        let windowId = (info["windowId"] as? NSNumber)?.intValue ?? 0
+        EventBus.shared.send(ExtensionEvent(browserId: windowId, action: .iconChanged(info: info)))
+    }
     
     func newTabCreated(withInfo tabInfo: [AnyHashable : Any], windowId: Int64) {
         AppLogDebug("[Tab] newTabCreated: \(tabInfo) \n, windowId: \(windowId)")

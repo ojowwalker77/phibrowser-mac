@@ -12,9 +12,6 @@
 		2ABF91DB68C2445BAA58C9BA /* GroupTabsTableView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 457F461C0F164136A46FF641 /* GroupTabsTableView.swift */; };
 		3703C88C2F68F78500E7CF6D /* AISettingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3703C88B2F68F78500E7CF6D /* AISettingView.swift */; };
 		3703C9822F69558C00E7CF6D /* BrowserState+ToggleAI.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3703C9812F69558C00E7CF6D /* BrowserState+ToggleAI.swift */; };
-		5F1A5A11AC1D000000000001 /* BrowserState+Split.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F1A5A11AC1D000000000002 /* BrowserState+Split.swift */; };
-		5F1A5A11AC1D000000000003 /* SplitPaneHostView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F1A5A11AC1D000000000004 /* SplitPaneHostView.swift */; };
-		5F1A5A11AC1D000000000005 /* SplitTabDropContainer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F1A5A11AC1D000000000006 /* SplitTabDropContainer.swift */; };
 		3703C9842F6956E600E7CF6D /* SentinelHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3703C9832F6956E600E7CF6D /* SentinelHelper.swift */; };
 		3703C9862F6956E600E7CF6D /* SentinelVersionGuard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3703C9852F6956E600E7CF6D /* SentinelVersionGuard.swift */; };
 		370D03AC2F0E463B0087A1C9 /* Mapper.swift in Sources */ = {isa = PBXBuildFile; fileRef = 370D03A32F0E463B0087A1C9 /* Mapper.swift */; };
@@ -132,11 +129,16 @@
 		37E6AF402EEC30E80078CCD8 /* ChatButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37E6AF3F2EEC30E80078CCD8 /* ChatButton.swift */; };
 		37E9E91B2FC84DEA00815832 /* TabDataModelSchemaV4.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37E9E9192FC84DEA00815832 /* TabDataModelSchemaV4.swift */; };
 		37E9E91C2FC84DEA00815832 /* TabDataModelSchemaV5.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37E9E91A2FC84DEA00815832 /* TabDataModelSchemaV5.swift */; };
+		37E9E91D2FC84DEA00815832 /* TabDataModelSchemaV6.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37E9E91E2FC84DEA00815832 /* TabDataModelSchemaV6.swift */; };
 		37EA23AB2F6C010C00D3C4A9 /* Dependencies in Frameworks */ = {isa = PBXBuildFile; productRef = B00B9F252E3B2A3F0029D3A9 /* Dependencies */; };
 		37EA23AC2F6C010C00D3C4A9 /* Dependencies in Frameworks */ = {isa = PBXBuildFile; productRef = B02BEB612E3B2D5900E5859A /* Dependencies */; };
 		37EA25EF2F6D5A5A00D3C4A9 /* CommonMessageRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37EA25EE2F6D5A5A00D3C4A9 /* CommonMessageRouter.swift */; };
 		37EECF222F0F623A0022A176 /* EmbeddedChatViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37EECF212F0F623A0022A176 /* EmbeddedChatViewController.swift */; };
 		37F574482F7A7C5D00879867 /* PhiIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = 37F574472F7A7C5D00879867 /* PhiIcon.icon */; };
+		37FA01012FDA000100000001 /* LocalStoreCompatibilityManifest.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37FA01112FDA000100000001 /* LocalStoreCompatibilityManifest.swift */; };
+		37FA01022FDA000100000002 /* LocalStoreBackupPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37FA01122FDA000100000002 /* LocalStoreBackupPolicy.swift */; };
+		37FA01032FDA000100000003 /* LocalStoreCompatibilityConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37FA01132FDA000100000003 /* LocalStoreCompatibilityConfiguration.swift */; };
+		37FA01042FDA000100000004 /* LocalStoreCompatibilityController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37FA01142FDA000100000004 /* LocalStoreCompatibilityController.swift */; };
 		37FC8C922F335942004675B8 /* WebContentProgressBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37FC8C912F335942004675B8 /* WebContentProgressBarView.swift */; };
 		37FC8DAA2F39B2DE004675B8 /* LayoutModeSettingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37FC8DA92F39B2DE004675B8 /* LayoutModeSettingView.swift */; };
 		3BCDDE6FBABE4BD8A51F0127 /* TabGroupCellView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE7E61A49E8A472DB330779E /* TabGroupCellView.swift */; };
@@ -144,6 +146,9 @@
 		4D454D4F5259000000000001 /* MemoryUsageModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D454D4F5259000000000002 /* MemoryUsageModels.swift */; };
 		4D454D4F5259000000000004 /* MemoryUsageMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D454D4F5259000000000005 /* MemoryUsageMonitor.swift */; };
 		4D454D4F5259000000000006 /* ProcessMemorySampler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D454D4F5259000000000007 /* ProcessMemorySampler.swift */; };
+		5F1A5A11AC1D000000000001 /* BrowserState+Split.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F1A5A11AC1D000000000002 /* BrowserState+Split.swift */; };
+		5F1A5A11AC1D000000000003 /* SplitPaneHostView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F1A5A11AC1D000000000004 /* SplitPaneHostView.swift */; };
+		5F1A5A11AC1D000000000005 /* SplitTabDropContainer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F1A5A11AC1D000000000006 /* SplitTabDropContainer.swift */; };
 		7A5B00A02EF0000000000001 /* MemoryButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A5B00A02EF0000000000002 /* MemoryButton.swift */; };
 		7B00AAAA000000050000A5B5 /* PostHogEnv.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B00AAAA000000040000A4B4 /* PostHogEnv.swift */; };
 		7B00AAAA000000070000A7B7 /* PostHogConfig.generated.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B00AAAA000000060000A6B6 /* PostHogConfig.generated.swift */; };
@@ -265,7 +270,6 @@
 		CC6B000F2E77E04800D4F133 /* AboutView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC6B000E2E77E04800D4F133 /* AboutView.swift */; };
 		CC6B001B2E793EAC00D4F133 /* PinnedTabViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC6B001A2E793EAC00D4F133 /* PinnedTabViewController.swift */; };
 		CC6B00322E7941C300D4F133 /* PinnedTabItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC6B00312E7941C300D4F133 /* PinnedTabItem.swift */; };
-		CCAA00012F00010000000001 /* PinnedSplitItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCAA00012F00010000000002 /* PinnedSplitItem.swift */; };
 		CC6BFFDD2E72C04000D4F133 /* FaviconDataProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC6BFFDC2E72C04000D4F133 /* FaviconDataProvider.swift */; };
 		CC71BAB92E9E2E74006C7238 /* EventBlockBgView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC71BAB82E9E2E74006C7238 /* EventBlockBgView.swift */; };
 		CC71BABB2E9E40A9006C7238 /* OmniBoxSuggestionCellView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC71BABA2E9E40A9006C7238 /* OmniBoxSuggestionCellView.swift */; };
@@ -279,6 +283,7 @@
 		CC99096D2EBC86940046BC81 /* PhiPreferences.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC99096C2EBC86940046BC81 /* PhiPreferences.swift */; };
 		CC99097C2EBC9F090046BC81 /* login-bg.mp4 in Resources */ = {isa = PBXBuildFile; fileRef = CC99097B2EBC9F090046BC81 /* login-bg.mp4 */; };
 		CC9AF3442EC192BC00C27C98 /* AppControlle+LaunchInfo.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC9AF3432EC192BC00C27C98 /* AppControlle+LaunchInfo.swift */; };
+		CCAA00012F00010000000001 /* PinnedSplitItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCAA00012F00010000000002 /* PinnedSplitItem.swift */; };
 		CCB53DC32E6EBF68004BF233 /* OmniBoxViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCB53DC22E6EBF68004BF233 /* OmniBoxViewController.swift */; };
 		CCB53DCB2E6EC437004BF233 /* OmniBoxSuggestionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCB53DC72E6EC437004BF233 /* OmniBoxSuggestionView.swift */; };
 		CCB53DCC2E6EC437004BF233 /* OmniBoxViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCB53DCA2E6EC437004BF233 /* OmniBoxViewModel.swift */; };
@@ -396,9 +401,6 @@
 /* Begin PBXFileReference section */
 		3703C88B2F68F78500E7CF6D /* AISettingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AISettingView.swift; sourceTree = "<group>"; };
 		3703C9812F69558C00E7CF6D /* BrowserState+ToggleAI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "BrowserState+ToggleAI.swift"; sourceTree = "<group>"; };
-		5F1A5A11AC1D000000000002 /* BrowserState+Split.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "BrowserState+Split.swift"; sourceTree = "<group>"; };
-		5F1A5A11AC1D000000000004 /* SplitPaneHostView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SplitPaneHostView.swift; sourceTree = "<group>"; };
-		5F1A5A11AC1D000000000006 /* SplitTabDropContainer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SplitTabDropContainer.swift; sourceTree = "<group>"; };
 		3703C9832F6956E600E7CF6D /* SentinelHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SentinelHelper.swift; sourceTree = "<group>"; };
 		3703C9852F6956E600E7CF6D /* SentinelVersionGuard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SentinelVersionGuard.swift; sourceTree = "<group>"; };
 		370D039F2F0E463B0087A1C9 /* Appearance.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Appearance.swift; sourceTree = "<group>"; };
@@ -476,6 +478,7 @@
 		37B9780F2EF403AB007E0568 /* GradientBorderButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GradientBorderButton.swift; sourceTree = "<group>"; };
 		37BA3EA12F866864003A8A53 /* EdgeFogOverlayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EdgeFogOverlayView.swift; sourceTree = "<group>"; };
 		37BA3EA32F866870003A8A53 /* AgentAnimationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentAnimationManager.swift; sourceTree = "<group>"; };
+		37BE8D432FDA84DE00BE5687 /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
 		37C1B0D72ED6DCBD00DD4496 /* Shortcuts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Shortcuts.swift; sourceTree = "<group>"; };
 		37C1B0DD2ED8081400DD4496 /* ShortcutsSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutsSettingsView.swift; sourceTree = "<group>"; };
 		37C1B0DF2ED809EA00DD4496 /* ShortcutsSettingHostingViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutsSettingHostingViewController.swift; sourceTree = "<group>"; };
@@ -525,9 +528,14 @@
 		37E6AF3F2EEC30E80078CCD8 /* ChatButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatButton.swift; sourceTree = "<group>"; };
 		37E9E9192FC84DEA00815832 /* TabDataModelSchemaV4.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TabDataModelSchemaV4.swift; sourceTree = "<group>"; };
 		37E9E91A2FC84DEA00815832 /* TabDataModelSchemaV5.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TabDataModelSchemaV5.swift; sourceTree = "<group>"; };
+		37E9E91E2FC84DEA00815832 /* TabDataModelSchemaV6.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TabDataModelSchemaV6.swift; sourceTree = "<group>"; };
 		37EA25EE2F6D5A5A00D3C4A9 /* CommonMessageRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommonMessageRouter.swift; sourceTree = "<group>"; };
 		37EECF212F0F623A0022A176 /* EmbeddedChatViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmbeddedChatViewController.swift; sourceTree = "<group>"; };
 		37F574472F7A7C5D00879867 /* PhiIcon.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = PhiIcon.icon; sourceTree = "<group>"; };
+		37FA01112FDA000100000001 /* LocalStoreCompatibilityManifest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalStoreCompatibilityManifest.swift; sourceTree = "<group>"; };
+		37FA01122FDA000100000002 /* LocalStoreBackupPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalStoreBackupPolicy.swift; sourceTree = "<group>"; };
+		37FA01132FDA000100000003 /* LocalStoreCompatibilityConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalStoreCompatibilityConfiguration.swift; sourceTree = "<group>"; };
+		37FA01142FDA000100000004 /* LocalStoreCompatibilityController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalStoreCompatibilityController.swift; sourceTree = "<group>"; };
 		37FC8C912F335942004675B8 /* WebContentProgressBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebContentProgressBarView.swift; sourceTree = "<group>"; };
 		37FC8DA92F39B2DE004675B8 /* LayoutModeSettingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LayoutModeSettingView.swift; sourceTree = "<group>"; };
 		4508A9352EEFF2EB007C94E2 /* AccountWebWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountWebWindowController.swift; sourceTree = "<group>"; };
@@ -535,6 +543,9 @@
 		4D454D4F5259000000000002 /* MemoryUsageModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemoryUsageModels.swift; sourceTree = "<group>"; };
 		4D454D4F5259000000000005 /* MemoryUsageMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemoryUsageMonitor.swift; sourceTree = "<group>"; };
 		4D454D4F5259000000000007 /* ProcessMemorySampler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessMemorySampler.swift; sourceTree = "<group>"; };
+		5F1A5A11AC1D000000000002 /* BrowserState+Split.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "BrowserState+Split.swift"; sourceTree = "<group>"; };
+		5F1A5A11AC1D000000000004 /* SplitPaneHostView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SplitPaneHostView.swift; sourceTree = "<group>"; };
+		5F1A5A11AC1D000000000006 /* SplitTabDropContainer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SplitTabDropContainer.swift; sourceTree = "<group>"; };
 		7A5B00A02EF0000000000002 /* MemoryButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemoryButton.swift; sourceTree = "<group>"; };
 		7B00AAAA000000040000A4B4 /* PostHogEnv.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PostHogEnv.swift; sourceTree = "<group>"; };
 		7B00AAAA000000060000A6B6 /* PostHogConfig.generated.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PostHogConfig.generated.swift; sourceTree = "<group>"; };
@@ -667,7 +678,6 @@
 		CC6B000E2E77E04800D4F133 /* AboutView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AboutView.swift; sourceTree = "<group>"; };
 		CC6B001A2E793EAC00D4F133 /* PinnedTabViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinnedTabViewController.swift; sourceTree = "<group>"; };
 		CC6B00312E7941C300D4F133 /* PinnedTabItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinnedTabItem.swift; sourceTree = "<group>"; };
-		CCAA00012F00010000000002 /* PinnedSplitItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinnedSplitItem.swift; sourceTree = "<group>"; };
 		CC6BFFD82E72B83500D4F133 /* Phi Framework.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; path = "Phi Framework.framework"; sourceTree = "<group>"; };
 		CC6BFFDC2E72C04000D4F133 /* FaviconDataProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FaviconDataProvider.swift; sourceTree = "<group>"; };
 		CC71BAB82E9E2E74006C7238 /* EventBlockBgView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventBlockBgView.swift; sourceTree = "<group>"; };
@@ -683,6 +693,7 @@
 		CC99096C2EBC86940046BC81 /* PhiPreferences.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhiPreferences.swift; sourceTree = "<group>"; };
 		CC99097B2EBC9F090046BC81 /* login-bg.mp4 */ = {isa = PBXFileReference; lastKnownFileType = file; path = "login-bg.mp4"; sourceTree = "<group>"; };
 		CC9AF3432EC192BC00C27C98 /* AppControlle+LaunchInfo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppControlle+LaunchInfo.swift"; sourceTree = "<group>"; };
+		CCAA00012F00010000000002 /* PinnedSplitItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinnedSplitItem.swift; sourceTree = "<group>"; };
 		CCB53DC22E6EBF68004BF233 /* OmniBoxViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OmniBoxViewController.swift; sourceTree = "<group>"; };
 		CCB53DC62E6EC437004BF233 /* OmniBoxModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OmniBoxModels.swift; sourceTree = "<group>"; };
 		CCB53DC72E6EC437004BF233 /* OmniBoxSuggestionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OmniBoxSuggestionView.swift; sourceTree = "<group>"; };
@@ -1077,6 +1088,7 @@
 				37DEB42E2F67C0F000129429 /* TabDataModelSchemaV3.swift */,
 				37E9E9192FC84DEA00815832 /* TabDataModelSchemaV4.swift */,
 				37E9E91A2FC84DEA00815832 /* TabDataModelSchemaV5.swift */,
+				37E9E91E2FC84DEA00815832 /* TabDataModelSchemaV6.swift */,
 			);
 			path = TabDataModel;
 			sourceTree = "<group>";
@@ -1088,6 +1100,18 @@
 				CC288A892E5333CC004A6C1C /* main.m */,
 			);
 			path = Other;
+			sourceTree = "<group>";
+		};
+		37FA01212FDA000100000001 /* Compatibility */ = {
+			isa = PBXGroup;
+			children = (
+				37FA01122FDA000100000002 /* LocalStoreBackupPolicy.swift */,
+				37FA01132FDA000100000003 /* LocalStoreCompatibilityConfiguration.swift */,
+				37FA01142FDA000100000004 /* LocalStoreCompatibilityController.swift */,
+				37FA01112FDA000100000001 /* LocalStoreCompatibilityManifest.swift */,
+				37BE8D432FDA84DE00BE5687 /* README.md */,
+			);
+			path = Compatibility;
 			sourceTree = "<group>";
 		};
 		4D454D4F5259000000000003 /* Diagnostics */ = {
@@ -1447,6 +1471,7 @@
 				CC2708A22E7A65E500B65AB8 /* LocalStore.swift */,
 				CCD87CC32EC2E7E000148E3F /* LocalStore+Bookmark.swift */,
 				37DEB42B2F63F90200129429 /* TabDataModel */,
+				37FA01212FDA000100000001 /* Compatibility */,
 			);
 			path = LocalStorage;
 			sourceTree = "<group>";
@@ -1739,7 +1764,6 @@
 				377D210E2F51986900A68BE5 /* WebContentContainerViewController+FloatingSidebar.swift */,
 				B0F370B82E430CA5000B51F9 /* WebContentViewController.swift */,
 				37C9E5A12F3EF7CD00353A03 /* AIChatSidebarStateStore.swift */,
-				37EECF362F0F8C7F0022A176 /* SplitViewResizeHandle.swift */,
 				5F1A5A11AC1D000000000004 /* SplitPaneHostView.swift */,
 				5F1A5A11AC1D000000000006 /* SplitTabDropContainer.swift */,
 				37BA3EA12F866864003A8A53 /* EdgeFogOverlayView.swift */,
@@ -2002,6 +2026,7 @@
 				7B00AAAA000000050000A5B5 /* PostHogEnv.swift in Sources */,
 				37E9E91B2FC84DEA00815832 /* TabDataModelSchemaV4.swift in Sources */,
 				37E9E91C2FC84DEA00815832 /* TabDataModelSchemaV5.swift in Sources */,
+				37E9E91D2FC84DEA00815832 /* TabDataModelSchemaV6.swift in Sources */,
 				7B00AAAA000000070000A7B7 /* PostHogConfig.generated.swift in Sources */,
 				B025870E2E430305001B08FC /* MainSplitViewController.swift in Sources */,
 				3769C2E82EF9437A00A94DE0 /* ArcDataParser.swift in Sources */,
@@ -2087,6 +2112,10 @@
 				8E762CC62F16531A00631087 /* TabStripAnimation.swift in Sources */,
 				37C1B0DE2ED8081400DD4496 /* ShortcutsSettingsView.swift in Sources */,
 				CC2708A52E7A65E500B65AB8 /* LocalStore.swift in Sources */,
+				37FA01022FDA000100000002 /* LocalStoreBackupPolicy.swift in Sources */,
+				37FA01032FDA000100000003 /* LocalStoreCompatibilityConfiguration.swift in Sources */,
+				37FA01042FDA000100000004 /* LocalStoreCompatibilityController.swift in Sources */,
+				37FA01012FDA000100000001 /* LocalStoreCompatibilityManifest.swift in Sources */,
 				CC99096D2EBC86940046BC81 /* PhiPreferences.swift in Sources */,
 				CC2708A62E7A65E500B65AB8 /* TabDataModel.swift in Sources */,
 				CC6335F92E4DF65700A176DA /* PhiLogFormatter.swift in Sources */,
@@ -2362,17 +2391,8 @@
 				INFOPLIST_FILE = "PhiBrowser-Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = Phi;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
-				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "Websites may use your bluetooth for features on their site.";
-				INFOPLIST_KEY_NSCameraUsageDescription = "Websites may use your camera for features on their site.";
-				INFOPLIST_KEY_NSDesktopFolderUsageDescription = "Access to \"Desktop\" is required to make files accessible from Arc.";
-				INFOPLIST_KEY_NSDownloadsFolderUsageDescription = "Access to \"Downloads\" is required for downloading files from the web and to make files accessible from Arc.";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
-				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "Websites may use your location for features on their site.";
-				INFOPLIST_KEY_NSLocationAlwaysUsageDescription = "Websites may use your location for features on their site.";
-				INFOPLIST_KEY_NSLocationUsageDescription = "Websites may use your location for features on their site.";
-				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Websites may use your location for features on their site.";
 				INFOPLIST_KEY_NSMainNibFile = "";
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Websites may use your microphone for features on their site.";
 				INFOPLIST_KEY_NSPrincipalClass = PhiApplication;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -2515,17 +2535,8 @@
 				INFOPLIST_FILE = "PhiBrowser-Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = Phi;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
-				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "Websites may use your bluetooth for features on their site.";
-				INFOPLIST_KEY_NSCameraUsageDescription = "Websites may use your camera for features on their site.";
-				INFOPLIST_KEY_NSDesktopFolderUsageDescription = "Access to \"Desktop\" is required to make files accessible from Arc.";
-				INFOPLIST_KEY_NSDownloadsFolderUsageDescription = "Access to \"Downloads\" is required for downloading files from the web and to make files accessible from Arc.";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
-				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "Websites may use your location for features on their site.";
-				INFOPLIST_KEY_NSLocationAlwaysUsageDescription = "Websites may use your location for features on their site.";
-				INFOPLIST_KEY_NSLocationUsageDescription = "Websites may use your location for features on their site.";
-				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Websites may use your location for features on their site.";
 				INFOPLIST_KEY_NSMainNibFile = "";
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Websites may use your microphone for features on their site.";
 				INFOPLIST_KEY_NSPrincipalClass = PhiApplication;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -2734,17 +2745,8 @@
 				INFOPLIST_FILE = "PhiBrowser-Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = Phi;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
-				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "Websites may use your bluetooth for features on their site.";
-				INFOPLIST_KEY_NSCameraUsageDescription = "Websites may use your camera for features on their site.";
-				INFOPLIST_KEY_NSDesktopFolderUsageDescription = "Access to \"Desktop\" is required to make files accessible from Arc.";
-				INFOPLIST_KEY_NSDownloadsFolderUsageDescription = "Access to \"Downloads\" is required for downloading files from the web and to make files accessible from Arc.";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
-				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "Websites may use your location for features on their site.";
-				INFOPLIST_KEY_NSLocationAlwaysUsageDescription = "Websites may use your location for features on their site.";
-				INFOPLIST_KEY_NSLocationUsageDescription = "Websites may use your location for features on their site.";
-				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Websites may use your location for features on their site.";
 				INFOPLIST_KEY_NSMainNibFile = "";
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Websites may use your microphone for features on their site.";
 				INFOPLIST_KEY_NSPrincipalClass = PhiApplication;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -2792,17 +2794,8 @@
 				INFOPLIST_FILE = "PhiBrowser-Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = Phi;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
-				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "Websites may use your bluetooth for features on their site.";
-				INFOPLIST_KEY_NSCameraUsageDescription = "Websites may use your camera for features on their site.";
-				INFOPLIST_KEY_NSDesktopFolderUsageDescription = "Access to \"Desktop\" is required to make files accessible from Arc.";
-				INFOPLIST_KEY_NSDownloadsFolderUsageDescription = "Access to \"Downloads\" is required for downloading files from the web and to make files accessible from Arc.";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
-				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "Websites may use your location for features on their site.";
-				INFOPLIST_KEY_NSLocationAlwaysUsageDescription = "Websites may use your location for features on their site.";
-				INFOPLIST_KEY_NSLocationUsageDescription = "Websites may use your location for features on their site.";
-				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Websites may use your location for features on their site.";
 				INFOPLIST_KEY_NSMainNibFile = "";
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Websites may use your microphone for features on their site.";
 				INFOPLIST_KEY_NSPrincipalClass = PhiApplication;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -2993,17 +2986,8 @@
 				INFOPLIST_FILE = "PhiBrowser-Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = Phi;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
-				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "Websites may use your bluetooth for features on their site.";
-				INFOPLIST_KEY_NSCameraUsageDescription = "Websites may use your camera for features on their site.";
-				INFOPLIST_KEY_NSDesktopFolderUsageDescription = "Access to \"Desktop\" is required to make files accessible from Arc.";
-				INFOPLIST_KEY_NSDownloadsFolderUsageDescription = "Access to \"Downloads\" is required for downloading files from the web and to make files accessible from Arc.";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
-				INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription = "Websites may use your location for features on their site.";
-				INFOPLIST_KEY_NSLocationAlwaysUsageDescription = "Websites may use your location for features on their site.";
-				INFOPLIST_KEY_NSLocationUsageDescription = "Websites may use your location for features on their site.";
-				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Websites may use your location for features on their site.";
 				INFOPLIST_KEY_NSMainNibFile = "";
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Websites may use your microphone for features on their site.";
 				INFOPLIST_KEY_NSPrincipalClass = PhiApplication;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",

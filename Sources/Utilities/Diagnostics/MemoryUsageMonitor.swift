@@ -35,7 +35,7 @@ final class MemoryUsageMonitor {
         reporter: MemoryUsageReporting,
         queue: DispatchQueue = DispatchQueue(label: "com.phi.memory-usage-monitor", qos: .utility),
         interval: TimeInterval = 60 * 10,
-        cooldown: TimeInterval = 30 * 60,
+        cooldown: TimeInterval = 60 * 60,
         now: @escaping () -> Date = Date.init
     ) {
         self.sampler = sampler

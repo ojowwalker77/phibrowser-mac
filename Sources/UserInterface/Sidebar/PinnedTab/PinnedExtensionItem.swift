@@ -5,6 +5,7 @@
 
 import Cocoa
 import SnapKit
+import SwiftUI
 
 struct PinnedTabItemModel: Hashable {
     let id: String
@@ -37,6 +38,7 @@ class PinnedExtensionItem: NSCollectionViewItem {
     private var iconImageView: NSImageView!
     private var backgroundView: HoverableView!
     private var model: PinnedTabItemModel?
+    private var badgeHost: BadgeHostingView<BadgeCornerOverlay>?
 
     override func loadView() {
         view = NSView()
@@ -50,10 +52,43 @@ class PinnedExtensionItem: NSCollectionViewItem {
         model = nil
     }
 
-    func configure(with model: PinnedTabItemModel) {
+    /// `icon` is the resolved display icon (dynamic setIcon/declarative override
+    /// plus disabled graying, see ExtensionManager.iconImage); the model's static
+    /// icon is the fallback when no manager was available. The badge is a
+    /// self-observing SwiftUI overlay hosted over the icon, so badge changes
+    /// update without reloading the item.
+    func configure(with model: PinnedTabItemModel,
+                   icon: NSImage?,
+                   manager: ExtensionManager?) {
         self.model = model
-        iconImageView.image = model.icon ?? defaultIcon()
+        iconImageView.image = icon ?? model.icon ?? defaultIcon()
         view.toolTip = model.tooltip ?? model.title
+        if let manager {
+            installBadgeOverlay(manager: manager, extensionId: model.id)
+        }
+    }
+
+    private func installBadgeOverlay(manager: ExtensionManager, extensionId: String) {
+        let root = BadgeCornerOverlay(manager: manager,
+                                      extensionId: extensionId,
+                                      iconSize: 16)
+        if let badgeHost {
+            badgeHost.rootView = root
+        } else {
+            // Pass-through host so the decorative badge never intercepts the
+            // cell's clicks / hover (it currently survives only via responder-
+            // chain bubbling to backgroundView — fragile).
+            let host = BadgeHostingView(rootView: root)
+            // Pin to the (larger) backgroundView, not the 16pt icon, so the
+            // badge has room to straddle the icon's bottom-right corner without
+            // being clipped. BadgeCornerOverlay centers a 16pt region to match
+            // the centered iconImageView.
+            backgroundView.addSubview(host)
+            host.snp.makeConstraints { make in
+                make.edges.equalToSuperview()
+            }
+            badgeHost = host
+        }
     }
 
     override var isSelected: Bool {

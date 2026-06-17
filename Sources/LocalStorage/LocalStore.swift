@@ -4,6 +4,7 @@
 // found in the LICENSE file.
 
 import Foundation
+import AppKit
 import SwiftData
 import Combine
 
@@ -21,18 +22,42 @@ actor LocalStoreActor {
 
 class LocalStore {
     static let defaultProfileId = "Default"
+    static let compatibilityConfiguration = LocalStoreCompatibilityConfiguration(
+        currentStoreFormatVersion: 6,
+        readableStoreFormatVersions: 1...6,
+        storeFilename: "LocalStore.sqlite"
+    )
 
-    let container: ModelContainer?
+    private(set) var container: ModelContainer?
     let account: Account
     private let userStorageURL: URL
     private var cancellable: AnyCancellable?
     private let writeActor: LocalStoreActor?
-    
+
+    /// Serial FIFO queue for background writes. `writeActor` serializes write
+    /// *execution*, but `performBackgroundWrite` previously dispatched each
+    /// write as an independent `Task`, and unstructured tasks carry no
+    /// guarantee of reaching the actor in submission order. A "create record"
+    /// write could therefore land after a follow-up "update field" write that
+    /// targets it, and the update would silently no-op (its fetch finds no
+    /// row). This broke pinned-split pairing: the `splitPartnerGuid` set right
+    /// after the two pinned rows were created would sometimes apply before the
+    /// rows existed, leaving the pair unlinked and rendering as two cells once
+    /// the live SplitGroup went away (e.g. on close). Funnelling every write
+    /// through this stream restores submit-order == apply-order, which every
+    /// caller already assumes.
+    private let writeJobContinuation: AsyncStream<() async -> Void>.Continuation?
+    private(set) var compatibilityStatus: LocalStoreCompatibilityStatus = .notChecked
+
     @MainActor var mainContext: ModelContext? {
         container?.mainContext
     }
     
-    init(account: Account, storeDirectoryURL: URL? = nil) {
+    init(
+        account: Account,
+        storeDirectoryURL: URL? = nil,
+        presentsCompatibilityAlerts: Bool = true
+    ) {
         self.account = account
         
         let userDir = account.userDataStorage
@@ -44,6 +69,40 @@ class LocalStore {
         
         try? FileManager.default.createDirectory(at: userStorageURL,
                                                  withIntermediateDirectories: true)
+
+        let compatibilityController = LocalStoreCompatibilityController(
+            configuration: Self.compatibilityConfiguration
+        )
+        let compatibilityResult: LocalStoreCompatibilityResult
+        do {
+            compatibilityResult = try compatibilityController.prepareStore(at: userStorageURL)
+        } catch {
+            AppLogError("[LocalStore] Failed to prepare local store compatibility state: \(error)")
+            compatibilityStatus = .failed(error.localizedDescription)
+            container = nil
+            writeActor = nil
+            writeJobContinuation = nil
+            return
+        }
+
+        let openPlan: LocalStoreOpenPlan
+        switch compatibilityResult {
+        case .ready(let plan):
+            compatibilityStatus = .ready(plan)
+            openPlan = plan
+        case .requiresNewerApp(let issue):
+            AppLogError(
+                "[LocalStore] Store format \(issue.activeStoreFormatVersion) requires a newer app. Current readable range: \(issue.readableStoreFormatVersions)"
+            )
+            compatibilityStatus = .requiresNewerApp(issue)
+            container = nil
+            writeActor = nil
+            writeJobContinuation = nil
+            if presentsCompatibilityAlerts {
+                Self.runRequiresNewerAppAlert()
+            }
+            return
+        }
         
         let configuration = ModelConfiguration(url: userStorageURL.appendingPathComponent("LocalStore.sqlite"))
         
@@ -55,11 +114,45 @@ class LocalStore {
                 configurations: configuration
             )
             container = modelContainer
-            writeActor = LocalStoreActor(modelContainer: modelContainer)
+            let actor = LocalStoreActor(modelContainer: modelContainer)
+            writeActor = actor
+            // Drain queued writes one at a time, in submission order. Buffering
+            // is unbounded so no write is ever dropped, and yields made before
+            // this consumer starts are replayed in order.
+            let (stream, continuation) = AsyncStream<() async -> Void>.makeStream()
+            writeJobContinuation = continuation
+            Task {
+                for await job in stream {
+                    await job()
+                }
+            }
+            do {
+                try compatibilityController.markStoreOpenedSuccessfully(openPlan, at: userStorageURL)
+            } catch {
+                AppLogError("[LocalStore] Failed to record opened local store format: \(error)")
+            }
         } catch {
             AppLogError("Failed to create ModelContainer: \(error)")
             container = nil
             writeActor = nil
+            writeJobContinuation = nil
+        }
+    }
+
+    private static func runRequiresNewerAppAlert() {
+        Task { @MainActor in
+            let alert = NSAlert()
+            alert.messageText = NSLocalizedString(
+                "Update Phi to Open Local Data",
+                comment: "Local store compatibility alert - title when the local database was opened by a newer app version"
+            )
+            alert.informativeText = NSLocalizedString(
+                "This version of Phi cannot open local browser data that was updated by a newer version. Install the latest Phi version and try again.",
+                comment: "Local store compatibility alert - body when a newer app is required to read local data"
+            )
+            alert.alertStyle = .warning
+            alert.addButton(withTitle: NSLocalizedString("OK", comment: "Generic - OK button to dismiss an alert"))
+            alert.runModal()
         }
     }
 }
@@ -265,6 +358,27 @@ extension LocalStore {
         }
     }
 
+    func updateLastSeen(_ guid: String, seenAt: Date = Date()) {
+        performBackgroundWrite { context in
+            do {
+                let predicate = #Predicate<TabDataModel> { $0.guid == guid }
+                let descriptor = FetchDescriptor<TabDataModel>(predicate: predicate)
+                guard let tab = try context.fetch(descriptor).first else {
+                    return
+                }
+                switch tab.dataType {
+                case .pinnedTab, .bookmark:
+                    tab.lastSeen = seenAt
+                    tab.updatedDate = seenAt
+                case .tab, .bookmarkFolder:
+                    return
+                }
+            } catch {
+                AppLogError("[LocalStore] Failed to update last seen date: \(error)")
+            }
+        }
+    }
+
     func updateTabFavicon(_ guid: String, favicon: Data) {
         performBackgroundWrite { context in
             do {
@@ -324,14 +438,21 @@ extension LocalStore {
     
     func performBackgroundWrite(_ block: @escaping (ModelContext) -> Void) {
         guard let writeActor else { return }
-        Task {
+        writeJobContinuation?.yield {
             await writeActor.perform(block)
         }
     }
 
     func performBackgroundWriteAndWait(_ block: @escaping (ModelContext) -> Void) async {
         guard let writeActor else { return }
-        await writeActor.perform(block)
+        // Enqueue through the same FIFO stream so ordering relative to async
+        // writes is preserved, then await this job's completion.
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            writeJobContinuation?.yield {
+                await writeActor.perform(block)
+                continuation.resume()
+            }
+        }
     }
     
     // Exposes the main context for UI-bound consumers.
@@ -400,6 +521,7 @@ extension LocalStore {
                     old.guid == new.guid && 
                     old.title == new.title && 
                     old.index == new.index &&
+                    old.lastSeen == new.lastSeen &&
                     old.updatedDate == new.updatedDate
                 }
             }
@@ -462,6 +584,7 @@ extension LocalStore {
                 var pinnedTabs = try context.fetch(descriptor)
                 
                 var tabToMove: TabDataModel
+                let now = Date()
                 if let tabToMoveIndex = pinnedTabs.firstIndex(where: { $0.guid == tabGuid }) {
                     tabToMove = pinnedTabs.remove(at: tabToMoveIndex)
                 } else {
@@ -476,8 +599,8 @@ extension LocalStore {
                         index: 0,
                         url: url,
                         favicon: nil,
-                        createdDate: Date(),
-                        updatedDate: Date()
+                        createdDate: now,
+                        updatedDate: now
                     )
                     tabToMove.dataType = .pinnedTab
                     tabToMove.isCreatedByChromium = false
@@ -506,7 +629,7 @@ extension LocalStore {
                 
                 for (index, tabModel) in pinnedTabs.enumerated() {
                     tabModel.index = index
-                    tabModel.updatedDate = Date()
+                    tabModel.updatedDate = now
                 }
                 
             } catch {

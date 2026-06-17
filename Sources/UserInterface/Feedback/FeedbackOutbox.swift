@@ -169,10 +169,17 @@ enum FeedbackOutbox {
     static let maxAttachmentBytes: Int64 = 20 * 1024 * 1024
     static let zipPlanningBytes: Int64 = maxAttachmentBytes - 512 * 1024
     static let maxJobRetryCount = 5
-    static let archiveStrategyVersion = 5
+    static let archiveStrategyVersion = 6
     private static let directoryName = "feedbackOutbox"
     private static let manifestFilename = "manifest.json"
     private static let systemLogsFilename = "system_logs.txt"
+    private static let primaryLogsZipFilename = "logs.zip"
+    private static let sentinelLogsZipFilename = "sentinel-logs.zip"
+    private static let sentinelLogFilenamePrefixes = [
+        "boot.log",
+        "runner.log",
+        "ai-gateway.log"
+    ]
 
     static func outboxRoot(for account: Account) -> URL {
         account.userDataStorage.appendingPathComponent(directoryName, isDirectory: true)
@@ -515,23 +522,90 @@ enum FeedbackOutbox {
         return PreparedFile(url: destination, filename: filename, mimeType: "image/jpeg", size: Int64(data.count))
     }
 
-    private static func prepareLogZipAttachments(
+    static func prepareLogZipAttachments(
         jobRoot: URL,
         preparedDir: URL,
-        chromiumSystemLogs: FeedbackOutboxSourceAttachment?
+        chromiumSystemLogs: FeedbackOutboxSourceAttachment?,
+        phiLogsURL: URL = URL(fileURLWithPath: FileSystemUtils.phiBrowserDataDirectory(), isDirectory: true)
+            .appendingPathComponent("PhiLogs", isDirectory: true),
+        sentinelLogsURL: URL = SentinelHelper.sentinelLogsDirectoryURL()
     ) throws -> [FeedbackOutboxUploadAttachment] {
-        let items = try collectLogArchiveItems(
+        let primaryItems = try collectPrimaryLogArchiveItems(
             jobRoot: jobRoot,
-            chromiumSystemLogs: chromiumSystemLogs
+            chromiumSystemLogs: chromiumSystemLogs,
+            phiLogsURL: phiLogsURL
         )
-        return try makeZipAttachments(
-            items: items,
+        let sentinelItems = try collectLatestLogArchiveItems(
+            root: sentinelLogsURL,
+            archiveRoot: "SentinelLogs",
+            matchingFilenamePrefixes: sentinelLogFilenamePrefixes
+        )
+
+        var attachments: [FeedbackOutboxUploadAttachment] = []
+        if let primaryAttachment = try makeLogZipAttachment(
+            items: primaryItems,
             preparedDir: preparedDir,
-            singleFilename: "logs.zip",
-            numberedPrefix: "logs",
+            filename: primaryLogsZipFilename
+        ) {
+            attachments.append(primaryAttachment)
+        }
+        if let sentinelAttachment = try makeLogZipAttachment(
+            items: sentinelItems,
+            preparedDir: preparedDir,
+            filename: sentinelLogsZipFilename
+        ) {
+            attachments.append(sentinelAttachment)
+        }
+        return attachments
+    }
+
+    private static func collectPrimaryLogArchiveItems(
+        jobRoot: URL,
+        chromiumSystemLogs: FeedbackOutboxSourceAttachment?,
+        phiLogsURL: URL
+    ) throws -> [ArchiveItem] {
+        var items: [ArchiveItem] = []
+        if let chromiumSystemLogs {
+            let systemLogsURL = jobRoot.appendingPathComponent(chromiumSystemLogs.relativePath)
+            if FileManager.default.fileExists(atPath: systemLogsURL.path) {
+                items.append(chromiumSystemLogsArchiveItem(sourceURL: systemLogsURL))
+            } else {
+                AppLogWarn("Feedback V2 Chromium system logs file was missing when preparing logs.zip")
+            }
+        }
+
+        items.append(contentsOf: try collectLatestLogArchiveItems(
+            root: phiLogsURL,
+            archiveRoot: "PhiLogs"
+        ))
+        return items
+    }
+
+    private static func makeLogZipAttachment(
+        items: [ArchiveItem],
+        preparedDir: URL,
+        filename: String
+    ) throws -> FeedbackOutboxUploadAttachment? {
+        let destination = preparedDir.appendingPathComponent(filename)
+        try zipArchiveItems(items, destination: destination)
+        let size = fileSize(destination)
+        guard size <= maxAttachmentBytes else {
+            try? FileManager.default.removeItem(at: destination)
+            AppLogWarn("Feedback V2 log zip skipped because it exceeds 20 MB: \(filename) size=\(size)")
+            return nil
+        }
+
+        return FeedbackOutboxUploadAttachment(
+            id: UUID().uuidString,
+            relativePath: destination.pathRelative(to: preparedDir.deletingLastPathComponent()),
+            filename: filename,
+            mimeType: "application/zip",
+            size: size,
             attachmentType: .log,
             required: true,
-            preferSingleArchiveWhenPossible: true
+            status: .queued,
+            retryCount: 0,
+            objectKey: nil
         )
     }
 
@@ -631,28 +705,6 @@ enum FeedbackOutbox {
         return required + Array(optional.prefix(remainingSlots))
     }
 
-    private static func collectLogArchiveItems(
-        jobRoot: URL,
-        chromiumSystemLogs: FeedbackOutboxSourceAttachment?
-    ) throws -> [ArchiveItem] {
-        let phiLogsURL = URL(fileURLWithPath: FileSystemUtils.phiBrowserDataDirectory(), isDirectory: true)
-            .appendingPathComponent("PhiLogs", isDirectory: true)
-        let sentinelLogsURL = SentinelHelper.sentinelLogsDirectoryURL()
-
-        var items: [ArchiveItem] = []
-        if let chromiumSystemLogs {
-            let systemLogsURL = jobRoot.appendingPathComponent(chromiumSystemLogs.relativePath)
-            if FileManager.default.fileExists(atPath: systemLogsURL.path) {
-                items.append(chromiumSystemLogsArchiveItem(sourceURL: systemLogsURL))
-            } else {
-                AppLogWarn("Feedback V2 Chromium system logs file was missing when preparing logs.zip")
-            }
-        }
-        items.append(contentsOf: try collectLogArchiveItems(root: phiLogsURL, archiveRoot: "PhiLogs"))
-        items.append(contentsOf: try collectLogArchiveItems(root: sentinelLogsURL, archiveRoot: "SentinelLogs"))
-        return items
-    }
-
     static func chromiumSystemLogsArchiveItem(sourceURL: URL) -> ArchiveItem {
         ArchiveItem(
             sourceURL: sourceURL,
@@ -661,6 +713,129 @@ enum FeedbackOutbox {
             length: UInt64(max(fileSize(sourceURL), 0)),
             archivePath: systemLogsFilename
         )
+    }
+
+    private static func collectLatestLogArchiveItems(
+        root: URL,
+        archiveRoot: String,
+        matchingFilenamePrefixes: [String]? = nil
+    ) throws -> [ArchiveItem] {
+        let candidates = try collectLogArchiveCandidates(
+            root: root,
+            archiveRoot: archiveRoot
+        )
+
+        switch candidates {
+        case .missing(let item), .empty(let item):
+            return [item]
+        case .files(let files):
+            if let matchingFilenamePrefixes {
+                let latestFiles = matchingFilenamePrefixes.compactMap { prefix in
+                    latestLogArchiveCandidate(
+                        in: files.filter { logFilename($0.filename, matches: prefix) }
+                    )
+                }
+
+                guard !latestFiles.isEmpty else {
+                    let message = "\(archiveRoot) did not contain boot.log, runner.log, or ai-gateway.log at feedback submission time.\n"
+                    return [ArchiveItem(
+                        sourceURL: nil,
+                        inlineData: Data(message.utf8),
+                        offset: 0,
+                        length: UInt64(message.utf8.count),
+                        archivePath: "\(archiveRoot)/empty.txt"
+                    )]
+                }
+
+                return latestFiles
+                    .sorted { $0.archivePath.localizedStandardCompare($1.archivePath) == .orderedAscending }
+                    .map(\.archiveItem)
+            }
+
+            guard let latest = latestLogArchiveCandidate(in: files) else {
+                let message = "\(archiveRoot) directory was empty at feedback submission time.\n"
+                return [ArchiveItem(
+                    sourceURL: nil,
+                    inlineData: Data(message.utf8),
+                    offset: 0,
+                    length: UInt64(message.utf8.count),
+                    archivePath: "\(archiveRoot)/empty.txt"
+                )]
+            }
+
+            return [latest.archiveItem]
+        }
+    }
+
+    private static func collectLogArchiveCandidates(
+        root: URL,
+        archiveRoot: String
+    ) throws -> LogArchiveCandidates {
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: root.path) else {
+            let message = "\(archiveRoot) directory was not found at feedback submission time.\n"
+            return .missing(ArchiveItem(
+                sourceURL: nil,
+                inlineData: Data(message.utf8),
+                offset: 0,
+                length: UInt64(message.utf8.count),
+                archivePath: "\(archiveRoot)/missing.txt"
+            ))
+        }
+
+        guard let enumerator = fm.enumerator(
+            at: root,
+            includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey, .contentModificationDateKey],
+            options: []
+        ) else {
+            return .files([])
+        }
+
+        var candidates: [LogArchiveCandidate] = []
+        for case let fileURL as URL in enumerator {
+            let values = try fileURL.resourceValues(forKeys: [
+                .isRegularFileKey,
+                .fileSizeKey,
+                .contentModificationDateKey
+            ])
+            guard values.isRegularFile == true else { continue }
+
+            let relativePath = fileURL.pathRelative(to: root)
+            let archivePath = "\(archiveRoot)/\(relativePath)"
+            candidates.append(LogArchiveCandidate(
+                url: fileURL,
+                filename: fileURL.lastPathComponent,
+                archivePath: archivePath,
+                size: Int64(values.fileSize ?? 0),
+                modificationDate: values.contentModificationDate ?? .distantPast
+            ))
+        }
+
+        if candidates.isEmpty {
+            let message = "\(archiveRoot) directory was empty at feedback submission time.\n"
+            return .empty(ArchiveItem(
+                sourceURL: nil,
+                inlineData: Data(message.utf8),
+                offset: 0,
+                length: UInt64(message.utf8.count),
+                archivePath: "\(archiveRoot)/empty.txt"
+            ))
+        }
+
+        return .files(candidates)
+    }
+
+    private static func latestLogArchiveCandidate(in candidates: [LogArchiveCandidate]) -> LogArchiveCandidate? {
+        candidates.sorted {
+            if $0.modificationDate != $1.modificationDate {
+                return $0.modificationDate > $1.modificationDate
+            }
+            return $0.archivePath.localizedStandardCompare($1.archivePath) == .orderedAscending
+        }.first
+    }
+
+    private static func logFilename(_ filename: String, matches prefix: String) -> Bool {
+        filename == prefix || filename.hasPrefix("\(prefix).")
     }
 
     static func collectLogArchiveItems(root: URL, archiveRoot: String) throws -> [ArchiveItem] {
@@ -784,12 +959,9 @@ enum FeedbackOutbox {
                     continue
                 }
 
-                if required {
-                    throw FeedbackOutboxError.zipCreationFailed("\(filename) exceeds the 20 MB feedback attachment limit.")
-                } else {
-                    AppLogWarn("Feedback V2 optional zip skipped because it exceeds 20 MB: \(filename)")
-                    continue
-                }
+                let requiredText = required ? "required" : "optional"
+                AppLogWarn("Feedback V2 \(requiredText) zip skipped because it exceeds 20 MB: \(filename) size=\(size)")
+                continue
             }
 
             attachments.append(FeedbackOutboxUploadAttachment(
@@ -1486,6 +1658,30 @@ struct ArchiveItem {
     let offset: UInt64
     let length: UInt64
     let archivePath: String
+}
+
+private enum LogArchiveCandidates {
+    case missing(ArchiveItem)
+    case empty(ArchiveItem)
+    case files([LogArchiveCandidate])
+}
+
+private struct LogArchiveCandidate {
+    let url: URL
+    let filename: String
+    let archivePath: String
+    let size: Int64
+    let modificationDate: Date
+
+    var archiveItem: ArchiveItem {
+        ArchiveItem(
+            sourceURL: url,
+            inlineData: nil,
+            offset: 0,
+            length: UInt64(max(size, 0)),
+            archivePath: archivePath
+        )
+    }
 }
 
 private enum FeedbackImageEncoder {

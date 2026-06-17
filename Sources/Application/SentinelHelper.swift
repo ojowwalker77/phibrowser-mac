@@ -15,6 +15,13 @@ enum SentinelHelper {
         let build: String?
     }
 
+    private struct RuntimeInfoPayload: Decodable {
+        let bundleID: String
+        let version: String?
+        let build: String?
+        let processID: Int32
+    }
+
     static func register() {
         let identifier = loginItemIdentifier()
         let service = SMAppService.loginItem(identifier: identifier)
@@ -53,12 +60,14 @@ enum SentinelHelper {
             return nil
         }
 
-        let versionInfo = readVersionInfo(from: app.bundleURL)
-        return RunningInfo(
-            bundleID: app.bundleIdentifier ?? identifier,
-            version: versionInfo.version,
-            build: versionInfo.build
-        )
+        if let runtimeInfo = readRuntimeInfo(
+            identifier: identifier,
+            processIdentifier: app.processIdentifier
+        ) {
+            return runtimeInfo
+        }
+
+        return RunningInfo(bundleID: app.bundleIdentifier ?? identifier, version: nil, build: nil)
     }
 
     static func launch() {
@@ -131,17 +140,39 @@ enum SentinelHelper {
         }
     }
 
-    private static func readVersionInfo(from bundleURL: URL?) -> (version: String?, build: String?) {
-        guard let infoPlistURL = bundleURL?
-            .appendingPathComponent("Contents", isDirectory: true)
-            .appendingPathComponent("Info.plist", isDirectory: false),
-              let info = NSDictionary(contentsOf: infoPlistURL) as? [String: Any] else {
-            return (nil, nil)
+    private static func readRuntimeInfo(identifier: String, processIdentifier: pid_t) -> RunningInfo? {
+        guard let runtimeInfoURL = runtimeInfoURL(identifier: identifier),
+              FileManager.default.fileExists(atPath: runtimeInfoURL.path) else {
+            return nil
         }
 
-        return (
-            info["CFBundleShortVersionString"] as? String,
-            info["CFBundleVersion"] as? String
+        do {
+            let data = try Data(contentsOf: runtimeInfoURL)
+            let payload = try JSONDecoder().decode(RuntimeInfoPayload.self, from: data)
+
+            guard payload.bundleID.caseInsensitiveCompare(identifier) == .orderedSame,
+                  payload.processID == processIdentifier else {
+                AppLogInfo(
+                    "[SentinelHelper] Ignoring stale Sentinel runtime info: bundleID=\(payload.bundleID), pid=\(payload.processID)"
+                )
+                return nil
+            }
+
+            return RunningInfo(
+                bundleID: payload.bundleID,
+                version: payload.version,
+                build: payload.build
+            )
+        } catch {
+            AppLogError("[SentinelHelper] failed to read Sentinel runtime info: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    private static func runtimeInfoURL(identifier: String) -> URL? {
+        FileSystemUtils.sharedContainerURL()?.appendingPathComponent(
+            ".phi-sentinel-runtime-\(identifier)",
+            isDirectory: false
         )
     }
 

@@ -359,7 +359,8 @@ enum NativeTabDecisionEngine {
         visibleNormalTabIds: [Int],
         context: NativeTabCreationContext?,
         relationGraph: NativeTabRelationGraph,
-        splitPartnerByTabId: [Int: Int] = [:]
+        splitPartnerByTabId: [Int: Int] = [:],
+        hiddenOpenerTabIds: Set<Int> = []
     ) -> Int? {
         let creationKindText = context?.creationKind.rawValue ?? "nil"
         let isActiveText = context?.isActiveAtCreation.description ?? "nil"
@@ -394,6 +395,19 @@ enum NativeTabDecisionEngine {
                 )
                 return anchorIndex + 1
             }
+            if let openerTabId = context.openerTabId,
+               hiddenOpenerTabIds.contains(openerTabId) {
+                let result = hiddenOpenerInsertionIndex(
+                    openerTabId: openerTabId,
+                    visibleNormalTabIds: visibleNormalTabIds,
+                    relationGraph: relationGraph
+                )
+                AppLogDebug(
+                    "[NativeTab] insertionIndex chose hidden foreground opener=\(openerTabId) " +
+                    "result=\(result)"
+                )
+                return result
+            }
             if let insertAfterTabId = context.insertAfterTabId,
                let anchorIndex = visibleNormalTabIds.firstIndex(of: insertAfterTabId) {
                 AppLogDebug(
@@ -420,6 +434,19 @@ enum NativeTabDecisionEngine {
                 AppLogDebug(
                     "[NativeTab] insertionIndex chose background opener=\(openerTabId) " +
                     "openerIndex=\(openerIndex) anchorIndex=\(anchorIndex) result=\(result)"
+                )
+                return result
+            }
+            if let openerTabId = context.openerTabId,
+               hiddenOpenerTabIds.contains(openerTabId) {
+                let result = hiddenOpenerInsertionIndex(
+                    openerTabId: openerTabId,
+                    visibleNormalTabIds: visibleNormalTabIds,
+                    relationGraph: relationGraph
+                )
+                AppLogDebug(
+                    "[NativeTab] insertionIndex chose hidden background opener=\(openerTabId) " +
+                    "result=\(result)"
                 )
                 return result
             }
@@ -452,6 +479,19 @@ enum NativeTabDecisionEngine {
 
         AppLogDebug("[NativeTab] insertionIndex returned nil")
         return nil
+    }
+
+    private static func hiddenOpenerInsertionIndex(
+        openerTabId: Int,
+        visibleNormalTabIds: [Int],
+        relationGraph: NativeTabRelationGraph
+    ) -> Int {
+        var insertAfterIndex: Int?
+        for (index, tabId) in visibleNormalTabIds.enumerated()
+        where isDescendant(tabId, of: openerTabId, relationGraph: relationGraph) {
+            insertAfterIndex = index
+        }
+        return insertAfterIndex.map { $0 + 1 } ?? 0
     }
 
     static func selectionTarget(

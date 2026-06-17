@@ -185,6 +185,10 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
     private var lockedTabWidth: CGFloat?
     /// Previous normal-tab count, used to detect tab closes.
     private var previousNormalTabCount: Int = 0
+    /// Trailing normal-tab id from the previous tick. The close sink only
+    /// sees the post-close list, so a trailing close is detected by this
+    /// id having vanished from it.
+    private var previousTrailingNormalTabId: Int?
 
     private struct ExternalDragPreview {
         let zone: TabContainerType
@@ -418,8 +422,10 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
             } else {
                 dragSlotPerTab = context?.draggedTabWidth
             }
+            // One slot even for a split pair — it re-merges into a single
+            // cell on drop, matching the cross-window preview's sizing.
             normalGapW = (context?.targetContainerType == .normal)
-                ? draggedSlotsWidth(for: context, perTabWidth: dragSlotPerTab)
+                ? dragSlotPerTab
                 : (externalPreview?.zone == .normal ? externalPreview?.gapWidth : nil)
         }
 
@@ -980,7 +986,14 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
            let partnerView = normalTabViews[tabId(for: partnerTab)],
            partnerView.superview != nil,
            partnerView.frame.width > 0 {
-            return partnerView.convert(partnerView.bounds, to: coordView)
+            // Delegate instead of converting `partnerView` directly: during a
+            // merged-cell drag the host partner is the dragging tab, whose
+            // source view stays parked at its drag-start frame (alpha = 0)
+            // while the proxy follows the cursor. Re-entering tabFrame lets
+            // the partner's drag-proxy and group-drag branches resolve the
+            // live frame. Bounded: the width > 0 guard above keeps the
+            // partner out of this placeholder branch.
+            return tabFrame(for: partnerTab, in: coordView)
         }
         let frame = view.convert(view.bounds, to: coordView)
         // Whole-group drag: members are visually translated via
@@ -1171,6 +1184,7 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
             ? NSColor.clear.cgColor
             : NSColor(resource: .sidebarTabHovered).cgColor
         previousNormalTabCount = normalTabs.count
+        previousTrailingNormalTabId = normalTabs.last?.guid
         isLayoutLocked = false
         lockedTabWidth = nil
 
@@ -1205,6 +1219,7 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
         currentScrollOffset = 0
         lastContentWidth = 0
         previousNormalTabCount = 0
+        previousTrailingNormalTabId = nil
         isLayoutLocked = false
         lockedTabWidth = nil
         pendingDropAction = nil
@@ -1234,10 +1249,29 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
                 }
 
                 let isTabClosed = normalTabs.count < self.previousNormalTabCount
+                let trailingTabClosed = isTabClosed
+                    && (self.previousTrailingNormalTabId.map { previousLast in
+                        !normalTabs.contains { $0.guid == previousLast }
+                    } ?? false)
                 self.previousNormalTabCount = normalTabs.count
+                self.previousTrailingNormalTabId = normalTabs.last?.guid
 
                 if isTabClosed && self.isMouseInside() {
-                    self.lockLayoutIfNeeded()
+                    if trailingTabClosed {
+                        // Trailing close: reflow IS the continuation
+                        // affordance here. Width-constrained tabs fill the
+                        // container, so re-allocating parks the new
+                        // trailing tab's close button back at the fixed
+                        // right-edge position under the cursor, while a
+                        // frozen layout would leave the cursor past the
+                        // content end. Also ends a running locked session
+                        // the moment the cursor slot becomes the trailing
+                        // tab, snapping straight to the final layout.
+                        self.isLayoutLocked = false
+                        self.lockedTabWidth = nil
+                    } else {
+                        self.lockLayoutIfNeeded()
+                    }
                 }
 
                 // Refresh chip widths for any group whose member count
@@ -1533,87 +1567,40 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
         guard !isLayoutLocked else { return }
         guard normalTabViews.count > 1 else { return }
 
-        // Infer the inactive width from any tab narrower than the active
-        // minimum. `frame != .zero` filters out collapsed-group members:
-        // they're sized to zero by `layoutNormalWithGroups`, not because
-        // the strip is compressed, but because the group is collapsed —
-        // they shouldn't be treated as "narrow inactive tab" evidence.
-        // Without the filter, the heuristic captures `lockedTabWidth = 0`
-        // and freezes a degenerate layout where every non-active cell
+        // Lock whenever the strip is width-constrained, i.e. some tab sits
+        // below the ideal width. In that whole band widths come from
+        // container allocation (available / count), so a close
+        // redistributes the freed space and every close button drifts away
+        // from the cursor — not just in the compressed (< activeMinWidth)
+        // band. At full ideal width a close moves no widths (the next
+        // close button slides under the cursor by itself), so no lock is
+        // needed.
+        //
+        // Sample the MINIMUM qualifying width: the engine keeps
+        // active ≥ inactive and split merged cells at ~2× a single cell,
+        // so the minimum is always a plain inactive tab's width — an
+        // arbitrary dictionary hit could capture the active tab (or a
+        // merged cell) and broadcast its wider value to every inactive
+        // tab, visibly expanding the strip the moment the lock engages.
+        // `frame != .zero` filters out collapsed-group members: they're
+        // sized to zero by `layoutNormalWithGroups`, not because the strip
+        // is compressed, but because the group is collapsed — they
+        // shouldn't be treated as "narrow inactive tab" evidence. Without
+        // the filter, the heuristic captures `lockedTabWidth = 0` and
+        // freezes a degenerate layout where every non-active cell
         // collapses to width 0 (visually a clump of overlapping favicons,
         // sticky until mouse exits the strip).
-        let activeMinWidth = TabStripMetrics.Tab.activeMinWidth
+        let idealWidth = TabStripMetrics.Tab.idealWidth
         let inactiveTabWidth = normalTabViews.values
-            .first { $0.frame != .zero && $0.frame.width < activeMinWidth }?
-            .frame.width
+            .filter { $0.frame != .zero && $0.frame.width < idealWidth }
+            .map(\.frame.width)
+            .min()
 
-        // If no inactive tab is compressed, there is no need to lock the layout.
+        // At full ideal width there is nothing to freeze.
         if let width = inactiveTabWidth {
             lockedTabWidth = width
             isLayoutLocked = true
         }
-    }
-
-    /// Manual layout used while widths are temporarily locked.
-    private func calculateLockedLayout(
-        tabs: [Tab],
-        activeTab: Tab?,
-        lockedInactiveWidth: CGFloat
-    ) -> TabStripLayoutOutput {
-        let spacing = TabStripMetrics.Tab.spacing
-        let tabHeight = TabStripMetrics.Strip.tabHeight
-        let activeMinWidth = TabStripMetrics.Tab.activeMinWidth
-        let bottomSpacing = TabStripMetrics.Strip.bottomSpacing
-
-        // Match the same leading offset used by the normal layout engine.
-        let startOffsetX = max(0, TabStripMetrics.Tab.inverseCornerRadius - spacing)
-
-        var tabFrames: [CGRect] = []
-        var separatorXs: [CGFloat] = []
-        var currentX = startOffsetX
-
-        for tab in tabs {
-            currentX += spacing
-
-            let isActive = isTabActive(tab, activeTab: activeTab)
-            let width = isActive ? activeMinWidth : lockedInactiveWidth
-
-            let frame = CGRect(
-                x: currentX,
-                y: bottomSpacing,
-                width: width,
-                height: tabHeight
-            )
-            tabFrames.append(frame)
-
-            currentX += width
-
-            // Separator position.
-            let separatorX = currentX + spacing
-            separatorXs.append(separatorX)
-
-            currentX += spacing + 1.0
-        }
-
-        currentX += spacing
-
-        // NewTabButton
-        let btnSize = TabStripMetrics.NewTabButton.size
-        let newTabFrame = CGRect(
-            x: currentX,
-            y: bottomSpacing,
-            width: btnSize.width,
-            height: btnSize.height
-        )
-
-        currentX += btnSize.width + TabStripMetrics.NewTabButton.insets.right
-
-        return TabStripLayoutOutput(
-            tabFrames: tabFrames,
-            separatorXPositions: separatorXs,
-            newTabButtonFrame: newTabFrame,
-            totalContentWidth: currentX
-        )
     }
 
     /// Updates one container by coordinating layout, view-pool, and apply phases.
@@ -1702,54 +1689,54 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
             )
         }
 
-        if isLayoutLocked, let lockedWidth = lockedTabWidth {
-            return calculateLockedLayout(
-                tabs: tabs,
-                activeTab: activeTab,
-                lockedInactiveWidth: lockedWidth
-            )
-        } else {
-            let activeIndex = tabs.firstIndex { isTabActive($0, activeTab: activeTab) }
-            let runs = currentGroupRuns()
-            // `gapBeforeRunStartChip` is a per-layout hint the engine
-            // uses ONLY when the gap actually lands at a run's
-            // lowerBound. Sources that should force before-chip:
-            //   • THIS strip is itself running a whole-group drag (same-
-            //     window slice slots in front of foreign chip).
-            //   • THIS strip has an external drop preview AND the
-            //     resolved intent is OUTSIDE (joinRunToken == nil).
-            //     JOIN intent (joinRunToken != nil) wants the gap on
-            //     the OTHER side of chip (inside the group), so the
-            //     flag must stay false. See spec §4.1.
-            //   • Single-tab same-window drag's cursor-half heuristic.
-            let externalIsOutsideIntent = (externalDragPreview != nil)
-                && (externalDragPreview?.joinRunToken == nil)
-            let gapBeforeRunStartChip = !isPinned && (
-                (groupDragController.context != nil)
-                || externalIsOutsideIntent
-                || (dragController.context?.gapBeforeRunStartChip ?? false)
-            )
-            let input = TabStripLayoutInput(
-                containerWidth: containerWidth,
-                tabCount: tabs.count,
-                activeTabIndex: activeIndex,
-                spacing: TabStripMetrics.Tab.spacing,
-                idealTabWidth: TabStripMetrics.Tab.idealWidth,
-                minTabWidth: TabStripMetrics.Tab.minWidth,
-                activeTabWidth: TabStripMetrics.Tab.activeMinWidth,
-                tabHeight: TabStripMetrics.Strip.tabHeight,
-                excludedTabIndex: excludedIndex,
-                excludedGroupRange: isPinned ? nil : excludedGroupRange,
-                excludedTabIndices: excludedIndices,
-                wideTabIndices: wideIndices,
-                gapAtIndex: gapIndex,
-                gapWidth: gapWidth,
-                groupRuns: isPinned ? [] : runs,
-                chipFullWidths: isPinned ? [:] : chipFullWidths,
-                gapBeforeRunStartChip: gapBeforeRunStartChip
-            )
-            return TabStripLayoutEngine.layoutNormal(input: input)
-        }
+        let activeIndex = tabs.firstIndex { isTabActive($0, activeTab: activeTab) }
+        // A merged split cell hosts two panes, so when it is the active
+        // cell its protected width must clear the split compact cutoff —
+        // at the single-tab minimum it would fall back to the two-favicon
+        // compact rendering and lose the per-pane close buttons.
+        let activeTabWidth = (activeIndex.map { wideIndices.contains($0) } ?? false)
+            ? TabStripMetrics.Tab.activeSplitMinWidth
+            : TabStripMetrics.Tab.activeMinWidth
+        let runs = currentGroupRuns()
+        // `gapBeforeRunStartChip` is a per-layout hint the engine
+        // uses ONLY when the gap actually lands at a run's
+        // lowerBound. Sources that should force before-chip:
+        //   • THIS strip is itself running a whole-group drag (same-
+        //     window slice slots in front of foreign chip).
+        //   • THIS strip has an external drop preview AND the
+        //     resolved intent is OUTSIDE (joinRunToken == nil).
+        //     JOIN intent (joinRunToken != nil) wants the gap on
+        //     the OTHER side of chip (inside the group), so the
+        //     flag must stay false. See spec §4.1.
+        //   • Single-tab same-window drag's cursor-half heuristic.
+        let externalIsOutsideIntent = (externalDragPreview != nil)
+            && (externalDragPreview?.joinRunToken == nil)
+        let gapBeforeRunStartChip = !isPinned && (
+            (groupDragController.context != nil)
+            || externalIsOutsideIntent
+            || (dragController.context?.gapBeforeRunStartChip ?? false)
+        )
+        let input = TabStripLayoutInput(
+            containerWidth: containerWidth,
+            tabCount: tabs.count,
+            activeTabIndex: activeIndex,
+            spacing: TabStripMetrics.Tab.spacing,
+            idealTabWidth: TabStripMetrics.Tab.idealWidth,
+            minTabWidth: TabStripMetrics.Tab.minWidth,
+            activeTabWidth: activeTabWidth,
+            tabHeight: TabStripMetrics.Strip.tabHeight,
+            excludedTabIndex: excludedIndex,
+            excludedGroupRange: isPinned ? nil : excludedGroupRange,
+            excludedTabIndices: excludedIndices,
+            wideTabIndices: wideIndices,
+            gapAtIndex: gapIndex,
+            gapWidth: gapWidth,
+            groupRuns: isPinned ? [] : runs,
+            chipFullWidths: isPinned ? [:] : chipFullWidths,
+            gapBeforeRunStartChip: gapBeforeRunStartChip,
+            lockedInactiveTabWidth: isLayoutLocked ? lockedTabWidth : nil
+        )
+        return TabStripLayoutEngine.layoutNormal(input: input)
     }
 
     /// Updates the view pool by creating, reusing, configuring, and removing views.
@@ -1893,11 +1880,17 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
                 view.onHoverChanged = { [weak self] isHovered in
                     guard let self = self else { return }
                     self.hoveredTabIndex = isHovered ? capturedIndex : nil
+                    // Mirror `performLayout`'s split-secondary exclusion so
+                    // the recomputed separator positions match the frames
+                    // actually on screen.
+                    let splitCollapse = self.normalSplitCollapseInfo()
                     let output = self.calculateLayout(
                         containerWidth: self.normalContainer.bounds.width,
                         tabs: self.browserState.normalTabs,
                         activeTab: self.visibleActiveTabForChrome(),
-                        isPinned: false
+                        isPinned: false,
+                        excludedIndices: splitCollapse.collapsedIndices,
+                        wideIndices: splitCollapse.wideIndices
                     )
                     // Re-render separators because hover state affects visibility.
                     self.updateSeparators(
@@ -1914,6 +1907,19 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
                     )
                 }
             }
+
+            // Stamp the UI-test query surface. The collapsed second pane of a
+            // split (it merges into its partner's cell) and the transparent
+            // drag-source stand-in must not count as separate tab cells.
+            let axVisible = !isDraggingSourceView
+                && !pinnedSplitCollapsedIndices.contains(index)
+            view.configureAccessibility(
+                identifier: isPinned
+                    ? TabItemView.pinnedAccessibilityIdentifier
+                    : TabItemView.normalAccessibilityIdentifier,
+                title: tab.title,
+                visible: axVisible,
+                isSplitPair: pinnedSplitPartners[id] != nil)
 
             nextViews[id] = view
         }
@@ -2100,11 +2106,16 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
                     // Re-render both separator pools so the chip's left
                     // separator (in `separatorViews`) and right separator
                     // (in `chipRightSeparatorViews`) react to the change.
+                    // Mirror `performLayout`'s split-secondary exclusion so
+                    // the recomputed positions match the on-screen frames.
+                    let splitCollapse = self.normalSplitCollapseInfo()
                     let output = self.calculateLayout(
                         containerWidth: self.normalContainer.bounds.width,
                         tabs: self.browserState.normalTabs,
                         activeTab: self.visibleActiveTabForChrome(),
-                        isPinned: false
+                        isPinned: false,
+                        excludedIndices: splitCollapse.collapsedIndices,
+                        wideIndices: splitCollapse.wideIndices
                     )
                     self.updateSeparators(
                         in: self.normalContainer,
@@ -2430,6 +2441,15 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
         let y = TabStripMetrics.Strip.bottomSpacing + (TabStripMetrics.Strip.tabHeight - sepSize.height) / 2.0
         let activeIndex = tabs.firstIndex { isTabActive($0, activeTab: activeTab) }
 
+        // Split-secondary slots are zero-width with off-screen separators,
+        // so the separator visually left of a tab can belong to an earlier
+        // index (the pair host's right edge). Every left-side rule below
+        // must use this mapping instead of the plain `idx - 1`.
+        let splitCollapsedIndices = normalSplitCollapseInfo().collapsedIndices
+        let leftSeparatorIndex: (Int) -> Int = { idx in
+            TabStripLayoutEngine.visibleLeftSeparatorIndex(of: idx, skippingCollapsed: splitCollapsedIndices)
+        }
+
         // Hovered chip's left-edge sits between tab[firstMember - 1] and the chip.
         // That tab's right separator (separator[firstMember - 1]) should hide.
         let hoveredChipFirstMemberIdx: Int? = {
@@ -2463,18 +2483,18 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
 
             if let activeIdx = activeIndex {
                 if index == activeIdx { shouldHide = true }      // Separator on the tab's right side.
-                if index == activeIdx - 1 && !firstMemberOfExpandedGroup(activeIdx) {
+                if index == leftSeparatorIndex(activeIdx) && !firstMemberOfExpandedGroup(activeIdx) {
                     shouldHide = true  // Tab's left side (chip-between guard).
                 }
             }
             if let hoveredIdx = hoveredTabIndex {
                 if index == hoveredIdx { shouldHide = true }      // Separator on the tab's right side.
-                if index == hoveredIdx - 1 && !firstMemberOfExpandedGroup(hoveredIdx) {
+                if index == leftSeparatorIndex(hoveredIdx) && !firstMemberOfExpandedGroup(hoveredIdx) {
                     shouldHide = true  // Tab's left side (chip-between guard).
                 }
             }
             if let firstMemberIdx = hoveredChipFirstMemberIdx,
-               index == firstMemberIdx - 1 {
+               index == leftSeparatorIndex(firstMemberIdx) {
                 shouldHide = true  // Separator on the hovered chip's left side.
             }
 
@@ -3159,7 +3179,7 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
         if splitHintTargetContainer !== container {
             splitHintTargetContainer?.hideSplitDropHints()
         }
-        container.showSplitDropHints()
+        container.showSplitDropHints(draggedTabId: draggedTabId)
         splitHintTargetContainer = container
     }
 
@@ -3501,14 +3521,6 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
         return set
     }
 
-    /// Reserved gap width in the target zone: one tab width by default, two
-    /// when carrying a split pair so both members can land contiguously.
-    private func draggedSlotsWidth(for context: TabDragContext?, perTabWidth: CGFloat?) -> CGFloat? {
-        guard let context, let perTabWidth else { return perTabWidth }
-        let slotCount: CGFloat = context.siblingSourceIndex == nil ? 1 : 2
-        return perTabWidth * slotCount
-    }
-
     private func handleTabDragUpdate(event: NSEvent) {
         let mouseLoc = event.locationInWindow
         updateDragScreenPoint(from: event)
@@ -3699,7 +3711,9 @@ extension TabStrip: TabStripDragDelegate {
 
         if case let .splitWithFocused(zone) = dropAction {
             clearDraggingPresentation(using: context)
-            performSplitWithFocused(draggedTab: tab, zone: zone)
+            performSplitWithFocused(draggedTab: tab,
+                                    fromPinnedZone: context.sourceContainerType == .pinned,
+                                    zone: zone)
             // Treat the drop as consumed locally — the dragged tab stayed in
             // this window, so don't run the tear-off path.
             browserState.tabDraggingSession.end(screenLocation: screenPoint, dragOperation: .move)
@@ -3715,16 +3729,13 @@ extension TabStrip: TabStripDragDelegate {
         // Perform the underlying data move first.
         if isOriginalPinned {
             if toZone == .normal {
-                // Case: pinned -> normal. A single (non-split) pinned tab
-                // dropped onto a group unpins and joins it; every other
-                // case keeps the existing plain move-out behavior.
+                // Case: pinned -> normal. A pinned tab dropped onto a group
+                // unpins and joins it — pinned splits too: `movePinnedTabOut`
+                // folds the pair into the group as a split, same as the
+                // sidebar drop path. Every other case keeps the plain
+                // move-out behavior.
                 if let guid = tab.guidInLocalDB {
-                    let pinnedTab = browserState.pinnedTabs.first { $0.guidInLocalDB == guid }
-                    let isSplit = (pinnedTab?.splitPartnerGuid.map { !$0.isEmpty } ?? false)
-                        || browserState.splitGroup(forTabId: tab.guid) != nil
-                    let joinToken: String? = isSplit
-                        ? nil
-                        : resolvePinnedDropGroupToken(context: context, toIndex: toIndex)
+                    let joinToken = resolvePinnedDropGroupToken(context: context, toIndex: toIndex)
                     if let token = joinToken,
                        let run = currentGroupRuns().first(where: { $0.token == token }) {
                         let groupIndex = max(0, min(toIndex - run.range.lowerBound, run.range.count))
@@ -4053,23 +4064,34 @@ extension TabStrip: TabStripDragDelegate {
         return convert(windowPoint, from: nil)
     }
 
-    /// Pairs the dragged tab with the currently focused tab into a new
-    /// vertical split. The dragged tab takes the left (primary) slot when
-    /// dropped on the left zone, the right (secondary) slot when dropped on
-    /// the right zone. When the dragged tab *is* the focused tab, a fresh
-    /// new-tab-page is spawned as the other pane. Defensive guards mirror
-    /// those in `SplitTabDropContainer.splitZoneForScreenPoint`.
+    /// Commits a split drop against the focused tab's page. When the focused
+    /// tab is *not* a split, pairs the dragged tab with it into a new vertical
+    /// split (dragged tab takes the dropped side; dragging the focused tab
+    /// onto itself spawns a fresh new-tab-page partner). When the focused tab
+    /// *is* a split, replaces the hovered pane with the dragged tab. The
+    /// create/replace decision lives in `SplitTabDropContainer.commitSplitDrop`
+    /// so both entry points stay identical.
     private func performSplitWithFocused(draggedTab: Tab,
+                                         fromPinnedZone: Bool,
                                          zone: SplitTabDropContainer.DropZone) {
-        guard let focused = browserState.focusingTab,
-              browserState.splitGroup(forTabId: focused.guid) == nil,
-              browserState.splitGroup(forTabId: draggedTab.guid) == nil,
+        guard browserState.splitGroup(forTabId: draggedTab.guid) == nil,
               let dropContainer = unsafeBrowserWindowController?.mainSplitViewController
                 .webContentContainerViewController.splitTabDropContainer else { return }
-        dropContainer.performSplitDrop(state: browserState,
-                                       source: .normalTab(tabId: draggedTab.guid),
-                                       focusedTabId: focused.guid,
-                                       zone: zone)
+        // A tab dragged out of the pinned zone must keep its pinned status:
+        // route it as `.pinnedTab` so the drop demotes it into a normal split
+        // (leaving a pinned placeholder at its slot), exactly as the
+        // sidebar/vertical-layout drag does via the pasteboard. Passing
+        // `.normalTab` here would form the split with the tab still pinned —
+        // splits are never allowed to live in the pinned strip.
+        let source: SplitTabDropContainer.DragSource
+        if fromPinnedZone, let dbGuid = draggedTab.guidInLocalDB, !dbGuid.isEmpty {
+            source = .pinnedTab(dbGuid: dbGuid)
+        } else {
+            source = .normalTab(tabId: draggedTab.guid)
+        }
+        dropContainer.commitSplitDrop(state: browserState,
+                                      source: source,
+                                      zone: zone)
     }
 
     private func handleExternalDrop(tab: Tab, context: TabDragContext, target: ExternalDropTarget) -> Bool {

@@ -266,6 +266,13 @@ typedef NS_ENUM(NSUInteger, PhiOmniboxSuggestionDisposition) {
                                       windowId:(int64_t)windowId;
 
 @optional
+// Per-window extension action badge state (text/colors/visibility/enabled).
+// Keys: windowId, extensionId, tabId, badgeText, backgroundColor, textColor,
+// visible, enabled.
+- (void)badgeInfoChanged:(NSDictionary *)info;
+// Per-window dynamic extension action icon. Keys: windowId, extensionId, tabId,
+// iconData (PNG NSData, empty => no dynamic icon), dipSize, scale.
+- (void)actionIconChanged:(NSDictionary *)info;
 // Optional metadata-rich variants for richer native tab orchestration.
 - (void)tabWillBeRemove:(int64_t)tabId
                windowId:(int64_t)windowId
@@ -697,7 +704,8 @@ typedef NS_ENUM(NSUInteger, PhiOmniboxSuggestionDisposition) {
 /// @param splitId   Target split.
 /// @param slotIndex 0 = primary slot, 1 = secondary slot.
 /// @param otherTabId The tab outside the split that moves in.
-/// @param swap      YES → kSwap (other tab takes the slot, evicted tab takes other's old position).
+/// @param swap      YES → other tab takes the slot; the evicted tab moves right
+///                  next to the split and joins its tab group, if any.
 ///                  NO  → kReplace (evicted tab is closed).
 /// If neither side of the split is currently active, the targeted slot is
 /// activated first so Chromium's "split contains the active tab" invariant

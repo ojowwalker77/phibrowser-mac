@@ -410,6 +410,11 @@ class SidebarSplitPairCellView: SidebarCellView {
     private var rightCloseHost: ZeroSafeAreaHostingView<AnyView>!
     private var leftMuteHost: ZeroSafeAreaHostingView<AnyView>!
     private var rightMuteHost: ZeroSafeAreaHostingView<AnyView>!
+    /// Per-pane recording badge overlaid on each pane's favicon. Mirrors the
+    /// corner badge `UnifiedTabFaviconView` draws on a normal tab so a split
+    /// pane using the microphone / camera / screen share reads the same.
+    private var leftRecordingHost: ZeroSafeAreaHostingView<AnyView>!
+    private var rightRecordingHost: ZeroSafeAreaHostingView<AnyView>!
     private var leftMuteWidth: Constraint?
     private var rightMuteWidth: Constraint?
     private var leftTitlePaneTrailing: Constraint?
@@ -475,6 +480,8 @@ class SidebarSplitPairCellView: SidebarCellView {
         rightCloseHost.isHidden = true
         leftMuteHost.isHidden = true
         rightMuteHost.isHidden = true
+        leftRecordingHost.isHidden = true
+        rightRecordingHost.isHidden = true
         leftMuteWidth?.update(offset: 0)
         rightMuteWidth?.update(offset: 0)
     }
@@ -516,10 +523,20 @@ class SidebarSplitPairCellView: SidebarCellView {
         leftMuteHost.isHidden = true
         rightMuteHost.isHidden = true
 
+        // Recording badges. Static content (the pulsing red dot); only their
+        // visibility is toggled, so the root view is built once here.
+        leftRecordingHost = ZeroSafeAreaHostingView(rootView: AnyView(
+            UnifiedTabRecordingIcon().phiThemeObserver(themeObserver)))
+        rightRecordingHost = ZeroSafeAreaHostingView(rootView: AnyView(
+            UnifiedTabRecordingIcon().phiThemeObserver(themeObserver)))
+        leftRecordingHost.isHidden = true
+        rightRecordingHost.isHidden = true
+
         leftMuteWidth = configurePane(leftPane,
                                       icon: leftIconView,
                                       title: leftTitleLabel,
                                       mute: leftMuteHost,
+                                      recording: leftRecordingHost,
                                       close: leftCloseHost,
                                       paneTrailing: &leftTitlePaneTrailing,
                                       closeTrailing: &leftTitleCloseTrailing)
@@ -527,6 +544,7 @@ class SidebarSplitPairCellView: SidebarCellView {
                                        icon: rightIconView,
                                        title: rightTitleLabel,
                                        mute: rightMuteHost,
+                                       recording: rightRecordingHost,
                                        close: rightCloseHost,
                                        paneTrailing: &rightTitlePaneTrailing,
                                        closeTrailing: &rightTitleCloseTrailing)
@@ -580,6 +598,7 @@ class SidebarSplitPairCellView: SidebarCellView {
                                icon: NSImageView,
                                title: NSTextField,
                                mute: NSView,
+                               recording: NSView,
                                close: NSView,
                                paneTrailing: inout Constraint?,
                                closeTrailing: inout Constraint?) -> Constraint? {
@@ -604,6 +623,17 @@ class SidebarSplitPairCellView: SidebarCellView {
             make.centerY.equalToSuperview()
             make.leading.equalToSuperview().offset(8)
             make.size.equalTo(CGSize(width: 16, height: 16))
+        }
+
+        // Recording badge sits at the favicon's top-trailing corner, matching
+        // `UnifiedTabFaviconView`'s overlay (8pt dot offset out by 3pt).
+        // Hosted on the pane rather than the icon so the icon's masked corners
+        // don't clip it. Hidden until the pane's tab starts capturing.
+        pane.addSubview(recording)
+        recording.snp.makeConstraints { make in
+            make.top.equalTo(icon.snp.top).offset(-3)
+            make.trailing.equalTo(icon.snp.trailing).offset(3)
+            make.size.equalTo(CGSize(width: 8, height: 8))
         }
 
         title.font = NSFont.systemFont(ofSize: 13)
@@ -732,6 +762,8 @@ class SidebarSplitPairCellView: SidebarCellView {
         updateMute(isLeft: false,
                    audible: pair.rightTab.isCurrentlyAudible,
                    muted: pair.rightTab.isAudioMuted)
+        updateRecording(isLeft: true, capturing: pair.leftTab.isCapturingMedia)
+        updateRecording(isLeft: false, capturing: pair.rightTab.isCapturingMedia)
 
         // Subscribe to each tab's audio state and route by tab identity so a
         // post-swap event lands in the correct pane — the configured left/right
@@ -748,6 +780,26 @@ class SidebarSplitPairCellView: SidebarCellView {
                         self.updateMute(isLeft: true, audible: audible, muted: muted)
                     } else if tab === self.configuredRightTab {
                         self.updateMute(isLeft: false, audible: audible, muted: muted)
+                    }
+                }
+                .store(in: &cancellables)
+        }
+
+        // Same identity-routed binding for the capture flags so each pane's
+        // recording badge tracks its own tab, matching a standalone tab.
+        for tab in [pair.leftTab, pair.rightTab] {
+            Publishers.CombineLatest3(tab.$isCapturingAudio,
+                                      tab.$isCapturingVideo,
+                                      tab.$isSharingScreen)
+                .map { $0 || $1 || $2 }
+                .removeDuplicates()
+                .receive(on: DispatchQueue.main)
+                .sink { [weak self, weak tab] capturing in
+                    guard let self, let tab else { return }
+                    if tab === self.configuredLeftTab {
+                        self.updateRecording(isLeft: true, capturing: capturing)
+                    } else if tab === self.configuredRightTab {
+                        self.updateRecording(isLeft: false, capturing: capturing)
                     }
                 }
                 .store(in: &cancellables)
@@ -873,6 +925,19 @@ class SidebarSplitPairCellView: SidebarCellView {
         )
     }
 
+    /// Show or hide a pane's recording badge based on its tab's capture
+    /// state. Mirrors the corner badge a standalone tab shows via
+    /// `UnifiedTabFaviconView` so split panes match unsplit panes.
+    private func updateRecording(isLeft: Bool, capturing: Bool) {
+        let host = isLeft ? leftRecordingHost : rightRecordingHost
+        host?.isHidden = !capturing
+    }
+
+    /// Test seam: whether the given pane currently shows its recording badge.
+    func isRecordingIndicatorVisible(isLeft: Bool) -> Bool {
+        !(isLeft ? leftRecordingHost : rightRecordingHost).isHidden
+    }
+
     private func updateSelected() {
         guard let pair = item as? SplitPairSidebarItem else { return }
         // Whole cell flips to the selected pill when *either* pane is the
@@ -880,6 +945,22 @@ class SidebarSplitPairCellView: SidebarCellView {
         // over its hover tint, so the cell-level NSTrackingArea-driven
         // hover background underneath cleanly yields to the active fill.
         outerBackground.isSelected = pair.leftTab.isActive || pair.rightTab.isActive
+    }
+
+    /// Re-binds the cell when the pair's membership changed in place — a
+    /// drag-to-replace swaps one pane's Tab object on the cached
+    /// `SplitPairSidebarItem` while the row id survives, so the outline
+    /// diff never reloads this row. `reresolvePairOrderIfNeeded` below only
+    /// covers order swaps of the two already-bound tabs; identity drift
+    /// needs the full re-bind so the title/favicon/audio subscriptions
+    /// attach to the new Tab. Driven by
+    /// `SidebarTabListViewController.pushPaneUpdatesToSplitPairCells`.
+    func rebindPanesIfNeeded() {
+        guard let pair = item as? SplitPairSidebarItem,
+              pair.leftTab !== configuredLeftTab || pair.rightTab !== configuredRightTab else {
+            return
+        }
+        configureAppearance()
     }
 
     /// If Chromium reordered the pair (swap button / drag), reflect the new
@@ -910,6 +991,8 @@ class SidebarSplitPairCellView: SidebarCellView {
             updateMute(isLeft: false,
                        audible: pair.rightTab.isCurrentlyAudible,
                        muted: pair.rightTab.isAudioMuted)
+            updateRecording(isLeft: true, capturing: pair.leftTab.isCapturingMedia)
+            updateRecording(isLeft: false, capturing: pair.rightTab.isCapturingMedia)
         }
     }
 }

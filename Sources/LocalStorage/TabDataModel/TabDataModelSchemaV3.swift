@@ -3,9 +3,14 @@
 // Use of this source code is governed by an Apache license that can be
 // found in the LICENSE file.
 
+
 import Foundation
 import SwiftData
-
+/// Modification record:
+/// - V3 adds `ProfileModel` and the `TabDataModel.profile` relationship for
+///   profile-scoped tabs and bookmarks.
+/// - V3 removes `associatedProfileIdentifier`; `profileId` remains as the
+///   denormalized profile lookup key.
 enum TabDataModelSchemaV3: VersionedSchema {
     static var versionIdentifier = Schema.Version(3, 0, 0)
 

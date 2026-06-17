@@ -21,6 +21,12 @@ struct TabSectionChange {
     /// The consumer reloads only these wrappers' children — adding an
     /// ungrouped tab leaves this empty so unrelated groups don't repaint.
     let affectedGroupTokens: Set<String>
+    /// Split ids whose merged pair row kept its identity but changed pane
+    /// membership (drag-to-replace swaps one pane's Tab object in place on
+    /// the cached `SplitPairSidebarItem`). The row id is keyed on the split
+    /// id alone, so the flat diff sees a no-op; the consumer re-binds these
+    /// rows' cells so titles/favicons/subscriptions attach to the new Tab.
+    let affectedSplitIds: Set<String>
 }
 
 class TabSectionController: NSObject {
@@ -66,6 +72,12 @@ class TabSectionController: NSObject {
     /// (and leave unrelated groups untouched on edits like creating a new
     /// ungrouped tab).
     private var previousGroupMembers: [String: [Int]] = [:]
+
+    /// Per-split [left guid, right guid] captured from the previous frame's
+    /// emitted pair rows. Compared frame-over-frame to detect a pane being
+    /// replaced in place — the pair row's id survives the swap, so without
+    /// this the diff path never re-binds the cell to the new Tab.
+    private var previousSplitMembers: [String: [Int]] = [:]
 
     weak var delegate: TabSectionDelegate?
     var browserState: BrowserState? {
@@ -293,12 +305,14 @@ class TabSectionController: NSObject {
             tabItems = []
             previousItemIds = []
             previousGroupMembers = [:]
+            previousSplitMembers = [:]
             delegate?.tabSectionDidUpdate(with: TabSectionChange(
                 insertedIndices: [],
                 removedIndices: [],
                 moveOperation: nil,
                 needsFullReload: true,
-                affectedGroupTokens: []
+                affectedGroupTokens: [],
+                affectedSplitIds: []
             ))
             return
         }
@@ -308,6 +322,9 @@ class TabSectionController: NSObject {
         let newGroupMembers = Self.computeGroupMembers(tabs: tabs)
         let affectedTokens = Self.affectedGroupTokens(old: previousGroupMembers,
                                                       new: newGroupMembers)
+        let newSplitMembers = Self.computeSplitMembers(items: items)
+        let affectedSplits = Self.affectedSplitIds(old: previousSplitMembers,
+                                                   new: newSplitMembers)
 
         // Single diff path for all cases (with or without groups). Group
         // rows participate as ordinary root-level ids (their token), so
@@ -326,16 +343,19 @@ class TabSectionController: NSObject {
                                       removedIndices: [],
                                       moveOperation: nil,
                                       needsFullReload: true,
-                                      affectedGroupTokens: [])
+                                      affectedGroupTokens: [],
+                                      affectedSplitIds: [])
         } else {
             change = computeFlatChange(oldIds: previousItemIds,
                                        newIds: newIds,
-                                       affectedGroupTokens: affectedTokens)
+                                       affectedGroupTokens: affectedTokens,
+                                       affectedSplitIds: affectedSplits)
         }
 
         self.tabItems = items
         self.previousItemIds = newIds
         self.previousGroupMembers = newGroupMembers
+        self.previousSplitMembers = newSplitMembers
 
         delegate?.tabSectionDidUpdate(with: change)
     }
@@ -361,9 +381,34 @@ class TabSectionController: NSObject {
         return tokens
     }
 
+    /// Snapshot of each emitted pair row's [left guid, right guid]. Compared
+    /// frame-over-frame to identify pair rows whose membership changed while
+    /// their id (the split id) survived — drag-to-replace and the
+    /// reverse-panes swap both mutate the cached wrapper in place.
+    private static func computeSplitMembers(items: [SidebarItem]) -> [String: [Int]] {
+        var result: [String: [Int]] = [:]
+        for case let pair as SplitPairSidebarItem in items {
+            result[pair.groupId] = [pair.leftTab.guid, pair.rightTab.guid]
+        }
+        return result
+    }
+
+    /// Split ids present in both frames whose pane guids changed. Ids only
+    /// in one frame surface as row insertions/removals in the flat diff and
+    /// rebuild their cell anyway.
+    private static func affectedSplitIds(old: [String: [Int]],
+                                         new: [String: [Int]]) -> Set<String> {
+        var ids: Set<String> = []
+        for id in Set(old.keys).intersection(new.keys) where old[id] != new[id] {
+            ids.insert(id)
+        }
+        return ids
+    }
+
     private func computeFlatChange(oldIds: [AnyHashable],
                                    newIds: [AnyHashable],
-                                   affectedGroupTokens: Set<String>) -> TabSectionChange {
+                                   affectedGroupTokens: Set<String>,
+                                   affectedSplitIds: Set<String>) -> TabSectionChange {
         let oldSet = Set(oldIds)
         let newSet = Set(newIds)
 
@@ -382,7 +427,8 @@ class TabSectionController: NSObject {
                         removedIndices: [],
                         moveOperation: (from: moveOp.from, to: moveOp.to),
                         needsFullReload: false,
-                        affectedGroupTokens: affectedGroupTokens
+                        affectedGroupTokens: affectedGroupTokens,
+                        affectedSplitIds: affectedSplitIds
                     )
                 }
             }
@@ -390,7 +436,8 @@ class TabSectionController: NSObject {
                                     removedIndices: [],
                                     moveOperation: nil,
                                     needsFullReload: true,
-                                    affectedGroupTokens: affectedGroupTokens)
+                                    affectedGroupTokens: affectedGroupTokens,
+                                    affectedSplitIds: affectedSplitIds)
         }
 
         var insertedIndices = IndexSet()
@@ -408,7 +455,8 @@ class TabSectionController: NSObject {
             removedIndices: removedIndices,
             moveOperation: nil,
             needsFullReload: false,
-            affectedGroupTokens: affectedGroupTokens
+            affectedGroupTokens: affectedGroupTokens,
+            affectedSplitIds: affectedSplitIds
         )
     }
     

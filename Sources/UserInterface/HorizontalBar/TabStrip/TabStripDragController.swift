@@ -582,17 +582,17 @@ final class TabStripDragController {
             }
         }
 
-        // Show the insertion gap in the target zone. Reserve room for both
-        // members when the drag carries a split pair.
-        let slotCount = context.siblingSourceIndex == nil ? 1 : 2
+        // Show the insertion gap in the target zone. One slot even for a
+        // split pair: the pair rests as one merged cell and re-merges into
+        // one slot on drop, so a two-slot gap made every other tab shrink
+        // at grab and snap back at drop.
         switch context.targetContainerType {
         case .pinned:
             pinnedGapIndex = context.targetIndex
         case .normal:
             normalGapIndex = context.targetIndex
             if let metrics = delegate?.dragControllerRequestMetrics() {
-                let perTab = calculateAverageTabWidth(from: metrics.normalTabFrames)
-                normalGapWidth = perTab * CGFloat(slotCount)
+                normalGapWidth = calculateAverageTabWidth(from: metrics.normalTabFrames)
             }
         }
 
@@ -716,7 +716,7 @@ final class TabStripDragController {
     /// This makes the let-way trigger independent of where inside x
     /// the user originally grabbed (cursor-based hit testing depends
     /// on grab offset).
-    private func calculateGapIndexEdgeBased(
+    func calculateGapIndexEdgeBased(
         xFrame: CGRect,
         tabFrames: [CGRect],
         chipFrames: [TabStripChipFrame],
@@ -799,7 +799,10 @@ final class TabStripDragController {
                 return entry.beforeIndex
             }
         }
-        return entries.last?.afterIndex ?? 0
+        // Past every entry: append after every record, not after the last
+        // entry — a merged split host's `afterIndex` points between the
+        // pair's records when the pair sits at the strip end.
+        return tabFrames.count
     }
 
     /// Calculates the gap index for a pointer position within one container.
@@ -809,7 +812,7 @@ final class TabStripDragController {
     ///   - excludedIndices: Source tab indices excluded from layout. Contains
     ///     both pair members during a split-pair drag.
     /// - Returns: Target gap index.
-    private func calculateGapIndex(
+    func calculateGapIndex(
         localX: CGFloat,
         tabFrames: [CGRect],
         excludedIndices: Set<Int>,
@@ -861,11 +864,11 @@ final class TabStripDragController {
         }
 
         // Insert at the end when the pointer is past every visible tab.
-        if let lastItem = visibleFrames.last {
-            return lastItem.index + 1
-        }
-
-        return 0
+        // Append after every record (`tabFrames.count`), not after the
+        // last visible one: trailing zero-width records (a merged split
+        // pair's second pane) sit between the two, and
+        // `lastVisible.index + 1` would land between the pair's records.
+        return tabFrames.count
     }
 
     /// Source-zone exclusion set: the dragged tab and (for split pairs) its

@@ -220,6 +220,96 @@ final class FeedbackOutboxArchiveTests: XCTestCase {
         XCTAssertEqual(try zipEntryText("PhiLogs/a.log", in: zipURL), "phi")
     }
 
+    func testPrepareLogZipAttachmentsUsesTwoPrioritizedArchives() throws {
+        let jobRoot = try makeJobDirectory()
+        let preparedDir = try makePreparedDirectory(in: jobRoot)
+        let logsDir = jobRoot.appendingPathComponent("logs", isDirectory: true)
+        try FileManager.default.createDirectory(at: logsDir, withIntermediateDirectories: true)
+
+        let systemLogsURL = logsDir.appendingPathComponent("system_logs.txt")
+        try Data("chromium logs".utf8).write(to: systemLogsURL)
+        let chromiumSystemLogs = FeedbackOutboxSourceAttachment(
+            relativePath: "logs/system_logs.txt",
+            filename: "system_logs.txt",
+            mimeType: "text/plain",
+            size: 13
+        )
+
+        let phiLogsURL = root.appendingPathComponent("PhiLogs", isDirectory: true)
+        try FileManager.default.createDirectory(at: phiLogsURL, withIntermediateDirectories: true)
+        let oldPhiURL = try writeLog("old phi", named: "old.log", in: phiLogsURL, modifiedAt: Date(timeIntervalSince1970: 100))
+        let currentPhiURL = try writeLog("current phi", named: "current.log", in: phiLogsURL, modifiedAt: Date(timeIntervalSince1970: 200))
+
+        let sentinelLogsURL = root.appendingPathComponent("SentinelLogs", isDirectory: true)
+        try FileManager.default.createDirectory(at: sentinelLogsURL, withIntermediateDirectories: true)
+        let olderBootURL = try writeLog("old boot", named: "boot.log", in: sentinelLogsURL, modifiedAt: Date(timeIntervalSince1970: 100))
+        let latestBootURL = try writeLog("latest boot", named: "boot.log.1", in: sentinelLogsURL, modifiedAt: Date(timeIntervalSince1970: 300))
+        let latestRunnerURL = try writeLog("latest runner", named: "runner.log", in: sentinelLogsURL, modifiedAt: Date(timeIntervalSince1970: 250))
+        let oldRunnerURL = try writeLog("old runner", named: "runner.log.1", in: sentinelLogsURL, modifiedAt: Date(timeIntervalSince1970: 150))
+        let latestGatewayURL = try writeLog("latest gateway", named: "ai-gateway.log", in: sentinelLogsURL, modifiedAt: Date(timeIntervalSince1970: 275))
+        let ignoredURL = try writeLog("ignored", named: "extra.log", in: sentinelLogsURL, modifiedAt: Date(timeIntervalSince1970: 400))
+
+        let attachments = try FeedbackOutbox.prepareLogZipAttachments(
+            jobRoot: jobRoot,
+            preparedDir: preparedDir,
+            chromiumSystemLogs: chromiumSystemLogs,
+            phiLogsURL: phiLogsURL,
+            sentinelLogsURL: sentinelLogsURL
+        )
+
+        XCTAssertEqual(attachments.map(\.filename), ["logs.zip", "sentinel-logs.zip"])
+        XCTAssertTrue(attachments.allSatisfy { $0.attachmentType == .log })
+        XCTAssertTrue(attachments.allSatisfy(\.required))
+        XCTAssertTrue(attachments.allSatisfy { $0.size <= FeedbackOutbox.maxAttachmentBytes })
+
+        let primaryZipURL = jobRoot.appendingPathComponent(attachments[0].relativePath)
+        XCTAssertEqual(try zipEntryText("system_logs.txt", in: primaryZipURL), "chromium logs")
+        XCTAssertEqual(try zipEntryText("PhiLogs/current.log", in: primaryZipURL), "current phi")
+        XCTAssertFalse(try zipEntryExists("PhiLogs/old.log", in: primaryZipURL))
+
+        let sentinelZipURL = jobRoot.appendingPathComponent(attachments[1].relativePath)
+        XCTAssertEqual(try zipEntryText("SentinelLogs/boot.log.1", in: sentinelZipURL), "latest boot")
+        XCTAssertEqual(try zipEntryText("SentinelLogs/runner.log", in: sentinelZipURL), "latest runner")
+        XCTAssertEqual(try zipEntryText("SentinelLogs/ai-gateway.log", in: sentinelZipURL), "latest gateway")
+        XCTAssertFalse(try zipEntryExists("SentinelLogs/boot.log", in: sentinelZipURL))
+        XCTAssertFalse(try zipEntryExists("SentinelLogs/runner.log.1", in: sentinelZipURL))
+        XCTAssertFalse(try zipEntryExists("SentinelLogs/extra.log", in: sentinelZipURL))
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: oldPhiURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: currentPhiURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: olderBootURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: latestBootURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: latestRunnerURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: oldRunnerURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: latestGatewayURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: ignoredURL.path))
+    }
+
+    func testPrepareLogZipAttachmentsSkipsZipOverActualSizeLimit() throws {
+        let jobRoot = try makeJobDirectory()
+        let preparedDir = try makePreparedDirectory(in: jobRoot)
+        let phiLogsURL = root.appendingPathComponent("PhiLogs", isDirectory: true)
+        let sentinelLogsURL = root.appendingPathComponent("SentinelLogs", isDirectory: true)
+        try FileManager.default.createDirectory(at: phiLogsURL, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: sentinelLogsURL, withIntermediateDirectories: true)
+
+        let largePhiLogURL = phiLogsURL.appendingPathComponent("current.log")
+        try randomData(byteCount: Int(FeedbackOutbox.maxAttachmentBytes + 1024 * 1024)).write(to: largePhiLogURL)
+        _ = try writeLog("runner", named: "runner.log", in: sentinelLogsURL, modifiedAt: Date())
+
+        let attachments = try FeedbackOutbox.prepareLogZipAttachments(
+            jobRoot: jobRoot,
+            preparedDir: preparedDir,
+            chromiumSystemLogs: nil,
+            phiLogsURL: phiLogsURL,
+            sentinelLogsURL: sentinelLogsURL
+        )
+
+        XCTAssertEqual(attachments.map(\.filename), ["sentinel-logs.zip"])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: preparedDir.appendingPathComponent("logs.zip").path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: jobRoot.appendingPathComponent(attachments[0].relativePath).path))
+    }
+
     func testMakeZipAttachmentsPrefersSingleLogsZipWhenCompressedUnderLimit() throws {
         let preparedDir = try makePreparedDirectory()
         let items = [
@@ -463,6 +553,30 @@ final class FeedbackOutboxArchiveTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: preparedDir.appendingPathComponent("feedback-files-1.zip").path))
     }
 
+    func testRequiredZipOverLimitIsSkippedAfterActualZipSizeCheck() throws {
+        let preparedDir = try makePreparedDirectory()
+        let data = try randomData(byteCount: Int(FeedbackOutbox.maxAttachmentBytes + 1024 * 1024))
+        let item = ArchiveItem(
+            sourceURL: nil,
+            inlineData: data,
+            offset: 0,
+            length: UInt64(data.count),
+            archivePath: "large-random.bin"
+        )
+
+        let attachments = try FeedbackOutbox.makeZipAttachments(
+            items: [item],
+            preparedDir: preparedDir,
+            singleFilename: nil,
+            numberedPrefix: "required-files",
+            attachmentType: .screenshot,
+            required: true
+        )
+
+        XCTAssertTrue(attachments.isEmpty)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: preparedDir.appendingPathComponent("required-files-1.zip").path))
+    }
+
     private func makeJobDirectory() throws -> URL {
         let jobRoot = root.appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: jobRoot, withIntermediateDirectories: true)
@@ -533,6 +647,25 @@ final class FeedbackOutboxArchiveTests: XCTestCase {
 
         let data = output.fileHandleForReading.readDataToEndOfFile()
         return String(data: data, encoding: .utf8) ?? ""
+    }
+
+    private func zipEntryExists(_ entry: String, in zipURL: URL) throws -> Bool {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/unzip")
+        process.arguments = ["-p", zipURL.path, entry]
+        process.standardOutput = Pipe()
+        process.standardError = Pipe()
+        try process.run()
+        process.waitUntilExit()
+        return process.terminationStatus == 0
+    }
+
+    @discardableResult
+    private func writeLog(_ text: String, named filename: String, in directory: URL, modifiedAt: Date) throws -> URL {
+        let url = directory.appendingPathComponent(filename)
+        try Data(text.utf8).write(to: url)
+        try FileManager.default.setAttributes([.modificationDate: modifiedAt], ofItemAtPath: url.path)
+        return url
     }
 
     private func randomData(byteCount: Int) throws -> Data {

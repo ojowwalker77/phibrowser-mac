@@ -30,6 +30,11 @@ class BrowserState {
 
     /// Native ordering for non-pinned tabs, stored as Chromium guids.
     private var normalTabOrder: [Int] = []
+
+    /// Tabs that were placed by native order before Chromium's initial
+    /// tab-index echo caught up. Protected tabs keep their native slot for
+    /// one Chromium order echo, then return to normal Chromium resequencing.
+    private var nativeOrderProtectedTabIds: Set<Int> = []
     
     /// Pending requests to mark the next created tab as a native NTP (incognito only).
     private var pendingNativeNtpCount: Int = 0
@@ -95,6 +100,13 @@ class BrowserState {
     /// split-view bookmarks; the partner NTP is navigated to it instead of
     /// being left blank.
     var pendingPrimarySplitTargetByGuid: [String: PendingPrimarySplit] = [:]
+
+    /// customGuid → pending split-pane replacement. When a tab opened via
+    /// `openTabAsPaneReplacement` (bookmark / closed-pinned dragged onto a
+    /// split pane) arrives from Chromium, it is swapped into the recorded
+    /// split slot and the evicted pane becomes a standalone tab. Mirrors
+    /// `pendingSplitPartnerByCustomGuid` for the replace-a-pane flow.
+    var pendingSplitSlotSwapByCustomGuid: [String: PendingSplitSlotSwap] = [:]
 
     /// splitId → tab id the caller wanted in the primary (left/top) slot.
     /// Chromium always reports the lower-tab-strip-indexed tab as primary, so
@@ -413,6 +425,10 @@ class BrowserState {
             existing.splitPartnerGuid = localTab.splitPartnerGuid
         }
 
+        if existing.lastSeen != localTab.lastSeen {
+            existing.lastSeen = localTab.lastSeen
+        }
+
         if !existing.isOpenned {
             existing.url = persistedURL
         }
@@ -484,6 +500,11 @@ class BrowserState {
 
         // Re-sync every pinned tab against the currently open Chromium tabs.
         syncAllPinnedTabsState()
+        // Stamp the pinned-split partner linkage from any live `isPinned`
+        // group now that the records exist, so closing a just-pinned split
+        // can't strand the pair unlinked while the store write is still in
+        // flight.
+        reconcilePinnedSplitPartners()
         updateNormalTabs()
     }
 
@@ -672,6 +693,8 @@ class BrowserState {
         // main thread, so `assumeIsolated` is safe here and avoids forcing
         // every caller of `openOrFocusPinnedTab` to become `@MainActor`.
         if let (leftDB, rightDB) = pinnedSplitDBPair(forPinnedTab: realTab) {
+            localStore.updateLastSeen(leftDB)
+            localStore.updateLastSeen(rightDB)
             MainActor.assumeIsolated {
                 openPinnedSplit(leftPinnedGuid: leftDB,
                                 rightPinnedGuid: rightDB,
@@ -680,6 +703,7 @@ class BrowserState {
             return
         }
 
+        localStore.updateLastSeen(guid)
         if realTab.isOpenned, let wrapper = realTab.webContentWrapper {
             wrapper.setAsActiveTab()
         } else {
@@ -1134,6 +1158,7 @@ class BrowserState {
         defer {
             consumePendingSplitPartner(for: tab)
             consumePendingPrimarySplit(for: tab)
+            consumePendingSplitSlotSwap(for: tab)
         }
 
         if consumePendingNativeNTP() {
@@ -1151,6 +1176,11 @@ class BrowserState {
         if let stashedFavicon = Self.consumeCrossWindowFavicon(for: tab.guid) {
             tab.updateCachedFaviconData(stashedFavicon)
         }
+
+        let preseededHiddenOpenerTabIds = hiddenPinnedOrBookmarkTabIds()
+        preseedHiddenOpenerInsertionIfNeeded(tab: tab,
+                                             context: context,
+                                             hiddenOpenerTabIds: preseededHiddenOpenerTabIds)
 
         tabs.append(tab)
         // If Chromium emitted a kCreated/kJoined for this tab while it was
@@ -1177,6 +1207,7 @@ class BrowserState {
         // Reattach to a pinned tab entry when the local guid matches.
         if let localGuid = tab.guidInLocalDB,
            let pinnedTab = pinnedTabs.first(where: { $0.guidInLocalDB == localGuid }) {
+            localStore.updateLastSeen(localGuid)
             pinnedTab.isOpenned = true
             pinnedTab.setWebContentsWrapper(wrapper: tab.webContentWrapper)
             pinnedTab.guid = tab.guid
@@ -1248,14 +1279,27 @@ class BrowserState {
             return
         }
 
+        let hiddenOpenerTabIds = preseededHiddenOpenerTabIds
+        let shouldSyncHiddenOpenerOrder: Bool = {
+            guard let context,
+                  let openerTabId = context.openerTabId,
+                  hiddenOpenerTabIds.contains(openerTabId) else {
+                return false
+            }
+            return context.creationKind == .linkForeground || context.creationKind == .linkBackground
+        }()
+
         if let insertionIndex = NativeTabDecisionEngine.insertionIndex(
             visibleNormalTabIds: normalTabs.map(\.guid),
             context: context,
             relationGraph: nativeRelationGraph,
-            splitPartnerByTabId: splitPartnerByTabIdMap()
+            splitPartnerByTabId: splitPartnerByTabIdMap(),
+            hiddenOpenerTabIds: hiddenOpenerTabIds
         ) {
             AppLogDebug("[NativeTab] handleNewTabFromChromium inserting tabId=\(tab.guid) at index=\(insertionIndex)")
-            insertIntoNormalTabOrder(tabGuid: tab.guid, at: insertionIndex)
+            insertIntoNormalTabOrder(tabGuid: tab.guid,
+                                     at: insertionIndex,
+                                     syncChromiumOrder: shouldSyncHiddenOpenerOrder)
             let elapsed = (CFAbsoluteTimeGetCurrent() - t0) * 1000
             AppLogDebug("[NativeTab] ⏱ handleNewTabFromChromium tabId=\(tab.guid) took \(String(format: "%.2f", elapsed))ms")
             return
@@ -1265,6 +1309,74 @@ class BrowserState {
         updateNormalTabs()
         let elapsed = (CFAbsoluteTimeGetCurrent() - t0) * 1000
         AppLogDebug("[NativeTab] ⏱ handleNewTabFromChromium tabId=\(tab.guid) took \(String(format: "%.2f", elapsed))ms")
+    }
+
+    private func preseedHiddenOpenerInsertionIfNeeded(
+        tab: Tab,
+        context: NativeTabCreationContext?,
+        hiddenOpenerTabIds: Set<Int>
+    ) {
+        guard pendingGroupInsertion?.memberGuids.contains(tab.guid) != true,
+              pendingNormalTabInsertion?.matches(tab: tab) != true,
+              let context,
+              let openerTabId = context.openerTabId,
+              hiddenOpenerTabIds.contains(openerTabId),
+              context.creationKind == .linkForeground || context.creationKind == .linkBackground,
+              let insertionIndex = NativeTabDecisionEngine.insertionIndex(
+                visibleNormalTabIds: normalTabs.map(\.guid),
+                context: context,
+                relationGraph: nativeRelationGraph,
+                splitPartnerByTabId: splitPartnerByTabIdMap(),
+                hiddenOpenerTabIds: hiddenOpenerTabIds
+              ) else {
+            return
+        }
+
+        normalTabOrder.removeAll { $0 == tab.guid }
+        let insertIndex = min(max(0, insertionIndex), normalTabOrder.count)
+        normalTabOrder.insert(tab.guid, at: insertIndex)
+        nativeOrderProtectedTabIds.insert(tab.guid)
+        AppLogDebug(
+            "[NativeTab] preseed hidden opener insertion tabId=\(tab.guid) " +
+            "opener=\(openerTabId) index=\(insertIndex)"
+        )
+    }
+
+    private func hiddenPinnedOrBookmarkTabIds() -> Set<Int> {
+        guard !isIncognito else { return [] }
+
+        let openedPinnedGuids = Set(
+            pinnedTabs.filter { $0.isOpenned }.compactMap { $0.guidInLocalDB }
+        )
+        let openedBookmarkGuids = Set(
+            bookmarkManager.getAllBookmarks().filter { $0.isOpened }.map { $0.guid }
+        )
+        var result: Set<Int> = []
+
+        for tab in tabs where !normalTabOrder.contains(tab.guid) {
+            if tab.isPinned {
+                result.insert(tab.guid)
+                continue
+            }
+            guard let localGuid = tab.guidInLocalDB, !localGuid.isEmpty else {
+                continue
+            }
+            if openedPinnedGuids.contains(localGuid) || openedBookmarkGuids.contains(localGuid) {
+                result.insert(tab.guid)
+            }
+        }
+
+        for splitId in splitBookmarkBindings.values {
+            guard let group = splits.first(where: { $0.id == splitId }) else { continue }
+            if !normalTabOrder.contains(group.primaryTabId) {
+                result.insert(group.primaryTabId)
+            }
+            if !normalTabOrder.contains(group.secondaryTabId) {
+                result.insert(group.secondaryTabId)
+            }
+        }
+
+        return result
     }
 
     func applyRelationshipSnapshot(_ snapshot: NativeTabRelationshipSnapshot) {
@@ -1740,6 +1852,15 @@ class BrowserState {
                 return
             }
             if opennedTab.isPinned || opennedTab.guidInLocalDB?.isEmpty == false {
+                if let pinnedGuid = opennedTab.guidInLocalDB,
+                   let pinnedTab = pinnedTabs.first(where: { $0.guidInLocalDB == pinnedGuid }),
+                   pinnedSplitDBPair(forPinnedTab: pinnedTab) != nil {
+                    movePinnedTabOut(pinnedGuid: pinnedGuid,
+                                     to: normalTabOrder.count,
+                                     selectAfterMove: opennedTab.isActive)
+                    return
+                }
+
                 // Migrate AI Chat tab association before changing identifier
                 // When unpinning, identifier changes from guidInLocalDB to chromium guid
                 migrateAIChatTab(for: opennedTab, toNewIdentifier: nil)
@@ -1751,7 +1872,9 @@ class BrowserState {
                     wrapper.updateTabCustomValue("")
                 }
                 opennedTab.isPinned = false
-                updateNormalTabs()
+                insertIntoNormalTabOrder(tabGuid: opennedTab.guid,
+                                         at: normalTabOrder.count,
+                                         syncChromiumOrder: true)
             } else {
                 // create Local tab
                 // Note: moveNormalTab already handles AI Chat tab migration
@@ -1856,8 +1979,27 @@ class BrowserState {
         // existing entries to match Chromium's authoritative order here.
         let cachedSet = Set(normalTabOrder)
         let resequenced = tabs.compactMap { cachedSet.contains($0.guid) ? $0.guid : nil }
-        if resequenced != normalTabOrder {
+        let protectedTabIds = nativeOrderProtectedTabIds.intersection(cachedSet)
+        if resequenced == normalTabOrder {
+            nativeOrderProtectedTabIds.subtract(protectedTabIds)
+        } else if protectedTabIds.isEmpty {
             normalTabOrder = resequenced
+        } else {
+            var mergedOrder = resequenced.filter { !protectedTabIds.contains($0) }
+            let protectedPositions = normalTabOrder.enumerated()
+                .filter { protectedTabIds.contains($0.element) }
+            for (index, tabId) in protectedPositions {
+                mergedOrder.insert(tabId, at: min(index, mergedOrder.count))
+            }
+            if mergedOrder != normalTabOrder {
+                normalTabOrder = mergedOrder
+            }
+            AppLogDebug(
+                "[NativeTab] reorderTabs preserved protected native slots " +
+                "protected=\(Array(protectedTabIds).sorted()) resequenced=\(resequenced) " +
+                "normalOrder=\(normalTabOrder)"
+            )
+            nativeOrderProtectedTabIds.subtract(protectedTabIds)
         }
         updateNormalTabs()
     }
@@ -2859,21 +3001,48 @@ class BrowserState {
         updateNormalTabs()
     }
 
+    /// Clamps a pinned insert index so it never lands between the two
+    /// records of a pinned split pair. The strip and the sidebar both pair
+    /// by partner guid and render the pair as one merged cell wherever its
+    /// records sit, so an interior index would silently persist a record
+    /// order that diverges from every visible order. Snapping past the
+    /// pair matches the reachable producers (drops on the pair's right).
+    /// Live-only pairs whose `splitPartnerGuid` hasn't persisted yet are
+    /// not detected — the drop-index tail fix upstream covers those.
+    static func pinnedInsertIndexOutsideSplitPair(_ index: Int, pinnedTabs: [Tab]) -> Int {
+        guard index > 0, index < pinnedTabs.count else { return index }
+        let before = pinnedTabs[index - 1]
+        let after = pinnedTabs[index]
+        guard let partnerGuid = before.splitPartnerGuid, !partnerGuid.isEmpty,
+              let afterGuid = after.guidInLocalDB, !afterGuid.isEmpty,
+              afterGuid == partnerGuid else {
+            return index
+        }
+        return index + 1
+    }
+
     /// Reorder pinned  tab
     func movePinnedTab(tab: Tab, to newIndex: Int, selectAfterMove: Bool) {
-        // Split-aware: pinned splits render as a single merged cell that
-        // requires both panes to sit adjacent in `pinnedTabs`. Moving only
-        // the dragged pane leaves the partner stranded and breaks the
-        // merged render until the user manually re-adjacent-s them.
-        if let partnerGuid = tab.splitPartnerGuid, !partnerGuid.isEmpty,
+        // Split-aware: use the same resolver as pinned-split rendering so
+        // live, persisted, and half-persisted pairs all move as one unit.
+        if let (leftDB, rightDB) = pinnedSplitDBPair(forPinnedTab: tab),
+           let tabGuid = tab.guidInLocalDB {
+            let partnerGuid = tabGuid == leftDB ? rightDB : leftDB
+            guard let partner = pinnedTabs.first(where: { $0.guidInLocalDB == partnerGuid }) else {
+                return
+            }
+            movePinnedSplitPair(handle: tab, partner: partner, to: newIndex)
+            return
+        } else if let partnerGuid = tab.splitPartnerGuid, !partnerGuid.isEmpty,
            let partner = pinnedTabs.first(where: { $0.guidInLocalDB == partnerGuid }) {
             movePinnedSplitPair(handle: tab, partner: partner, to: newIndex)
             return
         }
 
+        let insertIndex = Self.pinnedInsertIndexOutsideSplitPair(newIndex, pinnedTabs: pinnedTabs)
         var after: String?
-        if newIndex > 0, !pinnedTabs.isEmpty {
-            let tab = pinnedTabs[newIndex - 1]
+        if insertIndex > 0, !pinnedTabs.isEmpty {
+            let tab = pinnedTabs[insertIndex - 1]
             after = tab.guidInLocalDB
         }
 
@@ -2948,7 +3117,8 @@ class BrowserState {
         }
         var afterGuid: String?
         if pinnedIndex > 0, !pinnedTabs.isEmpty {
-            let clampedIdx = min(pinnedIndex - 1, pinnedTabs.count - 1)
+            let snappedIndex = Self.pinnedInsertIndexOutsideSplitPair(pinnedIndex, pinnedTabs: pinnedTabs)
+            let clampedIdx = min(snappedIndex - 1, pinnedTabs.count - 1)
             afterGuid = pinnedTabs[clampedIdx].guidInLocalDB
         } else if pinnedIndex == -1, !pinnedTabs.isEmpty {
             afterGuid = pinnedTabs.last!.guidInLocalDB
@@ -3797,11 +3967,12 @@ class BrowserState {
         return true
     }
 
-    /// Detaches any live Chromium tab still backed by a bookmark that is about
-    /// to be deleted, so the tab survives as a plain normal tab. Without this
-    /// the tab keeps a stale `guidInLocalDB`, which keeps it out of tab groups.
-    /// For a folder, all descendant bookmarks are processed.
-    func detachOpenTabsForRemovedBookmark(_ bookmark: Bookmark) {
+    /// Closes any live Chromium tab still backed by a bookmark that is about
+    /// to be deleted. The bookmark custom value is cleared before close so
+    /// Chromium does not keep a stale bookmark identity while tearing the tab
+    /// down. Split-backed bookmarks first remove the split through Chromium as
+    /// a unit. For a folder, all descendant bookmarks are processed.
+    func closeOpenTabsForRemovedBookmark(_ bookmark: Bookmark) {
         var guids: [String] = []
         func collect(_ node: Bookmark) {
             if node.isFolder {
@@ -3812,11 +3983,50 @@ class BrowserState {
         }
         collect(bookmark)
 
+        var tabIdsToClose = Set<Int>()
+        var tabsToClose: [Tab] = []
+        var splitIdsToRemove = Set<String>()
+        var orderedSplitIdsToRemove: [String] = []
+        func appendTabToClose(_ tab: Tab) {
+            guard tabIdsToClose.insert(tab.guid).inserted else { return }
+            tabsToClose.append(tab)
+        }
+        func appendSplitToRemove(_ splitId: String) {
+            guard splitIdsToRemove.insert(splitId).inserted else { return }
+            orderedSplitIdsToRemove.append(splitId)
+        }
+
         for guid in guids {
-            guard let chromiumTab = tabs.first(where: { $0.guidInLocalDB == guid }) else { continue }
-            migrateAIChatTab(for: chromiumTab, toNewIdentifier: nil)
-            chromiumTab.guidInLocalDB = nil
-            chromiumTab.webContentWrapper?.updateTabCustomValue("")
+            if let splitId = splitBookmarkBindings[guid] {
+                splitBookmarkBindings.removeValue(forKey: guid)
+                appendSplitToRemove(splitId)
+                if let group = splits.first(where: { $0.id == splitId }) {
+                    for tabId in [group.primaryTabId, group.secondaryTabId] {
+                        if let tab = tabs.first(where: { $0.guid == tabId }) {
+                            appendTabToClose(tab)
+                        }
+                    }
+                }
+                continue
+            }
+
+            if let chromiumTab = tabs.first(where: { $0.guidInLocalDB == guid }) {
+                appendTabToClose(chromiumTab)
+            }
+        }
+
+        for tab in tabsToClose {
+            migrateAIChatTab(for: tab, toNewIdentifier: nil)
+            tab.guidInLocalDB = nil
+            tab.webContentWrapper?.updateTabCustomValue("")
+        }
+
+        for splitId in orderedSplitIdsToRemove {
+            removeSplit(splitId)
+        }
+
+        for tab in tabsToClose {
+            tab.close()
         }
     }
 

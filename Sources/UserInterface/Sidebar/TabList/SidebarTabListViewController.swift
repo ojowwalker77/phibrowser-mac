@@ -30,6 +30,7 @@ enum SidebarNewTabStickyResolver {
 
 class SidebarTabListViewController: NSViewController {
     private static let bottomContentInset: CGFloat = 130
+    private static let bookmarkRenameClickInterval: TimeInterval = 0.5
 
     /// A temporary, UI-only representation of the currently focusing bookmark tab.
     /// This is used to keep the focusing bookmark visible even when its real parent folders are collapsed.
@@ -137,9 +138,12 @@ class SidebarTabListViewController: NSViewController {
     private var wholeGroupSidebarEscSuppressedTearOff = false
     private var wholeGroupSidebarEndFinalizeDone = false
 
+    private var suppressesFloatingNewTabDuringDrag = false
     private var scrollAnimationGeneration: Int = 0
     private var scrollScheduleGeneration: Int = 0
     private var isActive = false
+    private var bookmarkEditRequestGeneration = 0
+    private var lastBookmarkRenameClick: (guid: String, timestamp: TimeInterval)?
     
     /// Tracks the identity of the focusing tab we last scrolled to.
     /// Scroll is skipped when the focusing tab hasn't changed (e.g. bookmark expand/collapse).
@@ -190,6 +194,7 @@ class SidebarTabListViewController: NSViewController {
         scrollView.contentView.postsFrameChangedNotifications = true
         
         outlineView = SideBarOutlineView()
+        outlineView.setAccessibilityIdentifier("sidebarTabList")
         outlineView.bottomPadding = Self.bottomContentInset
         outlineView.dataSource = self
         outlineView.delegate = self
@@ -329,9 +334,13 @@ class SidebarTabListViewController: NSViewController {
     }
     
     private func startEditingBookmark(_ bookmark: Bookmark) {
+        bookmarkEditRequestGeneration &+= 1
+        let generation = bookmarkEditRequestGeneration
+        endBookmarkEditing(except: bookmark)
         expandParents(of: bookmark)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
             guard let self else { return }
+            guard generation == self.bookmarkEditRequestGeneration else { return }
             scheduleScrollToVisible(forItem: bookmark)
             bookmark.isEditing = true
         }
@@ -409,13 +418,24 @@ class SidebarTabListViewController: NSViewController {
     // MARK: - Actions
     @objc private func outlineViewClicked(_ sender: NSOutlineView) {
         let clickedRow = sender.clickedRow
-        guard clickedRow != -1 else { return }
-
-        if let event = NSApp.currentEvent,
-           event.clickCount > 1,
-           let bookmark = bookmarkForRow(clickedRow),
-           !bookmark.isFolder {
+        guard clickedRow != -1 else {
+            cancelPendingBookmarkRenameClick()
+            endBookmarkEditing(except: nil)
             return
+        }
+
+        if let bookmark = bookmarkForRow(clickedRow), !bookmark.isFolder {
+            if shouldStartBookmarkRename(for: bookmark, event: NSApp.currentEvent) {
+                requestBookmarkRename(bookmark)
+                return
+            }
+            if bookmark.isEditing {
+                cancelPendingBookmarkRenameClick()
+                return
+            }
+            rememberBookmarkRenameClick(for: bookmark, event: NSApp.currentEvent)
+        } else {
+            cancelPendingBookmarkRenameClick()
         }
         
         if let item = outlineView.item(atRow: clickedRow) as? SidebarItem {
@@ -437,10 +457,14 @@ class SidebarTabListViewController: NSViewController {
         let clickedRow = sender.clickedRow
         guard clickedRow != -1 else { return }
         guard let bookmark = bookmarkForRow(clickedRow), !bookmark.isFolder else { return }
-        browserState.bookmarkManager.triggerRename(for: bookmark)
+        guard !isSplitBookmark(bookmark) else { return }
+        guard !bookmark.isEditing else { return }
+        requestBookmarkRename(bookmark)
     }
     
     private func itemClicked(_ item: SidebarItem) {
+        cancelPendingBookmarkEditRequest()
+        endBookmarkEditing(except: bookmark(from: item))
         if item.isSelectable {
             userSelectedItem(item)
         } else {
@@ -467,9 +491,58 @@ class SidebarTabListViewController: NSViewController {
 
     private func bookmarkForRow(_ row: Int) -> Bookmark? {
         guard let item = outlineView.item(atRow: row) as? SidebarItem else { return nil }
+        return bookmark(from: item)
+    }
+
+    private func bookmark(from item: SidebarItem) -> Bookmark? {
         if let bookmark = item as? Bookmark { return bookmark }
         if let provider = item as? UnderlyingBookmarkProviding { return provider.underlyingBookmark }
         return nil
+    }
+
+    private func isSplitBookmark(_ bookmark: Bookmark) -> Bool {
+        guard let secondaryURL = bookmark.secondaryUrl else { return false }
+        return !secondaryURL.isEmpty
+    }
+
+    private func shouldStartBookmarkRename(for bookmark: Bookmark, event: NSEvent?) -> Bool {
+        guard !isSplitBookmark(bookmark) else { return false }
+        if (event?.clickCount ?? 0) > 1 {
+            return true
+        }
+        let timestamp = event?.timestamp ?? ProcessInfo.processInfo.systemUptime
+        guard let last = lastBookmarkRenameClick, last.guid == bookmark.guid else {
+            return false
+        }
+        return timestamp - last.timestamp <= Self.bookmarkRenameClickInterval
+    }
+
+    private func rememberBookmarkRenameClick(for bookmark: Bookmark, event: NSEvent?) {
+        lastBookmarkRenameClick = (
+            guid: bookmark.guid,
+            timestamp: event?.timestamp ?? ProcessInfo.processInfo.systemUptime
+        )
+    }
+
+    private func cancelPendingBookmarkRenameClick() {
+        lastBookmarkRenameClick = nil
+    }
+
+    private func requestBookmarkRename(_ bookmark: Bookmark) {
+        cancelPendingBookmarkRenameClick()
+        browserState.bookmarkManager.triggerRename(for: bookmark)
+    }
+
+    private func cancelPendingBookmarkEditRequest() {
+        bookmarkEditRequestGeneration &+= 1
+    }
+
+    private func endBookmarkEditing(except keptBookmark: Bookmark?) {
+        for bookmark in browserState.bookmarkManager.getAllBookmarks() {
+            guard bookmark.isEditing else { continue }
+            if bookmark.guid == keptBookmark?.guid { continue }
+            bookmark.isEditing = false
+        }
     }
 
     private static func dragThresholdLogDescription(for item: Any?) -> String {
@@ -2320,6 +2393,7 @@ extension SidebarTabListViewController: NSOutlineViewDelegate {
                 bookmarkCell?.identifier = identifier
             }
             bookmarkCell?.editDelegate = self
+            bookmarkCell?.browserState = browserState
             cellView = bookmarkCell!
             
         case .tab:
@@ -2744,6 +2818,7 @@ extension SidebarTabListViewController: TabSectionDelegate {
             // affected-token filter keeps unrelated groups quiet during
             // pure metadata edits.
             pushMemberUpdatesToGroupCells(change.affectedGroupTokens)
+            pushPaneUpdatesToSplitPairCells(change.affectedSplitIds)
             return
         }
 
@@ -2780,6 +2855,10 @@ extension SidebarTabListViewController: TabSectionDelegate {
         // diffable table animates the row delta and re-notes its
         // height in the same animation tick.
         pushMemberUpdatesToGroupCells(change.affectedGroupTokens)
+        // Same for pair rows whose pane membership changed alongside the
+        // structural delta (drag-to-replace inserts the evicted tab's row
+        // while the pair row id stays put).
+        pushPaneUpdatesToSplitPairCells(change.affectedSplitIds)
 
         // Defer selection to the next run loop so NSOutlineView finishes its
         // insert/remove animation layout pass first. Calling row(forItem:) or
@@ -2814,6 +2893,26 @@ extension SidebarTabListViewController: TabSectionDelegate {
                 $0.groupToken == groupItem.group.token
             }
             cell.applyMembers(newMembers, animated: true)
+        }
+    }
+
+    /// Split-pair analog of `pushMemberUpdatesToGroupCells`: a pane replace
+    /// mutates the cached `SplitPairSidebarItem` in place and the row id
+    /// survives, so the outline diff never reloads the merged cell. Re-bind
+    /// the affected cells so their titles/favicons/subscriptions attach to
+    /// the new pane's Tab.
+    private func pushPaneUpdatesToSplitPairCells(_ splitIds: Set<String>) {
+        guard !splitIds.isEmpty else { return }
+        for case let pairItem as SplitPairSidebarItem in allItems
+            where splitIds.contains(pairItem.groupId) {
+            let row = outlineView.row(forItem: pairItem)
+            guard row >= 0,
+                  let cell = outlineView.view(atColumn: 0,
+                                              row: row,
+                                              makeIfNecessary: false)
+                            as? SidebarSplitPairCellView
+            else { continue }
+            cell.rebindPanesIfNeeded()
         }
     }
 
@@ -3193,14 +3292,16 @@ extension SidebarTabListViewController {
     }
 
     private func updateFloatingNewTabVisibility() {
-        guard isViewLoaded, isActive, let item = newTabButtonItem else {
+        guard isViewLoaded, isActive, !suppressesFloatingNewTabDuringDrag, let item = newTabButtonItem else {
             removeFloatingNewTabCell()
+            outlineView.dragAutoscrollTopObstructionHeight = 0
             return
         }
 
         let row = outlineView.row(forItem: item)
         guard row >= 0 else {
             removeFloatingNewTabCell()
+            outlineView.dragAutoscrollTopObstructionHeight = 0
             return
         }
 
@@ -3217,6 +3318,7 @@ extension SidebarTabListViewController {
             removeFloatingNewTabCell()
         }
 
+        outlineView.dragAutoscrollTopObstructionHeight = shouldShow ? rowRect.height : 0
         setOriginalNewTabCellHidden(shouldShow)
     }
 
@@ -3263,6 +3365,19 @@ extension SidebarTabListViewController {
         floatingNewTabView?.removeFromSuperview()
         floatingNewTabView = nil
         setOriginalNewTabCellHidden(false)
+    }
+
+    private func beginOutlineDestinationDrag() {
+        guard suppressesFloatingNewTabDuringDrag == false else { return }
+        suppressesFloatingNewTabDuringDrag = true
+        removeFloatingNewTabCell()
+        outlineView.dragAutoscrollTopObstructionHeight = 0
+    }
+
+    private func endOutlineDestinationDrag() {
+        guard suppressesFloatingNewTabDuringDrag else { return }
+        suppressesFloatingNewTabDuringDrag = false
+        updateFloatingNewTabVisibility()
     }
 
     private func updateOriginalNewTabCellVisibility(_ cell: NSView) {
@@ -3840,7 +3955,16 @@ extension SidebarTabListViewController: TabGroupCellViewDelegate {
 // MARK: - Middle Click to Close Tab
 extension SidebarTabListViewController: SideBarOutlineViewDelegate {
     func outlineView(_ outlineView: NSOutlineView, draggingEntered sender: any NSDraggingInfo) {
+        beginOutlineDestinationDrag()
         expandFloatingBookmarkParentsIfNeeded()
+    }
+
+    func outlineView(_ outlineView: NSOutlineView, draggingExited sender: (any NSDraggingInfo)?) {
+        endOutlineDestinationDrag()
+    }
+
+    func outlineView(_ outlineView: NSOutlineView, draggingEnded sender: any NSDraggingInfo) {
+        endOutlineDestinationDrag()
     }
     
     func outlineView(_ outlineView: NSOutlineView, draggingSession session: NSDraggingSession, movedTo screenPoint: NSPoint) {

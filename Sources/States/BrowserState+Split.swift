@@ -24,8 +24,12 @@ enum SplitLayout: String {
 }
 
 /// Reserved customGuid markers stamped on a tab while a split is mid-flight.
-/// They masquerade as `guidInLocalDB` from creation until the consumer in
-/// `handleNewTabFromChromium` clears them on both Swift and Chromium sides.
+/// They masquerade as `guidInLocalDB` from creation until one of the three
+/// consumers in `handleNewTabFromChromium` — `consumePendingSplitPartner`,
+/// `consumePendingPrimarySplit`, or `consumePendingSplitSlotSwap` — clears
+/// them on both Swift and Chromium sides. Each consumer clears the marker
+/// whenever its prefix matches, even when the pending record has already
+/// expired, so a late echo can't leave the marker latched.
 ///
 /// IMPORTANT: never compare a `guidInLocalDB` for emptiness alone — these
 /// markers are non-empty but do not represent a real DB binding. Always go
@@ -39,14 +43,20 @@ enum SplitPendingGuid {
     /// split (bookmark "Open as Split"). Consumed by
     /// `consumePendingPrimarySplit`.
     case primary
+    /// Marker for a tab being opened to *replace* one pane of an existing
+    /// split (drag bookmark / closed-pinned onto a split pane). Consumed by
+    /// `consumePendingSplitSlotSwap`.
+    case swapSlot
 
     private static let partnerPrefix = "split-pending:"
     private static let primaryPrefix = "split-primary-pending:"
+    private static let swapSlotPrefix = "split-swap-pending:"
 
     private var prefix: String {
         switch self {
         case .partner: return Self.partnerPrefix
         case .primary: return Self.primaryPrefix
+        case .swapSlot: return Self.swapSlotPrefix
         }
     }
 
@@ -265,6 +275,13 @@ extension BrowserState {
         }
         if partnerDB == nil, let persisted = pinnedTab.splitPartnerGuid, !persisted.isEmpty {
             partnerDB = persisted
+        }
+        // Bidirectional fallback: a half-persisted pair may carry only the
+        // partner's forward link (the reverse `splitPartnerGuid` write was
+        // dropped on quit before flushing). Pair off whichever side points at
+        // us so close / move / render all treat the two as one split.
+        if partnerDB == nil {
+            partnerDB = pinnedTabs.first { $0.splitPartnerGuid == myDB }?.guidInLocalDB
         }
         guard let partnerDB,
               let myIdx = pinnedTabs.firstIndex(where: { $0.guidInLocalDB == myDB }),
@@ -564,6 +581,12 @@ extension BrowserState {
 
     @MainActor
     func handleSplitRemoved(splitId: String) {
+        // A pinned split's underlying Chromium split only dissolves on close
+        // (its panes can't be "Remove from Split"-ed). Capture the partner
+        // linkage from the still-present live group before dropping it, so the
+        // two pinned records survive as one reopenable merged cell instead of
+        // splintering into two separate pinned tabs.
+        reconcilePinnedSplitPartners()
         splits.removeAll { $0.id == splitId }
         // Drop any split-bookmark bindings that pointed at this split so the
         // bookmark cell stops claiming "opened" and a fresh click re-opens
@@ -662,7 +685,10 @@ extension BrowserState {
     /// Replace one side of a split with another tab from the strip.
     /// - Parameters:
     ///   - slotIndex: 0 = primary, 1 = secondary.
-    ///   - swap: true → swap positions; false → close the evicted tab.
+    ///   - swap: true → the evicted tab moves right next to the split and
+    ///     joins its tab group, if any (Chromium's `TabsProxy::UpdateSplitTab`
+    ///     stages the incoming tab there before the kSwap); false → close the
+    ///     evicted tab.
     func swapTabInSplit(_ splitId: String,
                         slotIndex: Int,
                         withTabId otherTabId: Int,
@@ -778,9 +804,14 @@ extension BrowserState {
             let group = splits[index]
             let primaryGuidInDB = tabs.first(where: { $0.guid == group.primaryTabId })?.guidInLocalDB
             let secondaryGuidInDB = tabs.first(where: { $0.guid == group.secondaryTabId })?.guidInLocalDB
-            splits[index].isPinned = false
-            toggleTabPinStatus(group.primaryTabId, guidInDB: primaryGuidInDB)
-            toggleTabPinStatus(group.secondaryTabId, guidInDB: secondaryGuidInDB)
+            let activePane = tabs.first { group.contains(tabId: $0.guid) && $0.isActive }
+            if let pinnedGuid = primaryGuidInDB ?? secondaryGuidInDB {
+                movePinnedTabOut(pinnedGuid: pinnedGuid,
+                                 to: normalTabs.count,
+                                 selectAfterMove: activePane?.isActive == true)
+            } else {
+                splits[index].isPinned = false
+            }
             return
         }
         // Pinning: delegate to the chained-anchor path so the secondary
@@ -813,6 +844,53 @@ extension BrowserState {
         }
         if let secondaryPinned = pinnedTabs.first(where: { $0.guidInLocalDB == secondaryDB }) {
             secondaryPinned.splitPartnerGuid = primaryDB
+        }
+    }
+
+    /// Stamp the `splitPartnerGuid` linkage onto the in-memory pinned records
+    /// of every live `isPinned` split, derived from the live `SplitGroup`
+    /// rather than waiting on the async store round-trip.
+    ///
+    /// `pinSplitInsertingAtPinnedIndex` persists `splitPartnerGuid` to the
+    /// store, but the in-memory pinned records only learn it on the next
+    /// pinned-tabs publisher emission (`persistPinnedSplitPair`'s in-memory
+    /// patch no-ops because the records don't exist yet at pin time). If the
+    /// user closes the split before that echo lands, the live group is
+    /// removed (`handleSplitRemoved`) while the two pinned records are still
+    /// unlinked, and the merged pinned-split cell splinters into two separate
+    /// pinned tabs. Reconciling from the live group throughout the split's
+    /// life — and once more at the instant it is removed — makes the linkage
+    /// durable in memory before the group can disappear.
+    ///
+    /// Safe to over-call: it only writes when a record's partner actually
+    /// changes, and it never runs for a dissolved pinned pair because the
+    /// only path that keeps the panes alive while breaking the pair
+    /// (`unpinSplitPanesIntoNormalList`) clears the group's `isPinned` flag
+    /// first. "Remove from Split" / "Reverse Panes" are not offered for
+    /// pinned splits, so a live `isPinned` group always means an intact pair.
+    func reconcilePinnedSplitPartners() {
+        guard !isIncognito else { return }
+        let pinnedByDB: [String: Tab] = Dictionary(
+            pinnedTabs.compactMap { tab in tab.guidInLocalDB.map { ($0, tab) } },
+            uniquingKeysWith: { first, _ in first }
+        )
+        for group in splits where group.isPinned {
+            guard let primaryLive = tabs.first(where: { $0.guid == group.primaryTabId }),
+                  let secondaryLive = tabs.first(where: { $0.guid == group.secondaryTabId }),
+                  let primaryDB = primaryLive.guidInLocalDB, !primaryDB.isEmpty,
+                  let secondaryDB = secondaryLive.guidInLocalDB, !secondaryDB.isEmpty,
+                  let primaryPinned = pinnedByDB[primaryDB],
+                  let secondaryPinned = pinnedByDB[secondaryDB] else {
+                continue
+            }
+            if primaryPinned.splitPartnerGuid != secondaryDB {
+                primaryPinned.splitPartnerGuid = secondaryDB
+                localStore.updateTabSplitPartner(primaryDB, partnerGuid: secondaryDB)
+            }
+            if secondaryPinned.splitPartnerGuid != primaryDB {
+                secondaryPinned.splitPartnerGuid = primaryDB
+                localStore.updateTabSplitPartner(secondaryDB, partnerGuid: primaryDB)
+            }
         }
     }
 
@@ -1124,17 +1202,18 @@ extension BrowserState {
         return true
     }
 
-    /// Opens a fresh new-tab-page tab and, once Chromium echoes it back,
-    /// pairs it with `partnerTabId` into a vertical split.
+    /// Opens a fresh tab (on `partnerNavigateURL` when given, else a
+    /// new-tab page) and, once Chromium echoes it back, pairs it with
+    /// `partnerTabId` into a vertical split.
     /// - Parameters:
     ///   - newTabSlot: Where the new tab should end up. Defaults to `.right`
     ///     (right-click "Open as Split" — right-clicked tab stays on the
     ///     left, new tab opens on the right). Pass `.left` to drop the new
     ///     tab on the left and leave the partner on the right.
-    ///   - partnerNavigateURL: When non-nil, the new pane is navigated to
-    ///     this URL after the customGuid marker is cleared. Used by the
-    ///     split-bookmark open path so the second pane lands on its saved
-    ///     URL instead of remaining a new-tab page.
+    ///   - partnerNavigateURL: When non-nil, the new pane is created directly
+    ///     on this URL instead of landing on a new-tab page first, so the
+    ///     NTP never flashes before the real page. Used by the
+    ///     open-link-as-split and split-bookmark paths.
     ///   - boundBookmarkGuid: When non-nil, the resulting split's id is
     ///     registered in `splitBookmarkBindings` under this bookmark guid so
     ///     a subsequent click on the bookmark activates the existing split.
@@ -1154,7 +1233,6 @@ extension BrowserState {
         pendingSplitPartnerByCustomGuid[pendingGuid] = PendingSplitPartner(
             partnerTabId: partnerTabId,
             newTabSlot: newTabSlot,
-            navigateURL: partnerNavigateURL,
             boundBookmarkGuid: boundBookmarkGuid,
             insertionIndex: insertionIndex
         )
@@ -1169,7 +1247,16 @@ extension BrowserState {
         ChromiumLauncher.sharedInstance().bridge?
             .markPendingSplitPartner(withTabId: partnerTabId.int64Value,
                                      windowId: windowId.int64Value)
-        createTab("chrome://newtab", customGuid: pendingGuid, focusAfterCreate: true)
+        // Create the pane directly on the target URL when one was supplied —
+        // parking it on NTP and navigating after the echo flashes the
+        // new-tab page first. The initial load of a fresh tab cannot trip
+        // CrossDomainNewTabNavigationThrottle even though the customGuid
+        // marker is still set: a brand-new WebContents has no committed URL
+        // and the load has no initiator origin, so the throttle's source-URL
+        // check never passes.
+        let createURL =
+            (partnerNavigateURL?.isEmpty == false) ? partnerNavigateURL! : "chrome://newtab"
+        createTab(createURL, customGuid: pendingGuid, focusAfterCreate: true)
         // Timeout cleanup: if the new tab never arrives (Chromium failure,
         // partner closed mid-flight, etc.), drop the pending record and clear
         // the visibility-skip mark so the partner can hide normally again.
@@ -1204,8 +1291,20 @@ extension BrowserState {
     /// pending split request keyed by its customGuid, create the split now.
     func consumePendingSplitPartner(for tab: Tab) {
         guard let customGuid = tab.guidInLocalDB,
-              SplitPendingGuid.partner.matches(customGuid),
-              let pending = pendingSplitPartnerByCustomGuid.removeValue(forKey: customGuid) else {
+              SplitPendingGuid.partner.matches(customGuid) else {
+            return
+        }
+        // Drop the transient pairing marker on both sides. On Swift it keeps
+        // `isPinnedOrInDB` from latching true; on Chromium it stops
+        // CrossDomainNewTabNavigationThrottle from treating the pane as a
+        // pinned/bookmark tab and redirecting cross-domain typing into a fresh
+        // tab. Without the bridge call the throttle still fires even after
+        // `guidInLocalDB` is cleared. This must happen even when the pending
+        // record has already expired (echo arrived after the 5s timeout in
+        // `openNewTabAsSplit`) — a latched marker hijacks the tab forever.
+        tab.guidInLocalDB = nil
+        tab.webContentWrapper?.updateTabCustomValue("")
+        guard let pending = pendingSplitPartnerByCustomGuid.removeValue(forKey: customGuid) else {
             return
         }
         // From here on, every exit path must clear the visibility-skip mark
@@ -1217,20 +1316,6 @@ extension BrowserState {
             ChromiumLauncher.sharedInstance().bridge?
                 .clearPendingSplitPartner(withTabId: pending.partnerTabId.int64Value,
                                           windowId: self.windowId.int64Value)
-        }
-        // Drop the transient pairing marker on both sides. On Swift it keeps
-        // `isPinnedOrInDB` from latching true; on Chromium it stops
-        // CrossDomainNewTabNavigationThrottle from treating the pane as a
-        // pinned/bookmark tab and redirecting cross-domain typing into a fresh
-        // tab. Without the bridge call the throttle still fires even after
-        // `guidInLocalDB` is cleared.
-        tab.guidInLocalDB = nil
-        tab.webContentWrapper?.updateTabCustomValue("")
-        // For split-bookmark opens the new pane needs to land on the saved
-        // secondary URL rather than staying on NTP. The throttle-avoidance
-        // marker is already cleared above, so the navigation is safe here.
-        if let navigateURL = pending.navigateURL, !navigateURL.isEmpty {
-            tab.webContentWrapper?.navigate(toURL: navigateURL)
         }
         guard pending.partnerTabId != tab.guid,
               splitGroup(forTabId: pending.partnerTabId) == nil else {
@@ -1322,6 +1407,80 @@ extension BrowserState {
         }
     }
 
+    // MARK: - Replace a split pane (drag onto an existing split)
+
+    /// Whether replacing pane `slotIndex` of `splitId` should preserve the
+    /// evicted pane as a standalone tab next to the split
+    /// (`swapTabInSplit(swap: true)`). An empty new-tab page is *not*
+    /// preserved — it would just litter the strip, so the caller passes
+    /// `swap: false` to close it instead. Returns true (preserve) when the
+    /// split or evicted tab can't be resolved.
+    func splitPaneReplacementKeepsEvicted(splitId: String, slotIndex: Int) -> Bool {
+        guard let group = splitGroup(forId: splitId) else { return true }
+        let evictedTabId = slotIndex == 0 ? group.primaryTabId : group.secondaryTabId
+        return tabs.first(where: { $0.guid == evictedTabId })?.isNTP != true
+    }
+
+    /// Opens a fresh tab directly on `url` and, once Chromium echoes it back,
+    /// swaps it into the given split slot via `swapTabInSplit(..., swap: true)`
+    /// so the evicted pane lands right next to the split. Used by the
+    /// drag-onto-split-pane flow for the bookmark and closed-pinned sources,
+    /// which have no live tab id to swap directly. Creating the tab on `url`
+    /// (instead of NTP plus a deferred navigate) is throttle-safe — see the
+    /// initial-load note in `openNewTabAsSplit`.
+    func openTabAsPaneReplacement(splitId: String, slotIndex: Int, url: String) {
+        guard splitGroup(forId: splitId) != nil, !url.isEmpty else { return }
+        let pendingGuid = SplitPendingGuid.swapSlot.mint()
+        pendingSplitSlotSwapByCustomGuid[pendingGuid] = PendingSplitSlotSwap(
+            splitId: splitId,
+            slotIndex: slotIndex
+        )
+        // Open in the background: focusing the new tab would flash it
+        // full-screen over the split before the swap pulls it into the pane.
+        createTab(url, customGuid: pendingGuid, focusAfterCreate: false)
+        // Timeout cleanup: if the new tab never arrives, drop the pending
+        // record so it can't fire a stale swap later.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
+            guard let self else { return }
+            guard self.pendingSplitSlotSwapByCustomGuid[pendingGuid] != nil else {
+                return  // already consumed
+            }
+            self.pendingSplitSlotSwapByCustomGuid.removeValue(forKey: pendingGuid)
+        }
+    }
+
+    /// Called from `handleNewTabFromChromium`. If the arriving tab matches a
+    /// pending pane-replacement request keyed by its customGuid, swap it
+    /// into the recorded split slot now.
+    func consumePendingSplitSlotSwap(for tab: Tab) {
+        guard let customGuid = tab.guidInLocalDB,
+              SplitPendingGuid.swapSlot.matches(customGuid) else {
+            return
+        }
+        // Drop the transient marker on both sides so it doesn't latch a
+        // pinned/bookmark binding or trigger CrossDomainNewTabNavigationThrottle.
+        // This must happen even when the pending record has already expired
+        // (echo arrived after the 5s timeout below) — a latched marker keeps
+        // `isPinnedOrInDB` true and the throttle hijacking the tab's
+        // cross-domain navigations forever.
+        tab.guidInLocalDB = nil
+        tab.webContentWrapper?.updateTabCustomValue("")
+        guard let pending = pendingSplitSlotSwapByCustomGuid.removeValue(forKey: customGuid) else {
+            return
+        }
+        // The split may have been dismantled between the open and the echo
+        // (pane closed, window torn off). Re-validate before swapping.
+        guard splitGroup(forId: pending.splitId) != nil else { return }
+        // Close the evicted pane if it's an empty new-tab page; otherwise keep
+        // it as a standalone tab.
+        let keepEvicted = splitPaneReplacementKeepsEvicted(splitId: pending.splitId,
+                                                           slotIndex: pending.slotIndex)
+        swapTabInSplit(pending.splitId,
+                       slotIndex: pending.slotIndex,
+                       withTabId: tab.guid,
+                       swap: keepEvicted)
+    }
+
     // MARK: - Open-URL-as-split (bookmark "Open as Split")
 
     /// Opens `url` as a new tab and, once Chromium echoes it back, creates a
@@ -1330,14 +1489,13 @@ extension BrowserState {
     /// Used by the bookmark "Open as Split" menu.
     func openURLAsSplit(url: String) {
         let pendingGuid = SplitPendingGuid.primary.mint()
-        // Mirror the throttle-avoidance trick in `openNewTabAsSplit`: open
-        // the tab as NTP with the marker, then navigate to `url` once the
-        // marker is cleared in the consumer.
         pendingPrimarySplitTargetByGuid[pendingGuid] = PendingPrimarySplit(
-            primaryURL: url,
             secondaryURL: nil
         )
-        createTab("chrome://newtab", customGuid: pendingGuid, focusAfterCreate: true)
+        // Create the tab directly on `url` — throttle-safe for the initial
+        // load, see the note in `openNewTabAsSplit`.
+        createTab(url, customGuid: pendingGuid, focusAfterCreate: true)
+        schedulePendingPrimarySplitCleanup(pendingGuid: pendingGuid)
     }
 
     /// Opens two URLs as a side-by-side split. The first becomes the primary
@@ -1355,33 +1513,49 @@ extension BrowserState {
                             insertionIndex: Int? = nil) {
         let pendingGuid = SplitPendingGuid.primary.mint()
         pendingPrimarySplitTargetByGuid[pendingGuid] = PendingPrimarySplit(
-            primaryURL: primaryURL,
             secondaryURL: secondaryURL,
             boundBookmarkGuid: bookmarkGuid,
             groupToken: groupToken,
             insertionIndex: insertionIndex
         )
-        createTab("chrome://newtab", customGuid: pendingGuid, focusAfterCreate: true)
+        createTab(primaryURL, customGuid: pendingGuid, focusAfterCreate: true)
+        schedulePendingPrimarySplitCleanup(pendingGuid: pendingGuid)
+    }
+
+    /// Timeout cleanup shared by the two primary-split openers: if the new
+    /// tab never arrives, drop the pending record so it can't fire a stale
+    /// split later. Mirrors the 5s cleanup in `openNewTabAsSplit` and
+    /// `openTabAsPaneReplacement`.
+    private func schedulePendingPrimarySplitCleanup(pendingGuid: String) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
+            guard let self else { return }
+            guard self.pendingPrimarySplitTargetByGuid[pendingGuid] != nil else {
+                return  // already consumed
+            }
+            self.pendingPrimarySplitTargetByGuid.removeValue(forKey: pendingGuid)
+        }
     }
 
     /// Called from `handleNewTabFromChromium`. If the arriving tab is marked
-    /// as a pending-primary split, kick off the NTP partner that completes
+    /// as a pending-primary split, kick off the partner that completes
     /// the pair through the regular `openNewTabAsSplit` path. When the
     /// pending record carries a `secondaryURL` (split-bookmark open), pass
-    /// it through so the partner navigates to that URL instead of staying
-    /// on NTP.
+    /// it through so the partner pane is created on that URL instead of NTP.
     func consumePendingPrimarySplit(for tab: Tab) {
         guard let customGuid = tab.guidInLocalDB,
-              SplitPendingGuid.primary.matches(customGuid),
-              let pending = pendingPrimarySplitTargetByGuid.removeValue(forKey: customGuid) else {
+              SplitPendingGuid.primary.matches(customGuid) else {
             return
         }
         // Same cleanup as `consumePendingSplitPartner`: drop the transient
         // marker on both sides so it doesn't latch a pinned/bookmark binding
-        // or trigger CrossDomainNewTabNavigationThrottle.
+        // or trigger CrossDomainNewTabNavigationThrottle. Cleared even when
+        // the pending record has already expired (echo arrived after the 5s
+        // timeout) so the marker can't stay latched on the tab.
         tab.guidInLocalDB = nil
         tab.webContentWrapper?.updateTabCustomValue("")
-        tab.webContentWrapper?.navigate(toURL: pending.primaryURL)
+        guard let pending = pendingPrimarySplitTargetByGuid.removeValue(forKey: customGuid) else {
+            return
+        }
         // Group drop: pull the primary pane into the destination group before
         // the partner is created. `consumePendingSplitPartner` reads the
         // partner's (this primary's) group token and folds the new pane into
@@ -1420,10 +1594,6 @@ struct PendingSplitPartner {
     let partnerTabId: Int
     /// Which slot the new tab should take in the resulting split.
     let newTabSlot: SplitSlot
-    /// Optional URL to navigate the new pane to once its throttle marker is
-    /// cleared. Nil leaves the pane as a new-tab page (the historical
-    /// behavior for the right-click "Open as Split" menu).
-    var navigateURL: String? = nil
     /// Optional bookmark guid to rebind to the new pane after the throttle
     /// marker is cleared. Used by the split-bookmark open flow so the
     /// bookmark cell stays in sync with the open split.
@@ -1435,12 +1605,22 @@ struct PendingSplitPartner {
     var insertionIndex: Int? = nil
 }
 
+/// Stored alongside a pending "open a tab to replace a split pane" request.
+/// When the tab arrives from Chromium, `consumePendingSplitSlotSwap` swaps
+/// it into `slotIndex` of `splitId` via `swapTabInSplit(..., swap: true)`,
+/// leaving the evicted pane as a standalone tab right next to the split.
+/// Used by the drag-onto-split-pane flow for the bookmark and closed-pinned
+/// sources, which have no live tab to swap directly.
+struct PendingSplitSlotSwap {
+    let splitId: String
+    let slotIndex: Int
+}
+
 /// Stored alongside a pending "open URL as primary pane" request. The
-/// primary URL is always present; `secondaryURL` is non-nil when the caller
-/// wants the partner pane navigated to a specific URL (split-bookmark open)
-/// rather than left blank.
+/// primary tab is created directly on its URL; `secondaryURL` is non-nil
+/// when the caller wants the partner pane created on a specific URL
+/// (split-bookmark open) rather than left as a new-tab page.
 struct PendingPrimarySplit {
-    let primaryURL: String
     let secondaryURL: String?
     /// Optional bookmark guid to rebind to both panes once they settle, so
     /// the originating split bookmark tracks the open split.

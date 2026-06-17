@@ -429,12 +429,23 @@ class WebContentViewController: NSViewController {
                     self.syncAIChatState(from: tab, to: aiChatSplitViewItem)
                 }
                 guard self.browserState?.focusingTab?.guid == tab.guid else { return }
-                // Each pane tracks its own `lastKnownAIChatWidth`, so a
-                // freshly-formed split would otherwise expand the partner
-                // pane at its stale (often default) width. Push the focused
-                // pane's width into the partner now — runs before the
-                // partner's own aiChatCollapsed observer fires the expand.
-                self.syncAIChatWidthToSplitPartner(self.lastKnownAIChatWidth)
+                // The chat is shared across both panes, so it has one width.
+                // If the partner already has an expanded chat, that width is
+                // the established shared one — adopt it. This pane may have
+                // just been swapped into the split (replace-pane / drag a tab
+                // onto a pane), in which case our own `lastKnownAIChatWidth` is
+                // stale (the new tab's per-origin value or the 360 default) and
+                // pushing it would snap the visible chat to the new tab's
+                // width. Only when the partner has no expanded chat yet — a
+                // freshly-formed split whose partner just opened
+                // collapsed/default — do we push ours so both panes open to the
+                // same size (runs before the partner's own aiChatCollapsed
+                // observer fires the expand).
+                if let partnerWidth = self.splitPartnerCurrentChatWidth() {
+                    self.applyAIChatWidthFromPartner(partnerWidth)
+                } else {
+                    self.syncAIChatWidthToSplitPartner(self.lastKnownAIChatWidth)
+                }
                 self.updateContentForTab(tab)
             }
             .store(in: &cancellables)
@@ -1389,6 +1400,18 @@ class WebContentViewController: NSViewController {
                 // catches up once the view reaches a window.
                 return
             }
+            // In a split, hostView holds the SplitPaneHostView (both panes +
+            // divider), not this tab's view alone — lifting it as-is would
+            // fullscreen the whole split and leave the video pane-sized.
+            // Re-run the mount path first: isInContentFullscreen is already
+            // true here, so activeSplitForCurrentTab() returns nil and
+            // showWebContent falls back to mounting just this tab's view
+            // (the same teardown the split-dissolve flow uses). The partner
+            // view drops to the normal hidden-tab state; the exit branch
+            // below rebuilds the split.
+            if isSplitContentMounted, let tab = associatedTab {
+                updateContentForTab(tab)
+            }
             savedHostViewSuperview = hostView.superview
             // Deactivate progress bar constraints before removing hostView —
             // they reference hostView and would otherwise be torn down by
@@ -1427,6 +1450,15 @@ class WebContentViewController: NSViewController {
             // Re-clear AppKit's kCAFilterPlusL after moving hostView back into
             // the ColoredVisualEffectView hierarchy (matches DevTools paths).
             hostView.scheduleVibrancyClear()
+            // Rebuild the split the entry path collapsed, now that hostView
+            // is back in the normal hierarchy and isInContentFullscreen is
+            // false again — installSplitContent revives the partner view the
+            // entry teardown evicted. Runs before first-responder restore so
+            // focus lands after all reparenting has settled.
+            if let tab = associatedTab,
+               browserState?.splitGroup(forTabId: tab.guid) != nil {
+                updateContentForTab(tab)
+            }
             // Same first-responder recovery as on entry (removeFromSuperview
             // resets responder chain in both directions).
             restoreWebContentFirstResponder()

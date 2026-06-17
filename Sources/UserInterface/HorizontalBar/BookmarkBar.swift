@@ -6,7 +6,6 @@
 import AppKit
 import Combine
 import SnapKit
-import Kingfisher
 
 class BookmarkBar: NSView {
     // MARK: - Properties
@@ -270,17 +269,19 @@ class BookmarkBar: NSView {
             let secondaryDisplay = Self.displayName(forSecondaryTitle: bookmark.secondaryTitle, url: secondaryUrl)
             item.title = secondaryDisplay.isEmpty ? bookmark.title : "\(bookmark.title) • \(secondaryDisplay)"
             item.image = NSImage(systemSymbolName: "rectangle.split.2x1", accessibilityDescription: nil)
-            loadSplitFavicons(primaryUrl: bookmark.url, secondaryUrl: secondaryUrl) { [weak item] image in
+            loadSplitFavicons(bookmark: bookmark, secondaryUrl: secondaryUrl) { [weak item] image in
                 item?.image = image
             }
             return item
         }
 
         item.image = NSImage(systemSymbolName: "globe", accessibilityDescription: nil)
-        loadFavicon(for: bookmark.url) { [weak item] image in
+        let iconSize = self.faviconSize
+        BookmarkFaviconLoader.loadPrimaryFavicon(for: bookmark,
+                                                 pageURLString: bookmark.url) { [weak item] image in
             guard let image = image else { return }
             DispatchQueue.main.async {
-                image.size = NSSize(width: self.faviconSize, height: self.faviconSize)
+                image.size = NSSize(width: iconSize, height: iconSize)
                 item?.image = image
             }
         }
@@ -303,15 +304,17 @@ class BookmarkBar: NSView {
     /// Loads both favicons of a split bookmark and composes them into a single
     /// side-by-side image suitable for use as an `NSMenuItem.image`. Missing
     /// favicons fall back to the globe symbol so the layout slot still renders.
-    private func loadSplitFavicons(primaryUrl: String?,
+    private func loadSplitFavicons(bookmark: Bookmark,
                                    secondaryUrl: String,
                                    completion: @escaping (NSImage) -> Void) {
         let iconSize = self.faviconSize
-        loadFavicon(for: primaryUrl) { [weak self] primaryImage in
-            self?.loadFavicon(for: secondaryUrl) { secondaryImage in
+        BookmarkFaviconLoader.loadPrimaryFavicon(for: bookmark,
+                                                 pageURLString: bookmark.url) { primaryImage in
+            BookmarkFaviconLoader.loadFavicon(profileId: bookmark.profileId,
+                                              pageURLString: secondaryUrl) { secondaryResult in
                 DispatchQueue.main.async {
                     let composed = BookmarkBar.composeSplitFavicon(primary: primaryImage,
-                                                                   secondary: secondaryImage,
+                                                                   secondary: secondaryResult.image,
                                                                    iconSize: iconSize)
                     completion(composed)
                 }
@@ -343,28 +346,6 @@ class BookmarkBar: NSView {
             menu.addItem(item)
         }
         return menu
-    }
-
-    private func loadFavicon(for urlString: String?, completion: @escaping (NSImage?) -> Void) {
-        let defaultIcon = NSImage(systemSymbolName: "globe", accessibilityDescription: "Website")
-        guard let urlString = urlString, let url = URL(string: urlString) else {
-            completion(defaultIcon)
-            return
-        }
-
-        let provider = FaviconDataProvider(pageURL: url)
-        let options: KingfisherOptionsInfo = [
-            .cacheOriginalImage
-        ]
-
-        KingfisherManager.shared.retrieveImage(with: .provider(provider), options: options) { result in
-            switch result {
-            case .success(let value):
-                completion(value.image)
-            case .failure:
-                completion(defaultIcon)
-            }
-        }
     }
 
     // MARK: - NSDraggingDestination

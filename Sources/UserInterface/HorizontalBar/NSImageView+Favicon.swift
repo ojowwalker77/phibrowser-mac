@@ -5,29 +5,41 @@
 
 import AppKit
 
-extension NSImageView {
-    /// Loads a favicon with a globe fallback.
-    func loadFavicon(from urlString: String?, cornerRadius: CGFloat = 4) {
-        let defaultIcon = NSImage(systemSymbolName: "globe", accessibilityDescription: "Website")
-
-        guard let urlString = urlString,
-              let url = URL(string: urlString) else {
-            if self.image == nil {
-                self.image = defaultIcon
-            }
-            return
+@MainActor
+enum BookmarkFaviconLoader {
+    @discardableResult
+    static func loadPrimaryFavicon(for bookmark: Bookmark,
+                                   pageURLString: String?,
+                                   completion: @escaping (NSImage?) -> Void) -> ProfileScopedFaviconLoadHandle? {
+        if let liveFaviconData = bookmark.liveFaviconData,
+           let image = NSImage(data: liveFaviconData) {
+            completion(image)
+            return nil
         }
 
-        self.setFavicon(for: url, configuration: .init(cornerRadius: cornerRadius, placeholder: nil)) { [weak self] result in
-            switch result {
-            case .failure:
-                // Preserve any existing image instead of flashing back to the default icon.
-                if self?.image == nil {
-                    self?.image = defaultIcon
-                }
-            case .success:
-                break
+        return loadFavicon(profileId: bookmark.profileId,
+                           pageURLString: pageURLString,
+                           snapshotData: bookmark.cachedFaviconData) { [weak bookmark] result in
+            completion(result.image)
+            if result.source == .chromium, let data = result.data {
+                bookmark?.updateCachedFaviconData(data)
             }
+        }
+    }
+
+    @discardableResult
+    static func loadFavicon(profileId: String?,
+                            pageURLString: String?,
+                            snapshotData: Data? = nil,
+                            completion: @escaping (ProfileScopedFaviconResult) -> Void) -> ProfileScopedFaviconLoadHandle? {
+        let request = ProfileScopedFaviconRequest(
+            profileId: profileId,
+            pageURLString: pageURLString,
+            snapshotData: snapshotData
+        )
+
+        return ProfileScopedFaviconRepository.shared.loadFavicon(for: request) { result in
+            completion(result)
         }
     }
 }

@@ -14,6 +14,7 @@ final class TabViewModel {
     var url: String?
     var faviconUrl: String?
     var liveFaviconImage: NSImage?
+    var profileFaviconImage: NSImage?
     private(set) var liveFaviconRevision: Int = 0
     /// The last non-nil URL used for favicon loading. Prevents globe flash
     /// when viewModel is briefly reconfigured with a nil-url tab during layout.
@@ -54,6 +55,7 @@ final class TabViewModel {
     
     private var cancellables = Set<AnyCancellable>()
     private var rawIsLoading: Bool = false
+    private var profileFaviconLoadHandle: ProfileScopedFaviconLoadHandle?
 
     var isShimmering: Bool {
         isLoading
@@ -72,6 +74,8 @@ final class TabViewModel {
     func cancelSubscriptions() {
         configurationGeneration &+= 1
         cancellables.removeAll()
+        profileFaviconLoadHandle?.cancel()
+        profileFaviconLoadHandle = nil
     }
 
     func prepareForReuse() {
@@ -82,6 +86,7 @@ final class TabViewModel {
         faviconUrl = nil
         faviconLoadURL = nil
         liveFaviconImage = nil
+        profileFaviconImage = nil
         liveFaviconRevision = 0
         isActive = false
         isActiveSuppressed = false
@@ -134,9 +139,11 @@ final class TabViewModel {
 
         self.title = tab.title
         self.url = tab.url
-        self.faviconLoadURL = (tab.url?.isEmpty == false) ? tab.url : nil
+        self.faviconLoadURL = Self.faviconPageURLString(for: tab)
         self.faviconUrl = tab.faviconUrl
         updateLiveFavicon(data: tab.liveFaviconData, revision: tab.liveFaviconRevision)
+        updateProfileFaviconImage(data: tab.cachedFaviconData, clearsOnNil: true)
+        refreshProfileFaviconIfNeeded(for: tab, expectedGuid: tab.guid)
         self.isActive = tab.isActive && !isActiveSuppressed
         self.rawIsLoading = tab.isLoading
         self.loadingProgress = Double(tab.loadingProgress)
@@ -170,6 +177,7 @@ final class TabViewModel {
                 if let newUrl, !newUrl.isEmpty {
                     self.faviconLoadURL = newUrl
                 }
+                self.refreshProfileFaviconIfNeeded(for: tab, expectedGuid: expectedGuid)
             }
             .store(in: &cancellables)
             
@@ -197,6 +205,7 @@ final class TabViewModel {
                 } else if oldFaviconUrl == nil {
                     self.reloadFavicon()
                 }
+                self.refreshProfileFaviconIfNeeded(for: tab, expectedGuid: expectedGuid)
             }
             .store(in: &cancellables)
 
@@ -206,6 +215,16 @@ final class TabViewModel {
             .sink { [weak self] data, revision in
                 guard let self, self.isCurrentConfiguration(expectedGuid: expectedGuid, expectedGeneration: expectedGeneration) else { return }
                 self.updateLiveFavicon(data: data, revision: revision)
+                self.refreshProfileFaviconIfNeeded(for: tab, expectedGuid: expectedGuid)
+            }
+            .store(in: &cancellables)
+
+        tab.$cachedFaviconData
+            .removeDuplicates()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] data in
+                guard let self, self.configuredTabGuid == expectedGuid else { return }
+                self.updateProfileFaviconImage(data: data, clearsOnNil: false)
             }
             .store(in: &cancellables)
             
@@ -335,5 +354,53 @@ final class TabViewModel {
 
     private func updateVisualLoading() {
         isLoading = rawIsLoading && loadingProgress < 0.99
+    }
+
+    private static func faviconPageURLString(for tab: Tab) -> String? {
+        let pageURLString = tab.isOpenned ? (tab.url ?? tab.pinnedUrl) : (tab.pinnedUrl ?? tab.url)
+        return (pageURLString?.isEmpty == false) ? pageURLString : nil
+    }
+
+    private func updateProfileFaviconImage(data: Data?, clearsOnNil: Bool) {
+        guard let data, let image = NSImage(data: data) else {
+            if clearsOnNil {
+                profileFaviconImage = nil
+            }
+            return
+        }
+
+        profileFaviconImage = image
+    }
+
+    private func refreshProfileFaviconIfNeeded(for tab: Tab, expectedGuid: Int) {
+        guard configuredTabGuid == expectedGuid else { return }
+
+        guard tab.liveFaviconData == nil else {
+            profileFaviconLoadHandle?.cancel()
+            profileFaviconLoadHandle = nil
+            return
+        }
+
+        profileFaviconLoadHandle?.cancel()
+        profileFaviconLoadHandle = nil
+
+        guard tab.cachedFaviconData != nil || tab.profileId?.isEmpty == false else {
+            profileFaviconImage = nil
+            return
+        }
+
+        let request = ProfileScopedFaviconRequest(
+            profileId: tab.profileId,
+            pageURLString: Self.faviconPageURLString(for: tab),
+            snapshotData: tab.cachedFaviconData
+        )
+
+        profileFaviconLoadHandle = ProfileScopedFaviconRepository.shared.loadFavicon(for: request) { [weak self, weak tab] result in
+            guard let self, self.configuredTabGuid == expectedGuid else { return }
+            self.profileFaviconImage = result.image
+            if result.source == .chromium, let data = result.data {
+                tab?.updateCachedFaviconData(data)
+            }
+        }
     }
 }

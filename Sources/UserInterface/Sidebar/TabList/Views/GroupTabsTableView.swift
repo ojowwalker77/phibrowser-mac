@@ -104,6 +104,40 @@ final class GroupTabsTableView: NSTableView {
                                     at: clickLocation)
     }
 
+    override func draggingUpdated(_ sender: any NSDraggingInfo) -> NSDragOperation {
+        let operation = super.draggingUpdated(sender)
+        // The inner table is not scroll-backed, so keep the outer outline view
+        // responsible for edge cue visibility and autoscroll.
+        enclosingSidebarOutlineView()?.updateDragAutoscrollCueVisibility()
+        enclosingSidebarOutlineView()?.autoscrollNearEdgeIfNeeded(
+            draggingLocationInWindow: sender.draggingLocation)
+        return operation
+    }
+
+    override func wantsPeriodicDraggingUpdates() -> Bool {
+        true
+    }
+
+    override func draggingEntered(_ sender: any NSDraggingInfo) -> NSDragOperation {
+        let operation = super.draggingEntered(sender)
+        enclosingSidebarOutlineView()?.updateDragAutoscrollCueVisibility()
+        return operation
+    }
+
+    override func draggingExited(_ sender: (any NSDraggingInfo)?) {
+        enclosingSidebarOutlineView()?.hideDragAutoscrollCue()
+        super.draggingExited(sender)
+    }
+
+    override func draggingEnded(_ sender: any NSDraggingInfo) {
+        enclosingSidebarOutlineView()?.hideDragAutoscrollCue()
+    }
+
+    override func concludeDragOperation(_ sender: (any NSDraggingInfo)?) {
+        enclosingSidebarOutlineView()?.hideDragAutoscrollCue()
+        super.concludeDragOperation(sender)
+    }
+
     override func mouseUp(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
         let upRow = row(at: point)
@@ -164,6 +198,17 @@ final class GroupTabsTableView: NSTableView {
             return .mute
         }
 
+        return nil
+    }
+
+    private func enclosingSidebarOutlineView() -> SideBarOutlineView? {
+        var view = superview
+        while let current = view {
+            if let outlineView = current as? SideBarOutlineView {
+                return outlineView
+            }
+            view = current.superview
+        }
         return nil
     }
 }

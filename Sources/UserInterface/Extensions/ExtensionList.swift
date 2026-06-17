@@ -21,6 +21,8 @@ final class CertificatePanelSheetDelegate: NSObject {
 // Protocol to abstract ExtensionManager for testing
 protocol ExtensionManagerProtocol: ObservableObject {
     var extensions: [Extension] { get }
+    var badges: [String: ExtensionManager.BadgeState] { get }
+    var dynamicIcons: [String: NSImage] { get }
     func refreshExtensions()
     func togglePin(_ model: Extension)
 }
@@ -210,6 +212,8 @@ struct ExtensionList<Manager: ExtensionManagerProtocol>: View {
             ForEach(extensionManager.extensions) { ext in
                 ExtensionGridItem(
                     ext: ext,
+                    badge: extensionManager.badges[ext.id],
+                    dynamicIcon: extensionManager.dynamicIcons[ext.id],
                     onTogglePin: { model in
                         extensionManager.togglePin(model)
                     },
@@ -226,6 +230,12 @@ struct ExtensionList<Manager: ExtensionManagerProtocol>: View {
     }
 
     private func triggerExtension(_ ext: Extension, anchor: NSView) {
+        // A disabled action doesn't run; fall back to the context menu like
+        // Chrome (ExecuteUserAction).
+        if extensionManager.badges[ext.id]?.enabled == false {
+            triggerExtensionContextMenu(ext)
+            return
+        }
         // Dismiss the SwiftUI popover BEFORE triggering the Chromium popup so
         // the popover's fade-out animation runs in parallel with the popup's
         // appearance instead of overlapping it visually.
@@ -316,15 +326,17 @@ struct ExtensionList<Manager: ExtensionManagerProtocol>: View {
 
 struct ExtensionGridItem: View {
     @ObservedObject var ext: Extension
+    var badge: ExtensionManager.BadgeState?
+    var dynamicIcon: NSImage?
     @State private var isHovered = false
     var onTogglePin: ((Extension) -> Void)?
     var onTap: ((Extension) -> Void)?
     var onSecondaryTap: ((Extension) -> Void)?
-    
+
     private let itemWidth: CGFloat = 50
     private let itemHeight: CGFloat = 32
     private let iconSize: CGFloat = 18
-    
+
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
             // Main item container
@@ -332,17 +344,24 @@ struct ExtensionGridItem: View {
                 // Background with hover effect
                 RoundedRectangle(cornerRadius: 8)
                     .fill(isHovered ? Color(.sidebarTabHoveredColorEmphasized) : Color(.sidebarTabHovered))
-                
-                // Extension icon
-                if let icon = ext.icon {
-                    Image(nsImage: icon)
+
+                // Extension icon (dynamic setIcon icon overrides the static one).
+                // Badge anchors to the icon's bottom-right corner. A grayed
+                // action uses the same desaturate+lighten treatment as the
+                // toolbar faces.
+                let isGrayed = badge?.grayscale == true
+                if let icon = dynamicIcon ?? ext.icon {
+                    Image(nsImage: isGrayed ? icon.disabledActionVariant : icon)
                         .resizable()
                         .frame(width: iconSize, height: iconSize)
+                        .extensionBadgeOverlay(badge)
                 } else {
                     Image(systemName: "puzzlepiece.extension")
                         .resizable()
                         .frame(width: iconSize, height: iconSize)
                         .foregroundColor(.secondary)
+                        .opacity(isGrayed ? 0.5 : 1)
+                        .extensionBadgeOverlay(badge)
                 }
             }
             .scaleEffect(isHovered ? 1.04 : 1.0)
@@ -655,6 +674,8 @@ class MockExtensionManager: ObservableObject, ExtensionManagerProtocol {
     @Published var extensions: [Extension] = []
     @Published var pinedExtensions: [Extension] = []
     @Published var phiExtensionVersion: String?
+    @Published var badges: [String: ExtensionManager.BadgeState] = [:]
+    @Published var dynamicIcons: [String: NSImage] = [:]
     
     init(mockExtensions: [Extension]) {
         self.extensions = mockExtensions

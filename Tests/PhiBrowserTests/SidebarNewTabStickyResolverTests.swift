@@ -60,4 +60,52 @@ final class SidebarNewTabStickyResolverTests: XCTestCase {
 
         XCTAssertEqual(result, visibleRect)
     }
+
+    func testDragAutoscrollUsesTopOverlayAsObstructedArea() {
+        let visibleRect = CGRect(x: 0, y: 100, width: 240, height: 400)
+
+        let delta = SidebarDragAutoscrollResolver.scrollDelta(
+            dragY: 150,
+            visibleRect: visibleRect,
+            isFlipped: true,
+            topObstructionHeight: 36,
+            hotZoneHeight: 92,
+            minStep: 5,
+            maxStep: 22
+        )
+
+        XCTAssertLessThan(delta, 0)
+    }
+
+    func testDragAutoscrollIgnoresPointerOutsideExpandedTopZone() {
+        let visibleRect = CGRect(x: 0, y: 100, width: 240, height: 400)
+
+        let delta = SidebarDragAutoscrollResolver.scrollDelta(
+            dragY: 240,
+            visibleRect: visibleRect,
+            isFlipped: true,
+            topObstructionHeight: 36,
+            hotZoneHeight: 92,
+            minStep: 5,
+            maxStep: 22
+        )
+
+        XCTAssertEqual(delta, 0)
+    }
+
+    func testDragAutoscrollScrollsDownNearBottomEdge() {
+        let visibleRect = CGRect(x: 0, y: 100, width: 240, height: 400)
+
+        let delta = SidebarDragAutoscrollResolver.scrollDelta(
+            dragY: 480,
+            visibleRect: visibleRect,
+            isFlipped: true,
+            topObstructionHeight: 36,
+            hotZoneHeight: 92,
+            minStep: 5,
+            maxStep: 22
+        )
+
+        XCTAssertGreaterThan(delta, 0)
+    }
 }
