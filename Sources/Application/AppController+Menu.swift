@@ -742,11 +742,22 @@ extension AppController {
             return false
         }
 
+        // Command-dispatched main-menu items that reach the app delegate had no
+        // key browser window to handle them. Defer their enabled state to
+        // PhiAppController (no-window CommandUpdater: New Tab/New Window enabled,
+        // tab-only commands disabled), matching upstream AppController.
+        if item.action == #selector(commandDispatch(_:)) {
+            return ChromiumLauncher.sharedInstance().bridge?.validateUserInterfaceItem(fromMenu: item) ?? false
+        }
+
         return true
     }
     
     @IBAction @objc func commandDispatch(_ sender: Any?) {
-        
+        // No key browser window handled this command, so it reached the app
+        // delegate. Forward to PhiAppController (via the bridge), which contains
+        // the no-window handling for File-menu commands like New Tab/New Window.
+        ChromiumLauncher.sharedInstance().bridge?.commandDispatchFromMenu(sender as Any)
     }
 }
 
