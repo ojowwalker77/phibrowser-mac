@@ -41,6 +41,7 @@ class PinnedTabViewController: NSViewController {
                 guard let pinnedItem = collectionView.makeItem(withIdentifier: PinnedExtensionItem.reuseIdentifier, for: indexPath) as? PinnedExtensionItem else {
                     return NSCollectionViewItem()
                 }
+                pinnedItem.view.isHidden = false
                 // Resolved icon (dynamic override + disabled graying) looked up
                 // by id. The badge is a self-observing overlay in the cell, so it
                 // updates without reloading; reloadItems is only needed for icon
@@ -62,6 +63,7 @@ class PinnedTabViewController: NSViewController {
                 guard let tabItem = collectionView.makeItem(withIdentifier: PinnedTabItem.reuseIdentifier, for: indexPath) as? PinnedTabItem else {
                     return NSCollectionViewItem()
                 }
+                tabItem.view.isHidden = tab == placeholderTab || self.isDraggingPinnedTab(tab)
                 tabItem.configure(
                     with: tab,
                     themeProvider: browserState?.themeContext ?? ThemeManager.shared
@@ -76,6 +78,7 @@ class PinnedTabViewController: NSViewController {
                 guard let splitItem = collectionView.makeItem(withIdentifier: PinnedSplitItem.reuseIdentifier, for: indexPath) as? PinnedSplitItem else {
                     return NSCollectionViewItem()
                 }
+                splitItem.view.isHidden = group.containsPinnedGuid(draggedPinnedGuid)
                 splitItem.configure(
                     leftTab: group.leftTab,
                     rightTab: group.rightTab,
@@ -110,6 +113,18 @@ class PinnedTabViewController: NSViewController {
         static func == (lhs: PinnedSplitGroupItem, rhs: PinnedSplitGroupItem) -> Bool {
             lhs.splitId == rhs.splitId
         }
+
+        func containsPinnedGuid(_ guid: String?) -> Bool {
+            guard let guid, !guid.isEmpty else {
+                return false
+            }
+            return leftTab.guidInLocalDB == guid || rightTab.guidInLocalDB == guid
+        }
+    }
+
+    private struct TabSectionEntry {
+        let item: Item
+        let rawPinnedIndices: [Int]
     }
 
     private enum Item: Hashable {
@@ -206,6 +221,7 @@ class PinnedTabViewController: NSViewController {
     private var isDragging = false
     /// Placeholder item used while dragging a normal tab into pinned tabs.
     private var placeholderTab: Tab?
+    private var draggedPinnedGuid: String?
     private var isExternalDrag = false
     private var hasAppliedInitialContentSnapshot = false
     private var isActive = false
@@ -429,6 +445,7 @@ class PinnedTabViewController: NSViewController {
         pinnedTabs = []
         pinnedExtensionItems = []
         placeholderTab = nil
+        draggedPinnedGuid = nil
         isDragging = false
         isExternalDrag = false
         hasAppliedInitialContentSnapshot = false
@@ -517,9 +534,11 @@ class PinnedTabViewController: NSViewController {
     ///   2. Persisted `Tab.splitPartnerGuid` — survives across restarts and
     ///      covers the case where one or both panes are closed pinned-tab
     ///      records waiting to be reopened.
-    private func buildTabSectionItems() -> [Item] {
+    private func buildTabSectionEntries(from sourcePinnedTabs: [Tab]) -> [TabSectionEntry] {
         guard let state = browserState else {
-            return pinnedTabs.map { .tabItem($0) }
+            return sourcePinnedTabs.enumerated().map { index, tab in
+                TabSectionEntry(item: .tabItem(tab), rawPinnedIndices: [index])
+            }
         }
         // Pre-compute lookup dictionaries so the per-tab loop runs O(1) per
         // entry instead of repeating `first(where:)` scans against `tabs`,
@@ -527,7 +546,7 @@ class PinnedTabViewController: NSViewController {
         // `$pinnedTabs` / `$splits` / `$focusingTab` emission, so the
         // savings compound during normal interaction.
         let pinnedByDB: [String: Tab] = Dictionary(uniqueKeysWithValues:
-            pinnedTabs.compactMap { tab in tab.guidInLocalDB.map { ($0, tab) } }
+            sourcePinnedTabs.compactMap { tab in tab.guidInLocalDB.map { ($0, tab) } }
         )
         let liveByDB: [String: Tab] = Dictionary(
             state.tabs.compactMap { tab in tab.guidInLocalDB.map { ($0, tab) } },
@@ -549,7 +568,7 @@ class PinnedTabViewController: NSViewController {
         // link so either direction pairs both panes makes the merge
         // order-independent and tolerant of a half-persisted link.
         var persistedPartnerByDB: [String: String] = [:]
-        for tab in pinnedTabs {
+        for tab in sourcePinnedTabs {
             guard let db = tab.guidInLocalDB,
                   let partner = tab.splitPartnerGuid, !partner.isEmpty else { continue }
             persistedPartnerByDB[db] = partner
@@ -559,8 +578,8 @@ class PinnedTabViewController: NSViewController {
         }
 
         var consumedDBGuids = Set<String>()
-        var items: [Item] = []
-        for tab in pinnedTabs {
+        var entries: [TabSectionEntry] = []
+        for (rawIndex, tab) in sourcePinnedTabs.enumerated() {
             guard let myDBGuid = tab.guidInLocalDB, !consumedDBGuids.contains(myDBGuid) else { continue }
 
             // Prefer the live SplitGroup id when one exists so the same
@@ -598,16 +617,66 @@ class PinnedTabViewController: NSViewController {
             }
 
             if let combined {
-                items.append(.splitItem(combined))
+                let splitGuids = Set([
+                    combined.leftTab.guidInLocalDB,
+                    combined.rightTab.guidInLocalDB
+                ].compactMap { $0 })
+                let rawIndices: [Int] = sourcePinnedTabs.enumerated().compactMap { index, candidate in
+                    guard let guid = candidate.guidInLocalDB, splitGuids.contains(guid) else {
+                        return nil
+                    }
+                    return index
+                }
+                entries.append(TabSectionEntry(item: .splitItem(combined), rawPinnedIndices: rawIndices))
             } else {
-                items.append(.tabItem(tab))
+                entries.append(TabSectionEntry(item: .tabItem(tab), rawPinnedIndices: [rawIndex]))
             }
             consumedDBGuids.insert(myDBGuid)
         }
-        return items
+        return entries
     }
 
-    private func applySnapshot(animatingDifferences: Bool = true) {
+    private func buildTabSectionItems() -> [Item] {
+        buildTabSectionEntries(from: pinnedTabs).map(\.item)
+    }
+
+    private func rawPinnedInsertionIndex(forTabSectionItemIndex itemIndex: Int, in sourcePinnedTabs: [Tab]) -> Int {
+        guard itemIndex > 0 else {
+            return 0
+        }
+        let entries = buildTabSectionEntries(from: sourcePinnedTabs)
+        guard itemIndex < entries.count else {
+            return sourcePinnedTabs.count
+        }
+        return entries[itemIndex].rawPinnedIndices.first ?? sourcePinnedTabs.count
+    }
+
+    private func reorderedPinnedTabsForPreview(pinnedGuid: String,
+                                               toTabSectionItemIndex itemIndex: Int,
+                                               in sourcePinnedTabs: [Tab]) -> [Tab]? {
+        var entryTabs = buildTabSectionEntries(from: sourcePinnedTabs).map { entry in
+            entry.rawPinnedIndices.compactMap { rawIndex in
+                sourcePinnedTabs.indices.contains(rawIndex) ? sourcePinnedTabs[rawIndex] : nil
+            }
+        }
+        guard let sourceEntryIndex = entryTabs.firstIndex(where: { tabs in
+            tabs.contains { $0.guidInLocalDB == pinnedGuid }
+        }) else {
+            return nil
+        }
+        guard sourceEntryIndex != itemIndex else {
+            return nil
+        }
+        let movedTabs = entryTabs.remove(at: sourceEntryIndex)
+        entryTabs.insert(movedTabs, at: min(itemIndex, entryTabs.count))
+        return entryTabs.flatMap { $0 }
+    }
+
+    private func pinnedReorderStepSize(for tab: Tab, in state: BrowserState) -> Int {
+        state.pinnedSplitDBPair(forPinnedTab: tab) == nil ? 1 : 2
+    }
+
+    private func applySnapshot(animatingDifferences: Bool = true, completion: (() -> Void)? = nil) {
         var snapshot = NSDiffableDataSourceSnapshot<Section, Item>()
         snapshot.appendSections(Section.allCases)
         if !pinnedExtensionItems.isEmpty {
@@ -645,8 +714,47 @@ class PinnedTabViewController: NSViewController {
                 self.hasAppliedInitialContentSnapshot = true
             }
             self.updateAllItemsSelectionState(self.browserState?.focusingTab)
+            completion?()
         }
         updateLayout()
+    }
+
+    private func placeholderIndexPathInCurrentSnapshot() -> IndexPath? {
+        guard let placeholder = placeholderTab else {
+            return nil
+        }
+        let tabItems = dataSource.snapshot().itemIdentifiers(inSection: .tabs)
+        guard let itemIndex = tabItems.firstIndex(where: { item in
+            if case .tabItem(let tab) = item {
+                return tab == placeholder
+            }
+            return false
+        }) else {
+            return nil
+        }
+        return IndexPath(item: itemIndex, section: Section.tabs.rawValue)
+    }
+
+    private func unhideCollectionItems() {
+        collectionView.visibleItems().forEach {
+            $0.view.isHidden = false
+        }
+    }
+
+    private func updatePlaceholderVisibility() {
+        unhideCollectionItems()
+        guard let indexPath = placeholderIndexPathInCurrentSnapshot(),
+              let item = collectionView.item(at: indexPath) else {
+            return
+        }
+        item.view.isHidden = true
+    }
+
+    private func isDraggingPinnedTab(_ tab: Tab) -> Bool {
+        guard let draggedPinnedGuid, !draggedPinnedGuid.isEmpty else {
+            return false
+        }
+        return tab.guidInLocalDB == draggedPinnedGuid
     }
 
     private func updateEmptyViewVisibility(isDraggingTab: Bool = false) {
@@ -701,7 +809,8 @@ class PinnedTabViewController: NSViewController {
 
     private func updateLayout() {
         let parentWidth = view.bounds.width
-        customLayout.configure(parentWidth: parentWidth, tabCount: pinnedTabs.count, extensionCount: pinnedExtensionItems.count)
+        let tabItemCount = buildTabSectionItems().count
+        customLayout.configure(parentWidth: parentWidth, tabCount: tabItemCount, extensionCount: pinnedExtensionItems.count)
 
         collectionView.collectionViewLayout?.invalidateLayout()
         collectionView.layoutSubtreeIfNeeded()
@@ -811,22 +920,23 @@ extension PinnedTabViewController {
         isExternalDrag = false
 
         browserState?.tabDraggingSession.attachNativeSession(session)
-        let draggingItem: Any? = {
+        let dragContext: (item: Any?, pinnedGuid: String?) = {
             guard let indexPath = indexPaths.first,
                   let item = dataSource.itemIdentifier(for: indexPath) else {
-                return nil
+                return (nil, nil)
             }
             switch item {
             case .tabItem(let tab):
-                return tab
+                return (tab, tab.guidInLocalDB)
             case .splitItem(let group):
-                return group.leftTab
+                return (group.leftTab, group.leftTab.guidInLocalDB)
             case .extensionItem:
-                return nil
+                return (nil, nil)
             }
         }()
+        draggedPinnedGuid = dragContext.pinnedGuid
         browserState?.tabDraggingSession.begin(
-            draggingItem: draggingItem,
+            draggingItem: dragContext.item,
             screenLocation: CGPoint(x: screenPoint.x, y: screenPoint.y),
             containerView: hostVC?.view
         )
@@ -857,6 +967,7 @@ extension PinnedTabViewController {
             pinnedTabs.removeAll { $0 == placeholder }
         }
         placeholderTab = nil
+        draggedPinnedGuid = nil
         isExternalDrag = false
 
         // Sync UI with the latest data, as snapshot apply may have been
@@ -931,16 +1042,14 @@ extension PinnedTabViewController {
         }
         
         let pasteboard = draggingInfo.draggingPasteboard
-        var finalDestinationIndex = indexPath.item
+        var finalDestinationIndex = rawPinnedInsertionIndex(forTabSectionItemIndex: indexPath.item, in: pinnedTabs)
         let isCrossWindow = isCrossWindowDrag(pasteboard)
         let sourceState = isCrossWindow ? sourceBrowserState(for: pasteboard) : nil
 
         // If it was an external drag, remove the placeholder before calculating the final index.
         if isExternalDrag, let placeholder = placeholderTab {
             if let placeholderIndex = pinnedTabs.firstIndex(of: placeholder) {
-                if indexPath.item > placeholderIndex {
-                    finalDestinationIndex -= 1
-                }
+                finalDestinationIndex = placeholderIndex
                 pinnedTabs.removeAll { $0 == placeholder }
             }
         }
@@ -964,8 +1073,9 @@ extension PinnedTabViewController {
 
         // Handle internal reorder
         if !isCrossWindow, !isExternalDrag, let guidString = pasteboard.string(forType: .pinnedTab) {
-            guard let sourceTab = browserState?.pinnedTabs.first(where: { $0.guidInLocalDB == guidString }),
-                  let sourceIndex = browserState?.pinnedTabs.firstIndex(of: sourceTab) else {
+            guard let state = browserState,
+                  let sourceTab = state.pinnedTabs.first(where: { $0.guidInLocalDB == guidString }),
+                  let sourceIndex = state.pinnedTabs.firstIndex(of: sourceTab) else {
                 return false
             }
             
@@ -975,10 +1085,10 @@ extension PinnedTabViewController {
 
             var adjustedDestinationIndex = destinationIndex
             if sourceIndex < destinationIndex {
-                adjustedDestinationIndex += 1
+                adjustedDestinationIndex += pinnedReorderStepSize(for: sourceTab, in: state)
             }
 
-            browserState?.movePinnedTab(tab: sourceTab, to: adjustedDestinationIndex, selectAfterMove: sourceTab.isActive)
+            state.movePinnedTab(tab: sourceTab, to: adjustedDestinationIndex, selectAfterMove: sourceTab.isActive)
             return true
         }
 
@@ -1028,7 +1138,7 @@ extension PinnedTabViewController {
            let sourceIndex = targetState.pinnedTabs.firstIndex(of: targetPinned) {
             var adjustedDestinationIndex = destinationIndex
             if sourceIndex < destinationIndex {
-                adjustedDestinationIndex += 1
+                adjustedDestinationIndex += pinnedReorderStepSize(for: targetPinned, in: targetState)
             }
             targetState.movePinnedTab(tab: targetPinned, to: adjustedDestinationIndex, selectAfterMove: targetPinned.isActive)
         }
@@ -1064,7 +1174,9 @@ extension PinnedTabViewController: ReorderingCollectionViewDelegate {
         // If it was an external drag, remove the placeholder when the drag exits the view.
         if isExternalDrag, let placeholder = placeholderTab {
             pinnedTabs.removeAll { $0 == placeholder }
-            applySnapshot(animatingDifferences: true)
+            applySnapshot(animatingDifferences: true) { [weak self] in
+                self?.unhideCollectionItems()
+            }
             self.placeholderTab = nil
         }
     }
@@ -1077,7 +1189,7 @@ extension PinnedTabViewController: ReorderingCollectionViewDelegate {
         
         // Case 1: Internal Reorder
         if let guidString = pasteboard.string(forType: .pinnedTab),
-           let sourceIndex = pinnedTabs.firstIndex(where: { $0.guidInLocalDB == guidString }) {
+           pinnedTabs.contains(where: { $0.guidInLocalDB == guidString }) {
             
             if isCrossWindow {
                 isExternalDrag = true
@@ -1085,13 +1197,14 @@ extension PinnedTabViewController: ReorderingCollectionViewDelegate {
                     self.pinnedTabs.removeAll { $0 == placeholder }
                     self.placeholderTab = nil
                 }
-                let sourceIndexPath = IndexPath(item: sourceIndex, section: Section.tabs.rawValue)
-                if sourceIndexPath == indexPath { return }
-                
-                let movedTab = self.pinnedTabs.remove(at: sourceIndexPath.item)
-                let targetIndex = min(indexPath.item, self.pinnedTabs.count)
-                self.pinnedTabs.insert(movedTab, at: targetIndex)
-                applySnapshot(animatingDifferences: true)
+                if let reorderedTabs = reorderedPinnedTabsForPreview(
+                    pinnedGuid: guidString,
+                    toTabSectionItemIndex: indexPath.item,
+                    in: self.pinnedTabs
+                ) {
+                    self.pinnedTabs = reorderedTabs
+                    applySnapshot(animatingDifferences: true)
+                }
                 return
             }
             
@@ -1101,13 +1214,14 @@ extension PinnedTabViewController: ReorderingCollectionViewDelegate {
                 self.placeholderTab = nil
             }
             
-            let sourceIndexPath = IndexPath(item: sourceIndex, section: Section.tabs.rawValue)
-            if sourceIndexPath == indexPath { return }
-
-            let movedTab = self.pinnedTabs.remove(at: sourceIndexPath.item)
-            let index = min(indexPath.item, self.pinnedTabs.count)
-            self.pinnedTabs.insert(movedTab, at: index)
-            applySnapshot(animatingDifferences: true)
+            if let reorderedTabs = reorderedPinnedTabsForPreview(
+                pinnedGuid: guidString,
+                toTabSectionItemIndex: indexPath.item,
+                in: self.pinnedTabs
+            ) {
+                self.pinnedTabs = reorderedTabs
+                applySnapshot(animatingDifferences: true)
+            }
             return
         }
         
@@ -1124,18 +1238,12 @@ extension PinnedTabViewController: ReorderingCollectionViewDelegate {
                 self.placeholderTab = Tab(guid: guid, url: "", isActive: false, index: -1, title: "placeholder", webContentView: nil, customGuid: "placeholder-\(guid)")
             }
             
-            let destinationIndex = min(indexPath.item, newTabs.count)
+            let destinationIndex = rawPinnedInsertionIndex(forTabSectionItemIndex: indexPath.item, in: newTabs)
             newTabs.insert(self.placeholderTab!, at: destinationIndex)
 
             self.pinnedTabs = newTabs
-            applySnapshot(animatingDifferences: true)
-            
-            DispatchQueue.main.async {
-                if let placeholder = self.placeholderTab,
-                   let placeholderIndex = self.pinnedTabs.firstIndex(of: placeholder),
-                   let item = self.collectionView.item(at: IndexPath(item: placeholderIndex, section: Section.tabs.rawValue)) {
-                    item.view.isHidden = true
-                }
+            applySnapshot(animatingDifferences: true) { [weak self] in
+                self?.updatePlaceholderVisibility()
             }
             return
         }
@@ -1153,18 +1261,12 @@ extension PinnedTabViewController: ReorderingCollectionViewDelegate {
                 self.placeholderTab = Tab(guid: bookmarkId.hashValue, url: "", isActive: false, index: -1, title: "placeholder", webContentView: nil, customGuid: "placeholder-\(bookmarkId)")
             }
             
-            let destinationIndex = min(indexPath.item, newTabs.count)
+            let destinationIndex = rawPinnedInsertionIndex(forTabSectionItemIndex: indexPath.item, in: newTabs)
             newTabs.insert(self.placeholderTab!, at: destinationIndex)
 
             self.pinnedTabs = newTabs
-            applySnapshot(animatingDifferences: true)
-            
-            DispatchQueue.main.async {
-                if let placeholder = self.placeholderTab,
-                   let placeholderIndex = self.pinnedTabs.firstIndex(of: placeholder),
-                   let item = self.collectionView.item(at: IndexPath(item: placeholderIndex, section: Section.tabs.rawValue)) {
-                    item.view.isHidden = true
-                }
+            applySnapshot(animatingDifferences: true) { [weak self] in
+                self?.updatePlaceholderVisibility()
             }
         }
     }

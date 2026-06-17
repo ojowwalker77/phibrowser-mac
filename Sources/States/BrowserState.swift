@@ -3023,11 +3023,17 @@ class BrowserState {
 
     /// Reorder pinned  tab
     func movePinnedTab(tab: Tab, to newIndex: Int, selectAfterMove: Bool) {
-        // Split-aware: pinned splits render as a single merged cell that
-        // requires both panes to sit adjacent in `pinnedTabs`. Moving only
-        // the dragged pane leaves the partner stranded and breaks the
-        // merged render until the user manually re-adjacent-s them.
-        if let partnerGuid = tab.splitPartnerGuid, !partnerGuid.isEmpty,
+        // Split-aware: use the same resolver as pinned-split rendering so
+        // live, persisted, and half-persisted pairs all move as one unit.
+        if let (leftDB, rightDB) = pinnedSplitDBPair(forPinnedTab: tab),
+           let tabGuid = tab.guidInLocalDB {
+            let partnerGuid = tabGuid == leftDB ? rightDB : leftDB
+            guard let partner = pinnedTabs.first(where: { $0.guidInLocalDB == partnerGuid }) else {
+                return
+            }
+            movePinnedSplitPair(handle: tab, partner: partner, to: newIndex)
+            return
+        } else if let partnerGuid = tab.splitPartnerGuid, !partnerGuid.isEmpty,
            let partner = pinnedTabs.first(where: { $0.guidInLocalDB == partnerGuid }) {
             movePinnedSplitPair(handle: tab, partner: partner, to: newIndex)
             return
