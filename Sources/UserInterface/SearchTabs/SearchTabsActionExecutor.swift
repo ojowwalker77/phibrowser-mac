@@ -60,6 +60,19 @@ final class SearchTabsActionExecutor {
         }
     }
 
+    @discardableResult
+    func close(_ item: SearchTabsItem) -> Bool {
+        guard item.isClosableOpenTab,
+              let tabId = item.primary.chromiumTabId,
+              let state = browserState(for: item.primary.windowId),
+              let tab = state.tabs.first(where: { $0.guid == tabId }) else {
+            return false
+        }
+
+        tab.close()
+        return true
+    }
+
     private func openPinned(localGuid: String, preferredPaneGuid: String?, in state: BrowserState) -> Bool {
         let requestedGuid = preferredPaneGuid ?? localGuid
         let requestedTab = state.pinnedTabs.first { $0.guidInLocalDB == requestedGuid }
@@ -71,5 +84,17 @@ final class SearchTabsActionExecutor {
 
         state.openOrFocusPinnedTab(tab)
         return true
+    }
+
+    private func browserState(for windowId: Int?) -> BrowserState? {
+        guard let windowId else {
+            return browserState
+        }
+
+        if let browserState, browserState.windowId == windowId {
+            return browserState
+        }
+
+        return MainBrowserWindowControllersManager.shared.getBrowserState(for: windowId)
     }
 }

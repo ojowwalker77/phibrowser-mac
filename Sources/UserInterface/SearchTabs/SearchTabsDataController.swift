@@ -36,14 +36,13 @@ final class SearchTabsDataController {
             )
         }
 
-        let normalizedQuery = SearchTabsQueryMatcher.normalizedQuery(query)
         let nativeProvider = SearchTabsNativeProvider(browserState: state)
         return SearchTabsAggregator.aggregate(
             query: query,
             profileId: state.profileId,
             windowId: state.windowId,
             chromium: chromiumProvider.snapshot(windowId: state.windowId),
-            native: nativeProvider.snapshot(includeBookmarkRoot: normalizedQuery.isEmpty),
+            native: nativeProvider.snapshot(includeBookmarkRoot: false),
             splitRelation: { tabId in
                 Self.splitRelation(for: tabId, in: state)
             }

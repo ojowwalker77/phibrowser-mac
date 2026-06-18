@@ -4,6 +4,10 @@
 
 The data layer now returns one profile-scoped `SearchTabsSnapshot` with Chromium open tabs, recently closed tabs, native pinned tabs, bookmarks, and a bookmark root entry for empty queries. The first UI should consume that snapshot directly and keep presentation logic separate from data collection.
 
+The approved visual target is documented in
+`docs/superpowers/specs/2026-06-18-native-tab-search-visual-contract.md`. That
+visual contract supersedes earlier exploratory UI details in this document.
+
 ## Goals
 
 - Intercept `IDC_TAB_SEARCH` and show a native AppKit search panel.
@@ -12,7 +16,7 @@ The data layer now returns one profile-scoped `SearchTabsSnapshot` with Chromium
 - Do not modify OmniBox files; use them only as a local overlay style reference.
 - Provide keyboard and mouse selection for results.
 - Execute item actions through a small executor that knows which APIs own each action.
-- Show one bookmark root entry on empty query and present the live bookmark tree as a menu from that row.
+- Match the approved visual contract: empty query shows Open Tabs and Recently Closed only; non-empty query shows Open Tabs, Pinned Tabs, Bookmarks, and Recently Closed.
 
 ## Non-Goals
 
@@ -32,19 +36,22 @@ The data layer now returns one profile-scoped `SearchTabsSnapshot` with Chromium
 - Escape hides the panel.
 - Clicking outside hides the panel and forwards the click to the underlying content.
 - Clicking a result executes it.
-- Hovering or clicking the empty-query bookmark root row opens an `NSMenu` built from `BrowserState.bookmarkManager.rootFolder.children`.
+- Section chevrons collapse and expand visible result sections without changing the query.
 
 ## Result Rendering
 
-Rows render from `SearchTabsItem` only:
+Rows render from `SearchTabsItem` only and follow the visual contract:
 
 - Open Chromium tabs show title, URL, elapsed text, and split partner hint when `splitRelation` exists.
 - Native pinned and bookmark split items render as one row with both pane titles.
 - Native open pin/bookmark entries keep their native kind and show open state.
 - Recently closed rows show title, URL, and elapsed text.
-- Bookmark root rows use `displayMode = .bookmarkMenuRoot` and never flatten bookmark children into results.
+- Empty-query UI omits bookmark root rows even if the snapshot contains them.
+- Non-empty bookmark rows show title and URL/host only; folder names and folder paths are not rendered.
 
-The UI may show type badges and system symbols, but must not re-sort results.
+The UI must not re-sort results. It also must not add row action buttons, header
+result counts, section dividers, input shortcut hints, pin icons, star icons, or
+restore icons unless the visual contract changes.
 
 ## Action Execution
 

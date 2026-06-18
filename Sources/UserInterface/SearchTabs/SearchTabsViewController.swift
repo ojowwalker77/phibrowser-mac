@@ -11,7 +11,7 @@ import SnapKit
 final class SearchTabsViewController: NSViewController {
     static let panelWidth: CGFloat = 680
 
-    @Published private(set) var contentSize = NSSize(width: panelWidth, height: 56)
+    @Published private(set) var contentSize = NSSize(width: panelWidth, height: 57)
     var didRequestDismiss: (() -> Void)?
 
     private let viewModel: SearchTabsViewModel
@@ -19,27 +19,27 @@ final class SearchTabsViewController: NSViewController {
     private let bookmarkMenuPresenter: SearchTabsBookmarkMenuPresenter
     private var cancellables = Set<AnyCancellable>()
 
-    private let baseHeight: CGFloat = 56
-    private let maxVisibleResults = 8
+    private let baseHeight: CGFloat = 57
+    private let maxResultsHeight: CGFloat = 460
     private var resultsHeightConstraint: Constraint?
     private var lastBookmarkRootMenuItemID: String?
 
     private lazy var shadow: NSShadow = {
         let shadow = NSShadow()
-        shadow.shadowColor = NSColor.black.withAlphaComponent(0.24)
-        shadow.shadowOffset = NSSize(width: 0, height: -16)
-        shadow.shadowBlurRadius = 40
+        shadow.shadowColor = .omniboxShadow
+        shadow.shadowOffset = NSSize(width: 0, height: -20)
+        shadow.shadowBlurRadius = 50
         return shadow
     }()
 
     private lazy var backgroundContainer: NSView = {
         let view = NSView()
         view.wantsLayer = true
-        view.layer?.backgroundColor = NSColor.windowBackgroundColor.withAlphaComponent(0.96).cgColor
+        view.phiLayer?.setBackgroundColor(.contentOverlayBackground)
         view.layer?.cornerRadius = 14
         view.layer?.cornerCurve = .continuous
         view.layer?.borderWidth = 1
-        view.layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.45).cgColor
+        view.phiLayer?.borderColor = NSColor.black.withAlphaComponent(0.16).cgColor <> NSColor.white.withAlphaComponent(0.16).cgColor
         view.clipsToBounds = true
         return view
     }()
@@ -69,7 +69,7 @@ final class SearchTabsViewController: NSViewController {
     private lazy var separatorView: NSView = {
         let view = NSView()
         view.wantsLayer = true
-        view.layer?.backgroundColor = NSColor.separatorColor.withAlphaComponent(0.6).cgColor
+        view.phiLayer?.setBackgroundColor(.separator)
         return view
     }()
 
@@ -133,13 +133,13 @@ final class SearchTabsViewController: NSViewController {
             make.width.equalTo(Self.panelWidth)
         }
         searchIconView.snp.makeConstraints { make in
-            make.leading.equalToSuperview().offset(18)
+            make.leading.equalToSuperview().offset(16)
             make.centerY.equalToSuperview()
-            make.width.height.equalTo(17)
+            make.width.height.equalTo(16)
         }
         textField.snp.makeConstraints { make in
-            make.leading.equalTo(searchIconView.snp.trailing).offset(10)
-            make.trailing.equalToSuperview().offset(-18)
+            make.leading.equalTo(searchIconView.snp.trailing).offset(8)
+            make.trailing.equalToSuperview().offset(-12)
             make.centerY.equalTo(searchIconView)
         }
         separatorView.snp.makeConstraints { make in
@@ -155,11 +155,13 @@ final class SearchTabsViewController: NSViewController {
     }
 
     private func setupBindings() {
-        viewModel.$snapshot
+        viewModel.$sections
             .combineLatest(viewModel.$selectedIndex)
+            .combineLatest(viewModel.$inputText)
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] snapshot, selectedIndex in
-                self?.updateResults(snapshot.items, selectedIndex: selectedIndex)
+            .sink { [weak self] sectionState, query in
+                let (sections, selectedIndex) = sectionState
+                self?.updateResults(sections, selectedIndex: selectedIndex, query: query)
             }
             .store(in: &cancellables)
 
@@ -173,18 +175,26 @@ final class SearchTabsViewController: NSViewController {
             .store(in: &cancellables)
     }
 
-    private func updateResults(_ items: [SearchTabsItem], selectedIndex: Int) {
+    private func updateResults(
+        _ sections: [SearchTabsSectionSnapshot],
+        selectedIndex: Int,
+        query: String
+    ) {
         lastBookmarkRootMenuItemID = nil
-        resultsView.updateItems(items, selectedIndex: selectedIndex, dataSourceChanged: true)
+        resultsView.updateSections(
+            sections,
+            profileId: viewModel.snapshot.profileId,
+            selectedIndex: selectedIndex,
+            query: query,
+            dataSourceChanged: true
+        )
 
-        let visibleCount = min(items.count, maxVisibleResults)
-        let resultsHeight = visibleCount == 0
+        let fullResultsHeight = SearchTabsResultsView.contentHeight(for: sections)
+        let resultsHeight = fullResultsHeight == 0
             ? 0
-            : CGFloat(visibleCount) * SearchTabsResultsView.rowHeight
-                + SearchTabsResultsView.topPadding
-                + SearchTabsResultsView.bottomPadding
+            : min(fullResultsHeight, maxResultsHeight)
         resultsHeightConstraint?.update(offset: resultsHeight)
-        separatorView.isHidden = items.isEmpty
+        separatorView.isHidden = sections.isEmpty
         contentSize = NSSize(width: Self.panelWidth, height: baseHeight + resultsHeight)
     }
 
@@ -214,6 +224,26 @@ final class SearchTabsViewController: NSViewController {
 extension SearchTabsViewController: NSTextFieldDelegate {
     func controlTextDidChange(_ obj: Notification) {
         viewModel.updateInputText(textField.stringValue)
+    }
+
+    func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+        guard control === textField else {
+            return false
+        }
+
+        switch commandSelector {
+        case #selector(NSTextView.moveDown(_:)):
+            return searchTabsTextFieldDidMoveDown(textField)
+        case #selector(NSTextView.moveUp(_:)):
+            return searchTabsTextFieldDidMoveUp(textField)
+        case #selector(NSTextView.insertNewline(_:)),
+             #selector(NSTextView.insertNewlineIgnoringFieldEditor(_:)):
+            return searchTabsTextFieldDidConfirm(textField)
+        case #selector(NSResponder.cancelOperation(_:)):
+            return searchTabsTextFieldDidCancel(textField)
+        default:
+            return false
+        }
     }
 }
 
@@ -246,6 +276,19 @@ extension SearchTabsViewController: SearchTabsResultsViewDelegate {
     func searchTabsResultsView(_ resultsView: SearchTabsResultsView, didSelect item: SearchTabsItem) {
         viewModel.selectItem(at: viewModel.items.firstIndex(where: { $0.id == item.id }) ?? -1)
         execute(item)
+    }
+
+    func searchTabsResultsView(_ resultsView: SearchTabsResultsView, didRequestClose item: SearchTabsItem) {
+        guard actionExecutor.close(item) else {
+            return
+        }
+
+        viewModel.removeItem(withID: item.id)
+        focusTextField()
+    }
+
+    func searchTabsResultsView(_ resultsView: SearchTabsResultsView, didToggleSection section: SearchTabsSectionKind) {
+        viewModel.toggleSection(section)
     }
 
     func searchTabsResultsView(_ resultsView: SearchTabsResultsView, didHoverBookmarkRoot item: SearchTabsItem, anchorView: NSView) {

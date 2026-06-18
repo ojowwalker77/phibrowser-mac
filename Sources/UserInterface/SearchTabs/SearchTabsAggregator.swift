@@ -219,14 +219,14 @@ enum SearchTabsAggregator {
         switch item.kind {
         case .openedtab:
             return true
-        case .pin:
-            return true
-        case .bookmark:
-            return item.state.isOpen
-        case .bookmarkRoot:
-            return true
         case .closedtab:
             return true
+        case .pin:
+            return false
+        case .bookmark:
+            return false
+        case .bookmarkRoot:
+            return false
         }
     }
 

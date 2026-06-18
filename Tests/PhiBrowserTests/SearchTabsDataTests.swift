@@ -469,9 +469,38 @@ final class SearchTabsDataTests: XCTestCase {
         XCTAssertTrue(try XCTUnwrap(snapshot.items.last).state.isOpen)
     }
 
-    func testAggregatorEmptyQueryShowsBookmarkRootButNotClosedBookmarks() {
+    func testAggregatorEmptyQueryShowsOnlyOpenAndRecentlyClosedItems() {
+        let chromium = SearchTabsChromiumSnapshot(
+            openTabs: [
+                makeOpenTab(
+                    tabId: 42,
+                    windowId: 7,
+                    title: "Open Tab",
+                    active: true,
+                    hostWindow: true,
+                    lastActiveElapsedMs: 10
+                ),
+            ],
+            closedTabs: [
+                makeClosedTab(
+                    sessionId: 100,
+                    title: "Closed Tab",
+                    lastActiveTimeMs: 1_000,
+                    lastActiveElapsedMs: 20
+                ),
+            ]
+        )
         let native = SearchTabsNativeSnapshot(
-            pins: [],
+            pins: [
+                nativeEntry(
+                    id: "pin:open",
+                    guid: "open",
+                    kind: .pin,
+                    title: "Pinned Tab",
+                    url: "https://pin.example",
+                    isOpen: true
+                ),
+            ],
             bookmarks: [
                 nativeEntry(
                     id: "bookmark:closed",
@@ -499,11 +528,11 @@ final class SearchTabsDataTests: XCTestCase {
             query: "",
             profileId: "profile-1",
             windowId: 7,
-            chromium: SearchTabsChromiumSnapshot(openTabs: [], closedTabs: []),
+            chromium: chromium,
             native: native
         )
 
-        XCTAssertEqual(snapshot.items.map(\.kind), [.bookmarkRoot])
+        XCTAssertEqual(snapshot.items.map(\.kind), [.openedtab, .closedtab])
     }
 
     func testAggregatorSortsOpenedTabsByHostActiveThenElapsedAscending() {

@@ -32,6 +32,38 @@ enum SearchTabsMatchedField: Hashable {
     case secondaryURL
 }
 
+enum SearchTabsSectionKind: CaseIterable, Hashable {
+    case openTabs
+    case pinnedTabs
+    case bookmarks
+    case recentlyClosed
+
+    init?(item: SearchTabsItem) {
+        switch item.kind {
+        case .openedtab:
+            self = .openTabs
+        case .pin:
+            self = .pinnedTabs
+        case .bookmark:
+            self = .bookmarks
+        case .closedtab:
+            self = .recentlyClosed
+        case .bookmarkRoot:
+            return nil
+        }
+    }
+}
+
+struct SearchTabsSectionSnapshot: Equatable {
+    let kind: SearchTabsSectionKind
+    let items: [SearchTabsItem]
+    let isCollapsed: Bool
+
+    var visibleItems: [SearchTabsItem] {
+        isCollapsed ? [] : items
+    }
+}
+
 struct SearchTabsPane: Equatable {
     let title: String
     let url: String?
@@ -93,6 +125,16 @@ struct SearchTabsItem: Equatable {
     let ranking: SearchTabsRankingMetadata
     let action: SearchTabsActionTarget
     let secondaryAction: SearchTabsActionTarget?
+}
+
+extension SearchTabsItem {
+    var isClosableOpenTab: Bool {
+        kind == .openedtab
+            && !state.isPinnedInChromium
+            && !state.isSplit
+            && primary.chromiumTabId != nil
+            && primary.windowId != nil
+    }
 }
 
 struct SearchTabsSnapshot: Equatable {
