@@ -22,6 +22,8 @@ final class SearchTabsViewController: NSViewController {
     private let baseHeight: CGFloat = 57
     private let maxResultsHeight: CGFloat = 460
     private var resultsHeightConstraint: Constraint?
+    private var renderedSections: [SearchTabsSectionSnapshot]?
+    private var renderedQuery = ""
     private var lastBookmarkRootMenuItemID: String?
 
     private lazy var shadow: NSShadow = {
@@ -180,13 +182,20 @@ final class SearchTabsViewController: NSViewController {
         selectedIndex: Int,
         query: String
     ) {
-        lastBookmarkRootMenuItemID = nil
+        let dataSourceChanged = renderedSections != sections || renderedQuery != query
+        renderedSections = sections
+        renderedQuery = query
+
+        if dataSourceChanged {
+            lastBookmarkRootMenuItemID = nil
+        }
+
         resultsView.updateSections(
             sections,
             profileId: viewModel.snapshot.profileId,
             selectedIndex: selectedIndex,
             query: query,
-            dataSourceChanged: true
+            dataSourceChanged: dataSourceChanged
         )
 
         let fullResultsHeight = SearchTabsResultsView.contentHeight(for: sections)
