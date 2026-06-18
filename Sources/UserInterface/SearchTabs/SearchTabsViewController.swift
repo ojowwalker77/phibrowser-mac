@@ -7,13 +7,26 @@ import Cocoa
 import Combine
 import SnapKit
 
+enum SearchTabsPanelDisplayMode: Equatable {
+    case compact
+    case normal
+
+    var panelWidth: CGFloat {
+        switch self {
+        case .compact:
+            return 350
+        case .normal:
+            return 680
+        }
+    }
+}
+
 @MainActor
 final class SearchTabsViewController: NSViewController {
-    static let panelWidth: CGFloat = 680
-
-    @Published private(set) var contentSize = NSSize(width: panelWidth, height: 57)
+    @Published private(set) var contentSize: NSSize
     var didRequestDismiss: (() -> Void)?
 
+    private var displayMode: SearchTabsPanelDisplayMode
     private let viewModel: SearchTabsViewModel
     private let actionExecutor: SearchTabsActionExecutor
     private let bookmarkMenuPresenter: SearchTabsBookmarkMenuPresenter
@@ -21,6 +34,7 @@ final class SearchTabsViewController: NSViewController {
 
     private let baseHeight: CGFloat = 57
     private let maxResultsHeight: CGFloat = 460
+    private var inputWidthConstraint: Constraint?
     private var resultsHeightConstraint: Constraint?
     private var renderedSections: [SearchTabsSectionSnapshot]?
     private var renderedQuery = ""
@@ -81,7 +95,9 @@ final class SearchTabsViewController: NSViewController {
         return view
     }()
 
-    init(browserState: BrowserState) {
+    init(browserState: BrowserState, displayMode: SearchTabsPanelDisplayMode = .normal) {
+        self.displayMode = displayMode
+        self.contentSize = NSSize(width: displayMode.panelWidth, height: 57)
         self.viewModel = SearchTabsViewModel(dataController: SearchTabsDataController(browserState: browserState))
         self.actionExecutor = SearchTabsActionExecutor(browserState: browserState)
         self.bookmarkMenuPresenter = SearchTabsBookmarkMenuPresenter(browserState: browserState)
@@ -118,6 +134,15 @@ final class SearchTabsViewController: NSViewController {
         view.window?.makeFirstResponder(textField)
     }
 
+    func setDisplayMode(_ displayMode: SearchTabsPanelDisplayMode) {
+        guard self.displayMode != displayMode else {
+            return
+        }
+        self.displayMode = displayMode
+        inputWidthConstraint?.update(offset: displayMode.panelWidth)
+        contentSize = NSSize(width: displayMode.panelWidth, height: contentSize.height)
+    }
+
     private func setupViews() {
         view.addSubview(backgroundContainer)
         backgroundContainer.addSubview(inputContainer)
@@ -132,7 +157,7 @@ final class SearchTabsViewController: NSViewController {
         inputContainer.snp.makeConstraints { make in
             make.leading.trailing.top.equalToSuperview()
             make.height.equalTo(baseHeight)
-            make.width.equalTo(Self.panelWidth)
+            inputWidthConstraint = make.width.equalTo(displayMode.panelWidth).constraint
         }
         searchIconView.snp.makeConstraints { make in
             make.leading.equalToSuperview().offset(16)
@@ -204,7 +229,7 @@ final class SearchTabsViewController: NSViewController {
             : min(fullResultsHeight, maxResultsHeight)
         resultsHeightConstraint?.update(offset: resultsHeight)
         separatorView.isHidden = sections.isEmpty
-        contentSize = NSSize(width: Self.panelWidth, height: baseHeight + resultsHeight)
+        contentSize = NSSize(width: displayMode.panelWidth, height: baseHeight + resultsHeight)
     }
 
     private func execute(_ item: SearchTabsItem) {

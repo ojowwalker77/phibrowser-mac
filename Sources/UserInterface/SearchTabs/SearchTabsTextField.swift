@@ -24,7 +24,7 @@ final class SearchTabsTextField: NSTextField {
         font = NSFont.systemFont(ofSize: 18, weight: .regular)
         textColor = .labelColor
         placeholderString = NSLocalizedString(
-            "Search tabs",
+            "Search Tabs",
             comment: "Search Tabs - Placeholder text for the native tab search field"
         )
         lineBreakMode = .byTruncatingTail

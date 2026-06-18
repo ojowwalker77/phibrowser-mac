@@ -1146,7 +1146,7 @@
     "Search or Enter URL" : {
       "comment" : "Omnibox - Placeholder text prompting user to search or enter URL\nOmnibox suggestion - Placeholder text for search or URL entry\nSidebar address bar - Placeholder text prompting user to enter URL or search query\nWeb content address bar - Placeholder text shown when window has no tab"
     },
-    "Search tabs" : {
+    "Search Tabs" : {
       "comment" : "Search Tabs - Placeholder text for the native tab search field"
     },
     "Select Phi User Data Backup" : {

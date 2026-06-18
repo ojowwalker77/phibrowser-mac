@@ -121,6 +121,14 @@ extension MainBrowserWindowController {
     }
 
     @objc func toggleSearchTabs() {
+        toggleSearchTabs(presentation: .centered)
+    }
+
+    func toggleSearchTabs(attachedTo anchorView: NSView) {
+        toggleSearchTabs(presentation: .attached(anchorView: anchorView))
+    }
+
+    private func toggleSearchTabs(presentation: SearchTabsPresentation) {
         if searchTabsContainerViewController?.hasShown ?? false {
             searchTabsContainerViewController?.hideSearchTabs()
             return
@@ -154,7 +162,7 @@ extension MainBrowserWindowController {
             }
         }
 
-        searchTabsContainerViewController?.showSearchTabs()
+        searchTabsContainerViewController?.showSearchTabs(presentation: presentation)
     }
     
     @IBAction func toggleBookmark(_ sender: Any?) {
