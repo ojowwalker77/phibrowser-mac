@@ -223,13 +223,15 @@ final class SearchTabsViewController: NSViewController {
             dataSourceChanged: dataSourceChanged
         )
 
-        let fullResultsHeight = SearchTabsResultsView.contentHeight(for: sections)
+        let fullResultsHeight = resultsView.measuredContentHeight()
         let resultsHeight = fullResultsHeight == 0
             ? 0
             : min(fullResultsHeight, maxResultsHeight)
         resultsHeightConstraint?.update(offset: resultsHeight)
         separatorView.isHidden = sections.isEmpty
         contentSize = NSSize(width: displayMode.panelWidth, height: baseHeight + resultsHeight)
+        view.layoutSubtreeIfNeeded()
+        resultsView.normalizeScrollPositionIfNeeded()
     }
 
     private func execute(_ item: SearchTabsItem) {

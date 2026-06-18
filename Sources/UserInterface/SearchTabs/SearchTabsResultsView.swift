@@ -83,20 +83,6 @@ final class SearchTabsResultsView: NSView {
         fatalError("init(coder:) has not been implemented")
     }
 
-    static func contentHeight(for sections: [SearchTabsSectionSnapshot]) -> CGFloat {
-        guard !sections.isEmpty else {
-            return 0
-        }
-
-        let itemCount = sections.reduce(0) { partialResult, section in
-            partialResult + section.visibleItems.count
-        }
-        return topPadding
-            + bottomPadding
-            + CGFloat(sections.count) * headerHeight
-            + CGFloat(itemCount) * rowHeight
-    }
-
     func updateSections(
         _ sections: [SearchTabsSectionSnapshot],
         profileId: String,
@@ -122,6 +108,17 @@ final class SearchTabsResultsView: NSView {
         }
         return tableView.view(atColumn: 0, row: row, makeIfNecessary: false)
             ?? tableView.rowView(atRow: row, makeIfNecessary: false)
+    }
+
+    func measuredContentHeight() -> CGFloat {
+        guard !rows.isEmpty else {
+            return 0
+        }
+
+        tableView.layoutSubtreeIfNeeded()
+        scrollView.layoutSubtreeIfNeeded()
+        let tableHeight = tableView.rect(ofRow: rows.count - 1).maxY
+        return Self.topPadding + tableHeight + Self.bottomPadding
     }
 
     private func setupViews() {
@@ -167,6 +164,30 @@ final class SearchTabsResultsView: NSView {
             rowsToReload.insert(oldSelectedRow)
         }
         tableView.reloadData(forRowIndexes: rowsToReload, columnIndexes: IndexSet(integer: 0))
+    }
+
+    func normalizeScrollPositionIfNeeded() {
+        let clipView = scrollView.contentView
+        let contentHeight = measuredContentHeight()
+        let visibleHeight = bounds.height
+
+        if contentHeight <= visibleHeight {
+            clipView.scroll(to: .zero)
+            scrollView.reflectScrolledClipView(clipView)
+            return
+        }
+
+        let maxY = max(contentHeight - visibleHeight, 0)
+        let currentOrigin = clipView.bounds.origin
+        let clampedOrigin = NSPoint(
+            x: max(currentOrigin.x, 0),
+            y: min(max(currentOrigin.y, 0), maxY)
+        )
+        guard clampedOrigin != currentOrigin else {
+            return
+        }
+        clipView.scroll(to: clampedOrigin)
+        scrollView.reflectScrolledClipView(clipView)
     }
 
     @objc private func handleRowClick(_ sender: Any?) {
