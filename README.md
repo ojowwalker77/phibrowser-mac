@@ -1,39 +1,51 @@
 # Phi Browser
 
-Phi Browser is a Chromium-based AI browser for macOS, built as a native app with AppKit and SwiftUI.
+**The open-source AI browser for macOS.** Agentic, local-first, and native Swift.
 
-This repository contains the macOS client source code. To build the app locally, you will need Xcode 26 or later and a local copy of `Phi Framework.framework`.
+Phi is a Chromium-based browser built as a real native macOS app (AppKit + SwiftUI), with an AI agent that actually does things, a memory that lives in a file you can read, and AI that can run on-device. No black box. The whole macOS client is open source, right here.
 
-## Build
+> **Download** (free, macOS): [phibrowser.com](https://phibrowser.com) · If this is your kind of thing, a ⭐ helps a lot.
+
+<!-- TODO (Alpha): drop a screenshot or short demo gif here. It roughly triples how many visitors star. -->
+
+## What makes it different
+
+- **The agent does the browsing.** Give it a task and watch it click, type, and navigate, with a visible record of every action it took. Not a chat panel bolted onto a browser.
+- **Memory you can actually read.** Phi's memory lives locally as files you can open, edit, and delete. It stays on your Mac, and it never trains anyone's model.
+- **On-device AI.** Routes through Apple's on-device Foundation Models (and MLX) where it can, so the work happens on your machine, not someone else's server. Bring your own models via Ollama / LM Studio, or switch AI off entirely.
+- **Built for agents.** CLI-friendly, Playwright-compatible, MCP support. Your own tools and agents can drive it.
+- **Reusable Skills.** Teach the agent a workflow once (built on an open `SKILL.md` standard); it knows it forever, with permissions enforced at runtime rather than promised in a doc.
+- **Native, not Electron.** Real AppKit + SwiftUI. Fast, and at home on macOS.
+
+## Why open source
+
+A browser sees everything you do, so you should be able to read the code that runs it. Phi's macOS client is Apache-2.0: audit it, fork it, or just trust it because you can check. (The Chromium framework layer lives separately.)
+
+## Download
+
+Free for macOS on Apple Silicon: [phibrowser.com](https://phibrowser.com)
+
+## Build from source
 
 ### Requirements
-
 - Mac with Apple chip
 - Xcode 26+
 - A local copy of `Phi Framework.framework`
 
-### Build Steps
-
+### Steps
 1. Check out this repository.
-2. Download the latest release of `Phi Framework` from the [phibrowser/phibrowser-framework](https://github.com/phibrowser/phibrowser-framework/releases) repository.
-3. Place `Phi Framework.framework` into the root `Frameworks/` directory of this repository.
-4. Open `Phi.xcodeproj` in Xcode and wait for Swift Package Manager to resolve dependencies.
+2. Download the latest `Phi Framework` from [phibrowser/phibrowser-framework](https://github.com/phibrowser/phibrowser-framework/releases).
+3. Place `Phi Framework.framework` into the root `Frameworks/` directory.
+4. Open `Phi.xcodeproj` in Xcode and let Swift Package Manager resolve dependencies.
 5. Select the `PhiBrowser-OpenSource` scheme.
-6. Build the app in Xcode.
+6. Build.
 
 ## Contributing
 
-Contributions are welcome.
+Contributions are welcome. Found a bug, have an idea, or want to add a feature? Open an issue first. To contribute code, send a PR with a clear description of the change and the motivation behind it.
 
-If you find a bug, have an idea for improvement, or want to propose a new feature, please open an issue first. If you would like to contribute code, feel free to submit a pull request with a clear description of the change and the motivation behind it.
-
-We welcome:
-
-- bug reports
-- feature requests
-- documentation improvements
-- pull requests
+We welcome bug reports, feature requests, documentation improvements, and pull requests.
 
 ## License
 
-Phi Browser is licensed under the Apache License 2.0. See [LICENSE](LICENSE) for details.
+Apache License 2.0. See [LICENSE](LICENSE).
