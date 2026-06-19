@@ -2,7 +2,7 @@
 
 **The open-source AI browser for macOS.** Agentic, local-first, and native Swift.
 
-Phi is a Chromium-based browser built as a real native macOS app (AppKit + SwiftUI), with an AI agent that actually does things, a memory that lives in a file you can read, and AI that can run on-device. No black box. The whole macOS client is open source, right here.
+Phi is a Chromium-based browser built as a real native macOS app (AppKit + SwiftUI), with an AI agent that actually does things, a memory that lives in a file you can read, and AI that can run on-device. It's built for something new: a browser a person and an AI agent can use *together*, in the same window and the same session, each a first-class user. No black box. The whole macOS client is open source, right here.
 
 > **Download** (free, macOS): [phibrowser.com](https://phibrowser.com) · If this is your kind of thing, a ⭐ helps a lot.
 
@@ -10,10 +10,10 @@ Phi is a Chromium-based browser built as a real native macOS app (AppKit + Swift
 
 ## What makes it different
 
+- **Humans and agents, in the same browser.** Most tools make you choose: a browser for people, or a headless one for bots. Phi is both at once. A person and an AI agent can work in the same window, the same session, the same tabs, at the same time, each a first-class user instead of the agent being boxed off in a sandbox. CLI-friendly, Playwright-compatible, and MCP support mean your own tools and agents can drive it right alongside you.
 - **The agent does the browsing.** Give it a task and watch it click, type, and navigate, with a visible record of every action it took. Not a chat panel bolted onto a browser.
 - **Memory you can actually read.** Phi's memory lives locally as files you can open, edit, and delete. It stays on your Mac, and it never trains anyone's model.
 - **On-device AI.** Routes through Apple's on-device Foundation Models (and MLX) where it can, so the work happens on your machine, not someone else's server. Bring your own models via Ollama / LM Studio, or switch AI off entirely.
-- **Built for agents.** CLI-friendly, Playwright-compatible, MCP support. Your own tools and agents can drive it.
 - **Reusable Skills.** Teach the agent a workflow once (built on an open `SKILL.md` standard); it knows it forever, with permissions enforced at runtime rather than promised in a doc.
 - **Native, not Electron.** Real AppKit + SwiftUI. Fast, and at home on macOS.
 
