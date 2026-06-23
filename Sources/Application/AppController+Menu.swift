@@ -349,21 +349,25 @@ extension AppController {
         MainBrowserWindowControllersManager.shared.activeWindowController?.browserState.toggleAIChat()
     }
 
-    /// Starts a new AI conversation in the focused window's sidebar.
+    /// Starts a new AI conversation in the focused tab's sidebar.
     ///
     /// The actual "new conversation" logic lives inside the Sidecar extension
     /// (React), so we can't run it natively. Instead we broadcast a message the
     /// extension listens for. Validation (`validateUserInterfaceItem`) already
     /// guarantees focus is inside the AI sidebar when this fires, so the sidebar
-    /// is open and visible — no need to open it here. `windowId` lets only the
-    /// focused window's Sidecar respond to the broadcast.
+    /// is open and visible — no need to open it here.
+    ///
+    /// Each browser tab has its own AI sidebar WebContents (one Sidecar instance
+    /// per tab), and they all share the same `windowId`. So we carry the focused
+    /// tab's `tabId` (its Chromium `guid`, the same value embedded as `?tabId=`
+    /// when the sidebar is created) to let exactly that tab's Sidecar respond.
     @MainActor
     @objc func newConversation(_ sender: Any?) {
-        guard let windowController = MainBrowserWindowControllersManager.shared.activeWindowController else {
+        guard let windowController = MainBrowserWindowControllersManager.shared.activeWindowController,
+              let tabId = windowController.browserState.focusingTab?.guid else {
             return
         }
-        let windowId = windowController.browserState.focusingTab?.windowId ?? 0
-        let payload = ["windowId": windowId]
+        let payload: [String: Any] = ["tabId": tabId]
         guard let data = try? JSONSerialization.data(withJSONObject: payload),
               let json = String(data: data, encoding: .utf8) else {
             return
