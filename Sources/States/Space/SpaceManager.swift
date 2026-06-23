@@ -38,16 +38,6 @@ final class SpaceManager: ObservableObject {
     /// pending spawn intent, and destroyed when its last controller closes.
     private(set) var slots: [SpaceWindowSlot] = []
 
-    /// Set once the "last slot closed" path has asked the app to quit. The
-    /// window-driven cascade closes siblings via `NSWindow.close()`, which
-    /// fires `windowWillClose` synchronously and re-enters `unregisterWindow`
-    /// on the same stack; the recursive leaf can empty the slot map and reach
-    /// the terminate branch before the outer frame's own `isEmpty` check runs
-    /// it again. `NSApp.terminate(nil)` is not idempotent (it re-enters
-    /// `applicationShouldTerminate`), so this flag makes the request fire at
-    /// most once regardless of re-entrancy ordering.
-    private var didRequestTerminate = false
-
     /// The slot whose window was most recently key. Used as the default
     /// destination for Chromium-initiated windows (Cmd+N from the menu bar)
     /// and for any caller that historically asked the singleton "what's
@@ -205,16 +195,6 @@ final class SpaceManager: ObservableObject {
         if keySlot === slot {
             keySlot = slots.last
         }
-    }
-
-    /// Asks the app to quit because the last slot just closed, exactly once.
-    /// See `didRequestTerminate` for why re-entrant cascades can otherwise
-    /// reach `NSApp.terminate(nil)` more than once.
-    func requestTerminateForLastSlotClose() {
-        guard !didRequestTerminate else { return }
-        didRequestTerminate = true
-        AppLogInfo("[SpaceManager] last slot removed; calling NSApp.terminate(nil)")
-        NSApp.terminate(nil)
     }
 
     /// Walks every slot looking for one that recorded a pending spawn
@@ -2541,8 +2521,9 @@ final class SpaceWindowSlot: ObservableObject {
     ///   Space is also empty): iterate every sibling Space and call
     ///   `NSWindow.close()` directly so the entire user-perceived
     ///   window goes away as a unit. If this leaves SpaceManager with
-    ///   no slots at all, also `NSApp.terminate(nil)` — the user
-    ///   asked for "close all spaces and exit".
+    ///   no slots at all, the slot is simply dropped and the app keeps
+    ///   running with no windows (closing a window never quits the app;
+    ///   only Cmd+Q / the Quit menu item terminate).
     ///
     /// `NSWindow.close()` (not `performClose:`) is used for the cascade
     /// because the user has already decided to close the window; a
@@ -2595,10 +2576,15 @@ final class SpaceWindowSlot: ObservableObject {
             }
         }
         if windowsBySpaceId.isEmpty {
+            // The slot's last window is gone, so drop the slot from the
+            // registry — but do NOT terminate the app when this empties the
+            // slot map. Closing the last window (red X, Cmd+Shift+W, or
+            // Cmd+W on the last tab) leaves the app running with no windows,
+            // the standard macOS behavior (`applicationShouldTerminate-
+            // AfterLastWindowClosed` is false). A dock-click reopen or Cmd+N
+            // rebuilds a window+slot on the persisted active Space. Cmd+Q /
+            // the Quit menu item remain the explicit way to fully quit.
             manager?.removeSlot(self)
-            if let manager, manager.slots.isEmpty {
-                manager.requestTerminateForLastSlotClose()
-            }
         }
     }
 
