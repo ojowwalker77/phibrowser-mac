@@ -87,18 +87,21 @@ extension BrowserState {
     /// bookmark and return true. Otherwise return false so the caller can fall
     /// back to a single-URL bookmark path.
     ///
-    /// The live split is bound to the new bookmark via `splitBookmarkBindings`
-    /// — mirroring the single-tab `moveNormalTab(tabId:toBookmark:index:)`
-    /// behavior where the dragged tab becomes the opened representation of
-    /// the new bookmark cell. The two panes stay alive (a split bookmark
-    /// can't be bound to a single live tab via `guidInLocalDB`), but the
-    /// binding hides them from the normal tab list via
-    /// `splitBookmarkBoundTabIds` in `updateNormalTabs`.
+    /// `bindLiveSplit` selects between two save semantics:
+    /// - `true` (drag-to-bookmark): the live split is bound to the new bookmark
+    ///   via `splitBookmarkBindings`, hiding the live panes from the normal tab
+    ///   list so the bookmark cell becomes the split's opened representation —
+    ///   a move (mirrors single-tab drag through `moveNormalTab`).
+    /// - `false` (menu "Add Split to Bookmark/Folder" and Cmd+D): the bookmark
+    ///   is an independent *copy* and the on-screen split stays open and
+    ///   unbound, mirroring the single-tab menu/Cmd+D bookmark path which also
+    ///   leaves the live tab in place.
     @discardableResult
     func addSplitBookmarkFromTab(_ tab: Tab,
                                  toFolder parent: Bookmark? = nil,
                                  toFolderGuid: String? = nil,
-                                 targetIndex: Int? = nil) -> Bool {
+                                 targetIndex: Int? = nil,
+                                 bindLiveSplit: Bool = true) -> Bool {
         // Pinned-split cells render synthetic-`guid` records; their `guid`
         // doesn't match the live SplitGroup's tab ids. Fall back to a
         // `guidInLocalDB` lookup so the context-menu actions can pass the
@@ -141,12 +144,13 @@ extension BrowserState {
                 secondaryUrl: URLProcessor.processUserInput(secondaryURL),
                 secondaryTitle: secondaryDisplayTitle
             )
-            // For pinned splits, "Add Split to Bookmark" should only persist the
-            // bookmark — the live pinned split must stay pinned and unbound so it
-            // doesn't get re-rendered as the bookmark's opened representation.
-            // The drag-from-pinned-split path (`savePinnedSplitAsBookmark`)
-            // intentionally unpins and binds; the menu click does not.
-            if !group.isPinned {
+            // Drag binds the live split so it becomes the bookmark's opened
+            // representation (a move); menu/Cmd+D leaves the split open as an
+            // independent copy. Pinned splits never bind from this path — the
+            // live pinned split must stay pinned and unbound (the
+            // drag-from-pinned-split path `savePinnedSplitAsBookmark` handles
+            // the unpin+bind case).
+            if bindLiveSplit, !group.isPinned {
                 splitBookmarkBindings[newBookmarkGuid] = group.id
             }
             updateNormalTabs()

@@ -407,7 +407,7 @@ extension Tab: ContextMenuRepresentable {
               let state = MainBrowserWindowControllersManager.shared.activeWindowController?.browserState else {
             return
         }
-        state.addSplitBookmarkFromTab(self, toFolder: folder)
+        state.addSplitBookmarkFromTab(self, toFolder: folder, bindLiveSplit: false)
     }
 
     @MainActor
@@ -431,7 +431,7 @@ extension Tab: ContextMenuRepresentable {
                                              profileId: state.profileId,
                                              parentId: nil,
                                              guid: folderGuid)
-            state.addSplitBookmarkFromTab(self, toFolderGuid: folderGuid)
+            state.addSplitBookmarkFromTab(self, toFolderGuid: folderGuid, bindLiveSplit: false)
         }
     }
 
@@ -837,7 +837,7 @@ extension Tab: ContextMenuRepresentable {
         // The menu item is only attached when this tab is in a split, so the
         // helper should always succeed here; the bool result is ignored.
         guard let state = MainBrowserWindowControllersManager.shared.activeWindowController?.browserState else { return }
-        state.addSplitBookmarkFromTab(self)
+        state.addSplitBookmarkFromTab(self, bindLiveSplit: false)
     }
 
     @MainActor

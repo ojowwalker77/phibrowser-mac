@@ -185,7 +185,7 @@ extension MainBrowserWindowController {
            let primaryURL = primaryTab.url, !primaryURL.isEmpty {
             if let existing = state.bookmarkManager.findSplitBookmark(byPrimaryURL: primaryURL) {
                 presentBookmarkEditor(for: existing)
-            } else if state.addSplitBookmarkFromTab(tab) {
+            } else if state.addSplitBookmarkFromTab(tab, bindLiveSplit: false) {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
                     if let newBookmark = self?.browserState.bookmarkManager.findSplitBookmark(byPrimaryURL: primaryURL) {
                         self?.presentBookmarkEditor(for: newBookmark)
