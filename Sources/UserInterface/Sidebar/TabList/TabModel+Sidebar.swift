@@ -306,6 +306,12 @@ extension Tab: ContextMenuRepresentable {
         // If the block was empty (pinned tab), the separator we appended
         // above already serves as the bookmark→pin/close divider.
 
+        let countBeforeMoveToSpace = items.count
+        appendMoveToSpaceMenuItems(into: &items, isSplitCell: isSplitCell)
+        if items.count > countBeforeMoveToSpace {
+            items.append(.separator())
+        }
+
         if isPinned {
             let editItem = NSMenuItem(title: NSLocalizedString("Edit...", comment: "Pinned tab context menu - Edit pinned tab menu item"), action: #selector(editPinnedTab), keyEquivalent: "")
             editItem.target = self
@@ -649,6 +655,55 @@ extension Tab: ContextMenuRepresentable {
             removeItem.target = self
             items.append(removeItem)
         }
+    }
+
+    /// Appends a "Move to Space ▶" submenu listing every Space except the one
+    /// this tab already lives in. Selecting a Space hands the tab to
+    /// `SpaceManager.moveTab` — a true cross-window move when the target shares
+    /// this tab's profile, or a URL re-open + origin-close across profiles.
+    ///
+    /// Restricted to plain normal tabs: pinned, split and bookmark-backed tabs
+    /// carry per-Space persistence bindings (`guidInLocalDB` / the custom-value
+    /// throttle mirror) that a move would strand, and Incognito windows have no
+    /// Spaces at all. The submenu is also suppressed when the Spaces feature is
+    /// off or no other Space exists.
+    @MainActor
+    private func appendMoveToSpaceMenuItems(into items: inout [NSMenuItem], isSplitCell: Bool) {
+        guard !isPinned, !isSplitCell,
+              PhiPreferences.GeneralSettings.spacesFeatureEnabled.loadValue() else { return }
+        let sourceState = MainBrowserWindowControllersManager.shared.getBrowserState(for: windowId)
+        guard let sourceState, !sourceState.isIncognito,
+              !isBookmarkBackedTab(state: sourceState) else { return }
+
+        let targets = SpaceManager.shared.spaces.filter { $0.spaceId != sourceState.spaceId }
+        guard !targets.isEmpty else { return }
+
+        let parent = NSMenuItem(
+            title: NSLocalizedString(
+                "Move to Space",
+                comment: "Tab context menu - Submenu to move this tab to another Space"),
+            action: nil,
+            keyEquivalent: "")
+        let submenu = NSMenu()
+        for space in targets {
+            let entry = NSMenuItem(title: space.name,
+                                   action: #selector(moveTabToSpace(_:)),
+                                   keyEquivalent: "")
+            entry.target = self
+            if let icon = NSImage(systemSymbolName: space.iconName, accessibilityDescription: nil) {
+                entry.image = icon
+            }
+            entry.representedObject = space.spaceId
+            submenu.addItem(entry)
+        }
+        parent.submenu = submenu
+        items.append(parent)
+    }
+
+    @MainActor
+    @objc private func moveTabToSpace(_ sender: NSMenuItem) {
+        guard let targetSpaceId = sender.representedObject as? String else { return }
+        SpaceManager.shared.moveTab(self, toSpaceId: targetSpaceId)
     }
 
     /// True iff this tab is a bookmark-backed tab (its `guidInLocalDB`

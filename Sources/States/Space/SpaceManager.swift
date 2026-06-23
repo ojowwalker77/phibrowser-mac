@@ -481,6 +481,93 @@ final class SpaceManager: ObservableObject {
         keySlot?.activate(spaceId: spaceId)
     }
 
+    /// Moves `tab` out of its current Space and into the Space identified by
+    /// `targetSpaceId`, then surfaces that Space with the tab focused.
+    ///
+    /// Two paths, chosen by profile:
+    ///  - **Same profile** — a true move. The target Space's window is
+    ///    spawned/surfaced in the tab's own slot, then Chromium runs an atomic
+    ///    cross-window detach + insert (`moveSelfToWindow:atIndex:`), preserving
+    ///    the live WebContents, its history and tab identity. Chromium activates
+    ///    the inserted tab in the target, satisfying the "focus the moved tab"
+    ///    contract for free — exactly as the cross-window drag path relies on.
+    ///  - **Different profile** — a live WebContents cannot cross a profile
+    ///    (BrowserContext) boundary, so the tab's URL is opened as a fresh,
+    ///    focused tab in the target Space and the origin tab is closed.
+    ///
+    /// Either path needs the target window to exist before the tab can land in
+    /// it, so the work runs inside `activate`'s `onSwapSettled` — by then the
+    /// target controller is registered and on screen, whether it was an existing
+    /// window (swap) or freshly spawned.
+    ///
+    /// Callers (the tab context menu) only offer this for plain normal tabs;
+    /// pinned / split / bookmark-backed tabs are filtered out there because
+    /// their per-Space persistence bindings would be stranded by a move.
+    func moveTab(_ tab: Tab, toSpaceId targetSpaceId: String) {
+        guard let sourceState = MainBrowserWindowControllersManager.shared
+                .getBrowserState(for: tab.windowId) else {
+            AppLogWarn("[SpaceManager] moveTab: no BrowserState for windowId \(tab.windowId)")
+            return
+        }
+        // Already in the target Space — nothing to do.
+        guard targetSpaceId != sourceState.spaceId else { return }
+        guard let targetSpace = spaces.first(where: { $0.spaceId == targetSpaceId }) else {
+            AppLogWarn("[SpaceManager] moveTab: unknown target space \(targetSpaceId)")
+            return
+        }
+        guard let slot = slot(forWindowId: tab.windowId) else {
+            AppLogWarn("[SpaceManager] moveTab: no slot owns windowId \(tab.windowId)")
+            return
+        }
+
+        // A live WebContents can only be detached+inserted within one profile.
+        // Incognito windows expose no Spaces, so "non-incognito source with a
+        // matching profileId" is the complete same-profile condition.
+        let sameProfile = !sourceState.isIncognito
+            && targetSpace.profileId == sourceState.profileId
+        let tabGuid = tab.guid
+        let url = tab.url
+
+        // Cross-profile recreation needs a URL to copy; bail if there is none.
+        if !sameProfile, (url ?? "").isEmpty {
+            AppLogWarn("[SpaceManager] moveTab: cross-profile move with empty URL — ignoring")
+            return
+        }
+
+        // `slot` is weak to avoid a retain cycle (the slot owns the swap
+        // machinery that holds this closure); `tab`/`sourceState` are captured
+        // strongly so they outlive the swap animation / async spawn.
+        slot.activate(spaceId: targetSpaceId) { [weak slot] in
+            // `onSwapSettled` always fires on the main thread (swap-animation
+            // completion or the spawn path's `DispatchQueue.main.async`), so we
+            // can synchronously assume main-actor isolation for the tab moves —
+            // `closeTab` and friends are main-actor isolated.
+            MainActor.assumeIsolated {
+                guard let slot,
+                      let targetState = slot.windowController(for: targetSpaceId)?.browserState else {
+                    AppLogWarn("[SpaceManager] moveTab: target window unavailable after activate")
+                    return
+                }
+                if sameProfile {
+                    guard let wrapper = tab.webContentWrapper else {
+                        AppLogWarn("[SpaceManager] moveTab: source tab lost its web contents")
+                        return
+                    }
+                    // Append to the end of the target's normal tabs; the scheduled
+                    // insertion lands the arriving tab there, mirroring the
+                    // cross-window drag path in `TabStrip.moveTabToWindow`.
+                    let normalIndex = targetState.normalTabs.count
+                    targetState.scheduleNormalTabInsertion(tabGuid: tabGuid, at: normalIndex)
+                    wrapper.moveSplit(toWindow: targetState.windowId.int64Value,
+                                      at: targetState.tabs.count)
+                } else {
+                    targetState.createTab(url, focusAfterCreate: true)
+                    sourceState.closeTab(tabGuid)
+                }
+            }
+        }
+    }
+
     func renameSpace(spaceId: String, to name: String) {
         boundAccount?.localStorage.updateSpace(spaceId: spaceId, name: name)
     }
