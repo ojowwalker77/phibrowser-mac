@@ -1334,6 +1334,24 @@ final class SpaceWindowSlot: ObservableObject {
     /// has ever had a positioned window.
     private var lastKnownFrame: NSRect?
 
+    /// Post-swap frame pin. When a switch/spawn surfaces a window, Chromium
+    /// asynchronously re-applies that window's stale *creation* bounds a few
+    /// hundred ms later, clobbering the position the swap set — the user-visible
+    /// "jump back to where the window was before I moved it". The user's drag
+    /// updates the live NSWindow frame (and our `lastKnownFrame`) but never
+    /// reaches whatever stored bounds Chromium re-applies on re-show, so a
+    /// one-shot re-assert at surface time is simply too early to win.
+    ///
+    /// While armed, the frame observer holds the surfaced window at this frame:
+    /// a programmatic reposition (Chromium's stale re-apply — no mouse button
+    /// held) is reverted and the pin then releases, having served its purpose;
+    /// a user drag (mouse held) instead moves the pin *with* the user and keeps
+    /// it armed, so a re-apply that lands mid/post-drag still snaps back to the
+    /// user's chosen spot. This is event-driven rather than time-bounded: it
+    /// waits for the actual re-apply however late it lands, and never fights a
+    /// deliberate drag. Nil when disarmed.
+    private var pinnedFrame: NSRect?
+
     /// True for the duration of a `performHorizontalWindowSlide`. Read by
     /// the `observeFrameChanges` propagation closure to early-return — the
     /// previous window's animated `didMove` would otherwise overwrite the
@@ -1454,6 +1472,11 @@ final class SpaceWindowSlot: ObservableObject {
                 // already torn down.
                 if let inheritedFrame, let targetWindow = target.window {
                     targetWindow.setFrame(inheritedFrame, display: false)
+                    // Hold this position against Chromium's late re-apply of the
+                    // window's stale creation bounds after it surfaces. A one-shot
+                    // re-assert is too early; the pin reverts that re-apply
+                    // whenever it lands. See `pinnedFrame`.
+                    pinnedFrame = inheritedFrame
                 }
                 // Align the target's sidebar shape to the previously visible
                 // Space *before* it surfaces so the user reads a single
@@ -2817,6 +2840,22 @@ final class SpaceWindowSlot: ObservableObject {
                   let visible = self.visibleController,
                   visible.window === window else { return }
             let frame = window.frame
+            // Post-swap pin: hold the just-surfaced window where the switch put
+            // it until Chromium's late re-apply of the window's stale creation
+            // bounds has been countered. A reposition with no mouse button held
+            // is that programmatic re-apply — revert it and release the pin. A
+            // reposition the user is driving (mouse held) moves the pin with
+            // them and keeps it armed. See `pinnedFrame`.
+            if let pinned = self.pinnedFrame {
+                if NSEvent.pressedMouseButtons == 0 {
+                    if !frame.equalTo(pinned) {
+                        window.setFrame(pinned, display: false)
+                        self.pinnedFrame = nil
+                    }
+                    return
+                }
+                self.pinnedFrame = frame
+            }
             // The visible window is the slot's authoritative position now;
             // record it so a later spawn/switch inherits the user's drag even
             // if the source window is gone by then.
