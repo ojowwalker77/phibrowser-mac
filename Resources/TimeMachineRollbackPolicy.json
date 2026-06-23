@@ -1,5 +1,5 @@
 {
-  "backupTriggerBuild": 611,
+  "backupTriggerBuild": 614,
   "rollbackVersion": "Canary",
   "rollbackBuild": 610,
   "rollbackPackageURL": "https://ota.phibrowser.com/mac-nightly/releases/Phi_Nightly_610.zip",
