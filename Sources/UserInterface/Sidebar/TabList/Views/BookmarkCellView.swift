@@ -609,11 +609,12 @@ private struct SidebarBookmarkCellContentView: View {
     }
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(alignment: .center, spacing: 8) {
             BookmarkFaviconView(
                 image: state.primaryFaviconImage,
                 pageURL: state.primaryPageURL,
                 revision: state.primaryFaviconRevision,
+                isFolder: state.isFolder,
                 liveTabViewModel: state.primaryTabIsLive ? primaryTabViewModel : nil
             )
 
@@ -628,6 +629,7 @@ private struct SidebarBookmarkCellContentView: View {
                     image: state.secondaryFaviconImage,
                     pageURL: state.secondaryPageURL,
                     revision: state.secondaryFaviconRevision,
+                    isFolder: false,
                     liveTabViewModel: state.secondaryTabIsLive ? secondaryTabViewModel : nil
                 )
 
@@ -646,6 +648,7 @@ private struct SidebarBookmarkCellContentView: View {
             .opacity(state.isEditing ? 0 : 1)
             .themedForeground(textColor)
             .fontWeight(state.isFolder ? .medium : .regular)
+            .frame(height: 16, alignment: .center)
 
             if showCloseButton {
                 UnifiedTabCloseButton(action: onClose)
@@ -676,23 +679,41 @@ private struct BookmarkFaviconView: View {
     let image: NSImage?
     let pageURL: String?
     let revision: Int
+    let isFolder: Bool
     let liveTabViewModel: TabViewModel?
+
+    private static let slotSize: CGFloat = 16
+    private static let faviconSize: CGFloat = 14
+    private static let faviconCornerRadius: CGFloat = 3
 
     var body: some View {
         Group {
             if let liveTabViewModel {
                 UnifiedTabFaviconView(viewModel: liveTabViewModel)
             } else if let image {
-                Image(nsImage: image)
-                    .resizable()
-                    .scaledToFit()
-                    .clipShape(RoundedRectangle(cornerRadius: 3, style: .continuous))
+                faviconImage(image)
             } else {
-                Image.favicon(for: pageURL, configuration: .init(cornerRadius: 3))
+                Image.favicon(for: pageURL, configuration: .init(cornerRadius: Self.faviconCornerRadius))
                     .id(revision)
+                    .frame(width: Self.faviconSize, height: Self.faviconSize)
             }
         }
-        .frame(width: 16, height: 16)
+        .frame(width: Self.slotSize, height: Self.slotSize)
+    }
+
+    @ViewBuilder
+    private func faviconImage(_ image: NSImage) -> some View {
+        if isFolder {
+            Image(nsImage: image)
+                .resizable()
+                .scaledToFit()
+        } else {
+            Image(nsImage: image)
+                .resizable()
+                .scaledToFit()
+                .frame(width: Self.faviconSize, height: Self.faviconSize)
+                .clipShape(RoundedRectangle(cornerRadius: Self.faviconCornerRadius, style: .continuous))
+        }
     }
 }
 
