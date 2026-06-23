@@ -921,6 +921,9 @@
     "Move to New Group" : {
       "comment" : "Tab context menu - Move this tab out of its current group into a newly created group"
     },
+    "Move to Space" : {
+      "comment" : "Tab context menu - Submenu to move this tab to another Space"
+    },
     "Mute" : {
       "comment" : "Notification menu option - Disable auto popup for notification cards\nTab mute button tooltip - mute"
     },
