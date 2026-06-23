@@ -2869,6 +2869,23 @@ final class SpaceWindowSlot: ObservableObject {
             // routing (Chromium doesn't close it), so the per-style snapshot
             // paths produce real pixels.
             if isExternalSwitch, let previous, let previousSpaceId {
+                // Chromium surfaced the target window itself for the URL-rule
+                // route, so the clicked path's swap-time frame pin never ran —
+                // yet Chromium still re-applies the target's stale creation
+                // bounds a few hundred ms after it surfaces, the same late
+                // clobber `activate` defends against. Without the pin that
+                // re-apply lands as a visible jump and, worse, the frame
+                // observer records the jumped-back bounds as `lastKnownFrame`
+                // and propagates them to every sibling. Hold the target at the
+                // leaving window's frame (still alive here, so authoritative)
+                // and arm the pin so the re-apply is reverted. Mirrors
+                // `activate`'s swap path; safe with both animation styles
+                // below. See `pinnedFrame`.
+                if let inheritedFrame = resolveInheritedFrame(from: previous),
+                   let targetWindow = controller.window {
+                    targetWindow.setFrame(inheritedFrame, display: false)
+                    pinnedFrame = inheritedFrame
+                }
                 let direction = swapDirection(
                     previousSpaceId: previousSpaceId,
                     targetSpaceId: spaceId
