@@ -279,9 +279,9 @@ final class SearchTabsResultCellView: NSTableCellView {
 
     private static func title(for item: SearchTabsItem) -> String {
         if item.displayMode == .split, let secondary = item.secondary {
-            return "\(item.primary.title) / \(secondary.title)"
+            return "\(displayTitle(for: item.primary)) / \(displayTitle(for: secondary))"
         }
-        return item.primary.title
+        return displayTitle(for: item.primary)
     }
 
     private static func detail(for item: SearchTabsItem) -> String {
@@ -293,12 +293,12 @@ final class SearchTabsResultCellView: NSTableCellView {
         }
 
         if item.displayMode == .split, let secondary = item.secondary {
-            return [hostText(for: item.primary.url), hostText(for: secondary.url)]
+            return [displayURLText(for: item.primary.url), displayURLText(for: secondary.url)]
                 .filter { !$0.isEmpty }
                 .joined(separator: "  •  ")
         }
 
-        return hostText(for: item.primary.url)
+        return displayURLText(for: item.primary.url)
     }
 
     private static func detailText(for item: SearchTabsItem) -> String {
@@ -312,6 +312,23 @@ final class SearchTabsResultCellView: NSTableCellView {
             return NSLocalizedString("Active", comment: "Search Tabs - Trailing label for the active tab result")
         }
         return item.state.lastActiveElapsedText ?? ""
+    }
+
+    private static func displayTitle(for pane: SearchTabsPane) -> String {
+        guard let rawURL = pane.url, rawURL.hasPrefix("chrome://") else {
+            return pane.title
+        }
+        return URLProcessor.phiBrandEnsuredUrlString(pane.title)
+    }
+
+    private static func displayURLText(for rawURL: String?) -> String {
+        guard let rawURL, !rawURL.isEmpty else {
+            return ""
+        }
+        guard rawURL.hasPrefix("chrome://") else {
+            return hostText(for: rawURL)
+        }
+        return URLProcessor.phiBrandEnsuredUrlString(rawURL)
     }
 
     private static func hostText(for rawURL: String?) -> String {
