@@ -275,9 +275,14 @@ class BookmarkManager: ObservableObject {
                 .receive(on: DispatchQueue.main)
                 .sink { [weak self] bookmarkModels in
                     guard let self else { return }
-                    self.saveExpandedState()
-                    
                     let bookmarks = self.mappedModels(from: bookmarkModels)
+                    if self.hasSameSidebarTree(as: bookmarks) {
+                        self.applyNonLayoutUpdates(from: bookmarks)
+                        self.browserState?.syncAllBookmarksOpenedState()
+                        return
+                    }
+
+                    self.saveExpandedState()
                     self.rootFolder = Bookmark(title: "Bookmarks", children: bookmarks)
                     self.rebuildIndex()
                     self.browserState?.syncAllBookmarksOpenedState()
@@ -311,6 +316,42 @@ class BookmarkManager: ObservableObject {
             pendingEditGuid = nil
             NotificationCenter.default.post(name: .bookmarkStartEditing, object: bookmark)
         }
+    }
+
+    private func hasSameSidebarTree(as bookmarks: [Bookmark]) -> Bool {
+        bookmarkTreesMatch(rootFolder.children, bookmarks)
+    }
+
+    private func bookmarkTreesMatch(_ lhs: [Bookmark], _ rhs: [Bookmark]) -> Bool {
+        guard lhs.count == rhs.count else { return false }
+
+        for (left, right) in zip(lhs, rhs) {
+            guard left.guid == right.guid,
+                  left.title == right.title,
+                  left.url == right.url,
+                  left.secondaryUrl == right.secondaryUrl,
+                  left.secondaryTitle == right.secondaryTitle,
+                  left.profileId == right.profileId,
+                  left.cachedFaviconData == right.cachedFaviconData,
+                  left.isFolder == right.isFolder,
+                  bookmarkTreesMatch(left.children, right.children) else {
+                return false
+            }
+        }
+
+        return true
+    }
+
+    private func applyNonLayoutUpdates(from bookmarks: [Bookmark]) {
+        func traverse(_ bookmark: Bookmark) {
+            if let existing = bookmarkIndex[bookmark.guid],
+               existing.lastSeen != bookmark.lastSeen {
+                existing.lastSeen = bookmark.lastSeen
+            }
+            bookmark.children.forEach(traverse)
+        }
+
+        bookmarks.forEach(traverse)
     }
     
     func updateBookmark(guid: String,
