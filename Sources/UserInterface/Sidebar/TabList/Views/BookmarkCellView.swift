@@ -330,6 +330,7 @@ class BookmarkCellView: SidebarCellView {
             .sink { [weak self, weak bookmark] _ in
                 guard let self, let bookmark else { return }
                 self.refreshLiveTabs(for: bookmark)
+                self.updatePrimaryFavicon(bookmark: bookmark, pageUrl: bookmark.url)
             }
             .store(in: &cancellables)
 
@@ -423,6 +424,11 @@ class BookmarkCellView: SidebarCellView {
             return
         }
 
+        guard bookmark.isOpened else {
+            viewState.primaryFaviconImage = storedPrimaryFaviconImage(bookmark: bookmark, pageUrl: pageUrl)
+            return
+        }
+
         if let liveFaviconData = bookmark.liveFaviconData,
            let image = NSImage(data: liveFaviconData) {
             viewState.primaryFaviconImage = image
@@ -443,6 +449,21 @@ class BookmarkCellView: SidebarCellView {
                 }
             }
         }
+    }
+
+    private func storedPrimaryFaviconImage(bookmark: Bookmark, pageUrl: String?) -> NSImage {
+        if let cachedFaviconData = bookmark.cachedFaviconData,
+           let image = NSImage(data: cachedFaviconData) {
+            return image
+        }
+
+        if let pageUrl,
+           let url = URL(string: pageUrl),
+           FaviconConfiguration.shouldUseDefaultFavicon(for: url) {
+            return .phiDefaultFavicon
+        }
+
+        return FaviconConfiguration.default.placeholder ?? NSImage()
     }
 
     private func updateFolderIcon(bookmark: Bookmark) {

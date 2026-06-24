@@ -198,7 +198,9 @@ extension MainBrowserWindowController {
         if let existing = state.bookmarkManager.findBookmark(byURL: url) {
             presentBookmarkEditor(for: existing)
         } else {
-            state.bookmarkManager.addBookmark(title: tab.title, url: url)
+            state.bookmarkManager.addBookmark(title: tab.title,
+                                              url: url,
+                                              faviconData: tab.liveFaviconData ?? tab.cachedFaviconData)
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
                 if let newBookmark = state.bookmarkManager.findBookmark(byURL: url) {
                     self?.presentBookmarkEditor(for: newBookmark)

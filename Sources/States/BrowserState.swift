@@ -949,7 +949,8 @@ class BrowserState {
             guard let tabURL = tab.url, !tabURL.isEmpty else { continue }
             bookmarkManager.addBookmark(title: tab.title,
                                         url: URLProcessor.processUserInput(tabURL),
-                                        to: folder)
+                                        to: folder,
+                                        faviconData: tab.liveFaviconData ?? tab.cachedFaviconData)
         }
     }
 
@@ -965,7 +966,8 @@ class BrowserState {
             title: name,
             to: nil,
             bookmarkTitle: first.title,
-            bookmarkURL: URLProcessor.processUserInput(firstURL)
+            bookmarkURL: URLProcessor.processUserInput(firstURL),
+            bookmarkFaviconData: first.liveFaviconData ?? first.cachedFaviconData
         ) { [weak self] success, newFolderGuid in
             // The folder may not be in the in-memory index yet, so address it
             // by guid rather than resolving a `Bookmark` instance.
@@ -975,7 +977,8 @@ class BrowserState {
                 self.bookmarkManager.addBookmark(
                     title: tab.title,
                     url: URLProcessor.processUserInput(tabURL),
-                    toParentGuid: newFolderGuid)
+                    toParentGuid: newFolderGuid,
+                    faviconData: tab.liveFaviconData ?? tab.cachedFaviconData)
             }
         }
     }
@@ -3352,7 +3355,8 @@ class BrowserState {
                                   parentId: parentGuid,
                                   index: index,
                                   guid: newBookmarkGuid,
-                                  spaceId: spaceId)
+                                  spaceId: spaceId,
+                                  favicon: tab.liveFaviconData ?? tab.cachedFaviconData)
 
         updateNormalTabs()
     }
@@ -3444,7 +3448,12 @@ class BrowserState {
             parentId: parentFolder?.guid,
             index: startIndex,
             spaceId: spaceId,
-            bookmarks: bookmarkDrafts.map { (title: $0.title, url: $0.url, guid: $0.guid) }
+            bookmarks: bookmarkDrafts.map {
+                (title: $0.title,
+                 url: $0.url,
+                 guid: $0.guid,
+                 favicon: $0.tab.liveFaviconData ?? $0.tab.cachedFaviconData)
+            }
         )
         updateNormalTabs()
         groups.removeValue(forKey: token)
@@ -3500,7 +3509,8 @@ class BrowserState {
                                   parentId: parentGuid,
                                   index: index,
                                   guid: newBookmarkGuid,
-                                  spaceId: spaceId)
+                                  spaceId: spaceId,
+                                  favicon: pinnedTab.liveFaviconData ?? pinnedTab.cachedFaviconData)
 
         if pinnedTab.isOpenned, let chromiumTab = tabs.first(where: { $0.guidInLocalDB == pinnedGuid }) {
             migrateAIChatTab(for: chromiumTab, toNewIdentifier: newBookmarkGuid)
@@ -3581,7 +3591,8 @@ class BrowserState {
             guid: newBookmarkGuid,
             spaceId: spaceId,
             secondaryUrl: URLProcessor.processUserInput(secondaryURL),
-            secondaryTitle: secondaryDisplayTitle
+            secondaryTitle: secondaryDisplayTitle,
+            favicon: primaryPinned.liveFaviconData ?? primaryPinned.cachedFaviconData
         )
 
         // If both panes are live, unpin them and register the bookmark→split

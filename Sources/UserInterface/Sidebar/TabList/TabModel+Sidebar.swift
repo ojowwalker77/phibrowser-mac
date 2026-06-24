@@ -340,13 +340,15 @@ extension Tab: ContextMenuRepresentable {
         }
         MainBrowserWindowControllersManager.shared.activeWindowController?.browserState.bookmarkManager.addBookmark(title: title,
                                                                                                                     url: URLProcessor.processUserInput(url ?? ""),
-                                                                                                                    to: folder)
+                                                                                                                    to: folder,
+                                                                                                                    faviconData: liveFaviconData ?? cachedFaviconData)
     }
 
     @objc private func addTabToRootBookmarks() {
         MainBrowserWindowControllersManager.shared.activeWindowController?.browserState.bookmarkManager.addBookmark(title: title,
                                                                                                                     url: URLProcessor.processUserInput(url ?? ""),
-                                                                                                                    to: nil)
+                                                                                                                    to: nil,
+                                                                                                                    faviconData: liveFaviconData ?? cachedFaviconData)
     }
     
     @MainActor
@@ -357,6 +359,7 @@ extension Tab: ContextMenuRepresentable {
         let state = windowController.browserState
         let tabTitle = title
         let tabURL = URLProcessor.processUserInput(url ?? "")
+        let tabFaviconData = liveFaviconData ?? cachedFaviconData
 
         EditPinnedTabPresenter.presentModal(
             mode: .newFolder,
@@ -367,7 +370,8 @@ extension Tab: ContextMenuRepresentable {
                 title: folderName,
                 to: nil,
                 bookmarkTitle: tabTitle,
-                bookmarkURL: tabURL
+                bookmarkURL: tabURL,
+                bookmarkFaviconData: tabFaviconData
             ) { _, _ in }
         }
     }

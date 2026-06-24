@@ -30,7 +30,8 @@ extension LocalStore {
                         guid: String? = nil,
                         spaceId: String = LocalStore.defaultSpaceId,
                         secondaryUrl: String? = nil,
-                        secondaryTitle: String? = nil) {
+                        secondaryTitle: String? = nil,
+                        favicon: Data? = nil) {
         guard let normalizedURL = normalizedURL(from: url),
         let bookmarkURL = URL(string: URLProcessor.processUserInput( normalizedURL.absoluteString)) else {
             AppLogError("Invalid bookmark url: \(url ?? "nil")")
@@ -68,6 +69,7 @@ extension LocalStore {
                                                 spaceId: spaceId,
                                                 secondaryUrl: normalizedSecondary,
                                                 secondaryTitle: secondaryTitle,
+                                                favicon: favicon,
                                                 now: now,
                                                 in: context)
             } catch {
@@ -112,6 +114,7 @@ extension LocalStore {
                                      parentId: String?,
                                      bookmarkTitle: String?,
                                      bookmarkURL: String,
+                                     bookmarkFavicon: Data? = nil,
                                      index: Int? = nil,
                                      spaceId: String = LocalStore.defaultSpaceId,
                                      completion: ((Bool) -> Void)? = nil) {
@@ -145,6 +148,7 @@ extension LocalStore {
                                                 index: nil,
                                                 guid: nil,
                                                 spaceId: folder.spaceId,
+                                                favicon: bookmarkFavicon,
                                                 now: now,
                                                 in: context)
                 completion?(true)
@@ -161,13 +165,13 @@ extension LocalStore {
                                       parentId: String?,
                                       index: Int?,
                                       spaceId: String = LocalStore.defaultSpaceId,
-                                      bookmarks: [(title: String?, url: String, guid: String)]) {
-        let normalizedBookmarks: [(title: String?, url: URL, guid: String)] = bookmarks.compactMap { bookmark in
+                                      bookmarks: [(title: String?, url: String, guid: String, favicon: Data?)]) {
+        let normalizedBookmarks: [(title: String?, url: URL, guid: String, favicon: Data?)] = bookmarks.compactMap { bookmark in
             guard let normalizedURL = normalizedURL(from: bookmark.url) else {
                 AppLogError("Invalid bookmark url: \(bookmark.url)")
                 return nil
             }
-            return (title: bookmark.title, url: normalizedURL, guid: bookmark.guid)
+            return (title: bookmark.title, url: normalizedURL, guid: bookmark.guid, favicon: bookmark.favicon)
         }
         guard normalizedBookmarks.count == bookmarks.count else { return }
 
@@ -195,6 +199,7 @@ extension LocalStore {
                                                     index: childIndex,
                                                     guid: bookmark.guid,
                                                     spaceId: folder.spaceId,
+                                                    favicon: bookmark.favicon,
                                                     now: now,
                                                     in: context)
                 }
@@ -796,13 +801,14 @@ private extension LocalStore {
                             spaceId: String?,
                             secondaryUrl: URL? = nil,
                             secondaryTitle: String? = nil,
+                            favicon: Data? = nil,
                             now: Date,
                             in context: ModelContext) throws -> TabDataModel {
         let bookmark = TabDataModel(title: (title?.isEmpty == false ? title! : url.absoluteString),
                                     guid: guid ?? UUID().uuidString,
                                     index: 0,
                                     url: url,
-                                    favicon: nil as Data?,
+                                    favicon: favicon,
                                     createdDate: now,
                                     updatedDate: now)
         bookmark.dataType = TabDataType.bookmark
