@@ -585,14 +585,14 @@ class SidebarViewController: NSViewController {
         spaceTintGradientLayer.add(animation, forKey: "spaceTintColors")
     }
 
-    /// The two-stop tint colors for a Space `colorHex` (or clear when nil):
-    /// the active color at 22% alpha fading to fully transparent.
+    /// The two-stop tint colors for a Space `colorHex`.
+    ///
+    /// The per-Space tint is disabled so the sidebar keeps its pre-Spaces
+    /// appearance (plain visual-effect material, no colored wash). Always
+    /// returns clear; switch the stops back to the active color at 22% alpha
+    /// fading to transparent to re-enable it.
     private func spaceTintColors(forHex hex: String?) -> [CGColor] {
-        let base = hex.map { NSColor(hexString: $0) } ?? .clear
-        return [
-            base.withAlphaComponent(0.22).cgColor,
-            base.withAlphaComponent(0).cgColor
-        ]
+        return [NSColor.clear.cgColor, NSColor.clear.cgColor]
     }
 
     // MARK: - Space-switch push-in support
@@ -649,12 +649,16 @@ class SidebarViewController: NSViewController {
 
     /// Sets the gradient model to the two-stop tint for `base` with implicit
     /// animation disabled (the timer supplies the motion).
+    ///
+    /// The per-Space tint is disabled to preserve the pre-Spaces sidebar look,
+    /// so this always paints clear regardless of `base`; restore the 0.22/0
+    /// alpha stops here (and in `spaceTintColors`) to bring the wash back.
     private func setSpaceTintBase(_ base: NSColor) {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         spaceTintGradientLayer.colors = [
-            base.withAlphaComponent(0.22).cgColor,
-            base.withAlphaComponent(0).cgColor
+            NSColor.clear.cgColor,
+            NSColor.clear.cgColor
         ]
         CATransaction.commit()
     }
