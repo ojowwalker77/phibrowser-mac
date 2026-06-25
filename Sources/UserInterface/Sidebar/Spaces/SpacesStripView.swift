@@ -93,6 +93,18 @@ struct SpacesStripView: View {
     @State private var isPickerOpen: Bool = false
     @State private var isIconPickerOpen: Bool = false
 
+    /// Drag-reorder state for the sidebar icon strip. `stripOrderedIds` is the
+    /// live arrangement shown while a pip is dragged across its siblings, and
+    /// `stripDraggingId` marks the pip under the cursor. Mirrors the popover's
+    /// picker (SpacePickerPopup) so the commit path through `manager.reorder`
+    /// is identical.
+    @State private var stripDraggingId: String?
+    @State private var stripOrderedIds: [String] = []
+
+    /// The pip currently under the cursor, driving its hover tooltip (Space name,
+    /// bound profile, and keyboard shortcut). Only one pip is hovered at a time.
+    @State private var hoveredSpaceId: String?
+
     /// The Space whose icon + name are currently shown. Lags `slot.activeSpaceId`
     /// by one animated step so the label can scroll the outgoing Space out and
     /// the incoming one in. `scrollEdge` is set just before the animated change
@@ -143,11 +155,7 @@ struct SpacesStripView: View {
         // to whichever row it's plugged into.
         Group {
             if showsEllipsisAffordance {
-                HStack(spacing: 6) {
-                    activeLabel
-                    Spacer(minLength: 4)
-                    ellipsisButton
-                }
+                iconStrip
             } else {
                 compactChip
             }
@@ -284,22 +292,245 @@ struct SpacesStripView: View {
         }
     }
 
-    private var ellipsisButton: some View {
-        Button {
-            isIconPickerOpen = false
-            isPickerOpen.toggle()
+    /// Sidebar chooser: one tappable icon per Space (the active one carries its
+    /// theme tint, the rest read muted) followed by a trailing "+" that creates
+    /// a new Space. Right-clicking a pip exposes the same per-Space edits the
+    /// popover used to host. A large number of Spaces can overflow the row; the
+    /// common handful fit within the sidebar width.
+    private var iconStrip: some View {
+        HStack(spacing: 4) {
+            ForEach(stripOrderedSpaces, id: \.spaceId) { space in
+                spacePip(for: space)
+                    .opacity(stripDraggingId == space.spaceId ? 0.5 : 1)
+                    .onDrag {
+                        stripDraggingId = space.spaceId
+                        return NSItemProvider(object: space.spaceId as NSString)
+                    }
+                    .onDrop(of: [.text], delegate: SpaceRowDropDelegate(
+                        targetSpaceId: space.spaceId,
+                        draggingSpaceId: $stripDraggingId,
+                        orderedIds: $stripOrderedIds,
+                        commit: { manager.reorder(spaceIds: $0) }
+                    ))
+            }
+            Spacer(minLength: 4)
+            addButton
+        }
+        .onAppear { stripOrderedIds = manager.spaces.map(\.spaceId) }
+        .onChange(of: manager.spaces.map(\.spaceId)) { ids in
+            // Leave an in-flight drag's local rearrangement alone; the drop's
+            // commit writes through and re-syncs on the next pass.
+            guard stripDraggingId == nil else { return }
+            stripOrderedIds = ids
+        }
+    }
+
+    /// Pips in drag order: the local `stripOrderedIds` snapshot (rearranged live
+    /// while a drag hovers across pips), with any Space the snapshot doesn't know
+    /// yet appended in the manager's order. Mirrors SpacePickerPopup.orderedSpaces.
+    private var stripOrderedSpaces: [SpaceModel] {
+        guard !stripOrderedIds.isEmpty else { return manager.spaces }
+        let byId = Dictionary(uniqueKeysWithValues: manager.spaces.map { ($0.spaceId, $0) })
+        var result = stripOrderedIds.compactMap { byId[$0] }
+        let known = Set(stripOrderedIds)
+        result.append(contentsOf: manager.spaces.filter { !known.contains($0.spaceId) })
+        return result
+    }
+
+    /// A single Space's icon. Tapping switches this window to that Space. Every
+    /// pip renders in the same monochrome style; the active Space stays at full
+    /// strength while the rest dim, so the difference is only brightness — never
+    /// a different icon color or weight.
+    private func spacePip(for space: SpaceModel) -> some View {
+        let isActive = space.spaceId == slot.activeSpaceId
+        return Button {
+            slot.activate(spaceId: space.spaceId)
         } label: {
-            Image(systemName: "ellipsis")
-                .font(.system(size: 13, weight: .semibold))
+            Image(systemName: systemSymbolName(for: space.iconName) ?? "rectangle.stack")
+                .font(.system(size: Self.iconSize, weight: .semibold))
+                .symbolRenderingMode(.monochrome)
+                .foregroundStyle(Color.primary.opacity(isActive ? 1 : 0.4))
+                .frame(width: 24, height: rowHeight)
+                .background(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(isActive ? Color.primary.opacity(0.1) : Color.clear)
+                )
+                .contentShape(RoundedRectangle(cornerRadius: 6))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(space.name)
+        .onHover { hovering in
+            if hovering {
+                hoveredSpaceId = space.spaceId
+            } else if hoveredSpaceId == space.spaceId {
+                hoveredSpaceId = nil
+            }
+        }
+        .popover(isPresented: hoverBinding(for: space), arrowEdge: .top) {
+            spaceTooltip(for: space)
+        }
+        .contextMenu { pipContextMenu(for: space) }
+    }
+
+    /// Presents a pip's hover tooltip while it (and only it) is hovered, and
+    /// never during a reorder drag so the card doesn't trail the cursor.
+    private func hoverBinding(for space: SpaceModel) -> Binding<Bool> {
+        Binding(
+            get: { hoveredSpaceId == space.spaceId && stripDraggingId == nil },
+            set: { presented in
+                if presented {
+                    hoveredSpaceId = space.spaceId
+                } else if hoveredSpaceId == space.spaceId {
+                    hoveredSpaceId = nil
+                }
+            }
+        )
+    }
+
+    /// Hover card for a pip: the bound profile on the left, the Space (icon +
+    /// name) as a tinted pill in the middle, and its switch shortcut as keycaps
+    /// on the right. The shortcut is omitted for Spaces past the ninth, which
+    /// have no ⌃-number binding.
+    private func spaceTooltip(for space: SpaceModel) -> some View {
+        HStack(spacing: 8) {
+            Text(profileDisplayName(for: space.profileId))
+                .font(.system(size: 11))
                 .foregroundStyle(Color.secondary)
-                .frame(width: 22, height: 22)
+                .lineLimit(1)
+
+            HStack(spacing: 5) {
+                Image(systemName: systemSymbolName(for: space.iconName) ?? "rectangle.stack")
+                    .font(.system(size: 11, weight: .semibold))
+                Text(space.name)
+                    .font(.system(size: 12, weight: .medium))
+                    .lineLimit(1)
+            }
+            .foregroundStyle(iconColor(for: space))
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(Capsule().fill(iconColor(for: space).opacity(0.15)))
+
+            if let key = spaceShortcut(for: space) {
+                HStack(spacing: 3) {
+                    ForEach(Array(keycapTokens(key).enumerated()), id: \.offset) { _, token in
+                        keycap(token)
+                    }
+                }
+            }
+        }
+        .fixedSize()
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+    }
+
+    /// A single keycap badge (one modifier symbol or the character).
+    private func keycap(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 11, weight: .medium))
+            .foregroundStyle(Color.secondary)
+            .frame(minWidth: 18, minHeight: 18)
+            .background(
+                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                    .fill(Color.primary.opacity(0.08))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                    .strokeBorder(Color.primary.opacity(0.12))
+            )
+    }
+
+    /// The effective (remap-aware) switch shortcut for a Space, resolved from its
+    /// position in the manager's order — mirroring how the Spaces menu binds
+    /// ⌃1…⌃9. Nil past the ninth Space or if the binding was cleared.
+    private func spaceShortcut(for space: SpaceModel) -> ShortcutsKey? {
+        guard let index = manager.spaces.firstIndex(where: { $0.spaceId == space.spaceId }),
+              let command = CommandWrapper.spaceSelectionCommand(at: index) else { return nil }
+        return Shortcuts.key(for: command)
+    }
+
+    /// Splits a shortcut into keycap tokens — one per modifier, then the key —
+    /// so the tooltip can render them as separate badges (e.g. ⌃ and 6).
+    private func keycapTokens(_ key: ShortcutsKey) -> [String] {
+        var tokens: [String] = []
+        let modifiers = key.modifiers
+        if modifiers.contains(.command) { tokens.append("⌘") }
+        if modifiers.contains(.option) { tokens.append("⌥") }
+        if modifiers.contains(.shift) { tokens.append("⇧") }
+        if modifiers.contains(.control) { tokens.append("⌃") }
+        tokens.append(key.characters.uppercased())
+        return tokens
+    }
+
+    /// Trailing affordance that opens the create-Space flow, seeding the new
+    /// Space with the active Space's profile so it lands in the same context.
+    private var addButton: some View {
+        Button {
+            CreateSpacePanel.requestCreation(initialProfileId: activeSpace?.profileId)
+        } label: {
+            Image(systemName: "plus")
+                .font(.system(size: Self.iconSize, weight: .semibold))
+                .foregroundStyle(Color.secondary)
+                .frame(width: 24, height: rowHeight)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help(NSLocalizedString("Spaces", comment: "Tooltip for the Spaces picker affordance"))
-        .popover(isPresented: $isPickerOpen, arrowEdge: .top) {
-            pickerPopup
+        .help(NSLocalizedString("New Space", comment: "Tooltip for the add-Space button in the sidebar Spaces strip"))
+    }
+
+    /// Per-Space management, mirroring the popover rows so dropping the ellipsis
+    /// popover from the sidebar doesn't strip the edits it used to host.
+    @ViewBuilder
+    private func pipContextMenu(for space: SpaceModel) -> some View {
+        Button(NSLocalizedString("Rename\u{2026}", comment: "")) { promptRename(for: space) }
+        Menu(NSLocalizedString("Change Icon", comment: "")) {
+            ForEach(Self.iconOptions, id: \.self) { icon in
+                Button {
+                    manager.changeIcon(spaceId: space.spaceId, iconName: icon)
+                } label: {
+                    Label(prettyIconLabel(icon), systemImage: icon)
+                }
+            }
         }
+        Menu(NSLocalizedString("Change Theme", comment: "")) {
+            Picker(NSLocalizedString("Change Theme", comment: ""), selection: themeBinding(for: space)) {
+                Label {
+                    Text(NSLocalizedString("Follow Global", comment: "Theme menu: clear per-Space override"))
+                } icon: {
+                    Image(nsImage: .themeColorSwatch(for: ThemeManager.shared.currentTheme))
+                        .renderingMode(.original)
+                }
+                .tag(String?.none)
+
+                Divider()
+
+                ForEach(ThemeManager.shared.orderedThemes, id: \.id) { theme in
+                    Label {
+                        Text(theme.name)
+                    } icon: {
+                        Image(nsImage: .themeColorSwatch(for: theme))
+                            .renderingMode(.original)
+                    }
+                    .tag(String?(theme.id))
+                }
+            }
+            .pickerStyle(.inline)
+            .labelsHidden()
+        }
+        if space.spaceId != LocalStore.defaultSpaceId {
+            Divider()
+            Button(role: .destructive) {
+                confirmDelete(space)
+            } label: {
+                Text(NSLocalizedString("Delete", comment: "Destructive menu item"))
+            }
+        }
+    }
+
+    private func themeBinding(for space: SpaceModel) -> Binding<String?> {
+        Binding(
+            get: { manager.themeId(forSpaceId: space.spaceId) },
+            set: { manager.setTheme(forSpaceId: space.spaceId, themeId: $0) }
+        )
     }
 
     /// The Space-switcher popover content, shared by the sidebar's ellipsis
