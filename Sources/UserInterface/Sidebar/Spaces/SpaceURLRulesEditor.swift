@@ -64,36 +64,12 @@ struct URLRulesEditor: View {
     }
 
     private var ruleList: some View {
-        List {
-            ForEach($rows) { $row in
-                RuleRowView(row: $row, spaces: manager.spaces, onDelete: { delete(row) })
-            }
-            .onMove { offsets, destination in
-                rows.move(fromOffsets: offsets, toOffset: destination)
-            }
-            if rows.isEmpty {
-                emptyState
-            }
-        }
-        .listStyle(.inset)
-    }
-
-    private var emptyState: some View {
-        VStack(alignment: .center, spacing: 6) {
-            Text(NSLocalizedString("No rules yet.",
-                comment: "Empty state label in the URL rules editor"))
-                .font(.body)
-                .foregroundStyle(.secondary)
-            Text(NSLocalizedString(
-                "Pick a target Space and enter a host like \u{201C}github.com\u{201D}.",
-                comment: "Empty state hint in the universal URL rules editor"
-            ))
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 24)
-        .listRowSeparator(.hidden)
+        // The table host is always mounted (even when empty), so deleting the
+        // last rule doesn't tear down the NSView tree mid-animation and adding
+        // the first rule doesn't rebuild it. The empty-state placeholder lives
+        // inside the host (see RuleTableView.makeEmptyOverlay).
+        RuleTableView(rows: $rows, spaces: manager.spaces)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var footer: some View {
@@ -130,10 +106,6 @@ struct URLRulesEditor: View {
     private func addBlankRow() {
         guard let firstSpaceId = manager.spaces.first?.spaceId else { return }
         rows.append(Row(defaultSpaceId: firstSpaceId))
-    }
-
-    private func delete(_ row: Row) {
-        rows.removeAll { $0.id == row.id }
     }
 
     private func save() {
@@ -334,121 +306,429 @@ struct URLRulesEditor: View {
     }
 }
 
-private struct RuleRowView: View {
-    @Binding var row: URLRulesEditor.Row
+// MARK: - AppKit rule list
+
+/// AppKit-backed list of URL rules. SwiftUI's `List` defers an embedded
+/// NSTextField's first responder ~2s (the List/NSTableView wrapper runs
+/// click-vs-drag disambiguation on mouse-down) and can't reconcile native
+/// drag-reorder with instant field focus. A hand-built NSTableView gets all of
+/// it natively: click a field → it focuses immediately; drag a row's empty area
+/// → native reorder with live row-parting + a drop indicator; click empty →
+/// focus resigns. The SwiftUI shell (header / footer / save) is unchanged.
+private struct RuleTableView: NSViewRepresentable {
+    @Binding var rows: [URLRulesEditor.Row]
     let spaces: [SpaceModel]
-    let onDelete: () -> Void
 
-    // List rows on macOS swallow the first click so the underlying
-    // NSTextField never becomes first responder and the focus ring fails
-    // to appear. Tracking focus through @FocusState and forcing it on tap
-    // makes the ring show reliably on the very first click.
-    @FocusState private var valueFieldFocused: Bool
-
-    /// Fixed width for the match-type picker — sized to the widest label
-    /// ("Domain contains") so the menu button never truncates.
-    private static let matchPickerWidth: CGFloat = 150
-    private static let columnSpacing: CGFloat = 10
-    /// Width reserved for the trailing delete button, so the second line's
-    /// Space picker stops at the same x as the first line's value field.
-    private static let deleteColumnWidth: CGFloat = 22
-
-    /// Folds the ask-first action into the target-Space picker: the selection
-    /// is a real `spaceId` for an auto-routed rule, or `askSpaceTag` for an
-    /// "ask every time" rule. Picking "Ask every time" leaves the row's
-    /// `targetSpaceId` intact so it stays the prompt's suggested default.
-    private var targetSelection: Binding<String> {
-        Binding(
-            get: { row.askBeforeRouting ? URLRulesEditor.askSpaceTag : row.targetSpaceId },
-            set: { newValue in
-                if newValue == URLRulesEditor.askSpaceTag {
-                    row.askBeforeRouting = true
-                } else {
-                    row.askBeforeRouting = false
-                    row.targetSpaceId = newValue
-                }
-            }
-        )
+    /// Captures every Space field shown in the target popup, so a rename / icon
+    /// / profile change (same `spaceId`) still triggers a reload — comparing ids
+    /// alone would leave the already-built menus in displayed rows stale.
+    private var spacesFingerprint: String {
+        spaces.map { "\($0.spaceId)\u{1F}\($0.name)\u{1F}\($0.iconName)\u{1F}\($0.profileId)" }
+            .joined(separator: "\u{1E}")
     }
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            matchLine
-            destinationLine
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    func makeNSView(context: Context) -> NSView {
+        let tableView = NSTableView()
+        let column = NSTableColumn(identifier: .ruleColumn)
+        column.resizingMask = .autoresizingMask
+        column.minWidth = 200
+        tableView.addTableColumn(column)
+        tableView.headerView = nil
+        tableView.style = .inset
+        tableView.rowHeight = Coordinator.rowHeight
+        tableView.intercellSpacing = NSSize(width: 0, height: 4)
+        tableView.selectionHighlightStyle = .none
+        tableView.allowsEmptySelection = true
+        tableView.allowsMultipleSelection = false
+        tableView.usesAlternatingRowBackgroundColors = false
+        tableView.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
+        tableView.dataSource = context.coordinator
+        tableView.delegate = context.coordinator
+        tableView.registerForDraggedTypes([.string])
+        tableView.setDraggingSourceOperationMask(.move, forLocal: true)
+        context.coordinator.tableView = tableView
+        context.coordinator.displayedIDs = rows.map(\.id)
+        context.coordinator.spacesFingerprint = spacesFingerprint
+
+        let scrollView = NSScrollView()
+        scrollView.documentView = tableView
+        scrollView.hasVerticalScroller = true
+        scrollView.hasHorizontalScroller = false
+        scrollView.autohidesScrollers = true
+        scrollView.drawsBackground = false
+        scrollView.translatesAutoresizingMaskIntoConstraints = false
+
+        let overlay = Self.makeEmptyOverlay()
+        overlay.isHidden = !rows.isEmpty
+        context.coordinator.emptyOverlay = overlay
+
+        let container = NSView()
+        container.addSubview(scrollView)
+        container.addSubview(overlay)
+        NSLayoutConstraint.activate([
+            scrollView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            scrollView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            scrollView.topAnchor.constraint(equalTo: container.topAnchor),
+            scrollView.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            overlay.centerXAnchor.constraint(equalTo: container.centerXAnchor),
+            overlay.centerYAnchor.constraint(equalTo: container.centerYAnchor),
+            overlay.leadingAnchor.constraint(greaterThanOrEqualTo: container.leadingAnchor, constant: 24),
+            overlay.trailingAnchor.constraint(lessThanOrEqualTo: container.trailingAnchor, constant: -24),
+        ])
+        return container
+    }
+
+    /// Centered "no rules yet" placeholder shown inside the table host while
+    /// there are no rows, so the empty state never swaps the NSView out (which
+    /// would fight the delete/insert row animations).
+    private static func makeEmptyOverlay() -> NSView {
+        let title = NSTextField(labelWithString:
+            NSLocalizedString("No rules yet.", comment: "Empty state label in the URL rules editor"))
+        title.font = .preferredFont(forTextStyle: .body)
+        title.textColor = .secondaryLabelColor
+        title.alignment = .center
+        let hint = NSTextField(labelWithString: NSLocalizedString(
+            "Pick a target Space and enter a host like \u{201C}github.com\u{201D}.",
+            comment: "Empty state hint in the universal URL rules editor"))
+        hint.font = .preferredFont(forTextStyle: .caption1)
+        hint.textColor = .secondaryLabelColor
+        hint.alignment = .center
+        hint.maximumNumberOfLines = 0
+        let stack = NSStackView(views: [title, hint])
+        stack.orientation = .vertical
+        stack.spacing = 6
+        stack.alignment = .centerX
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        return stack
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        let coordinator = context.coordinator
+        coordinator.parent = self
+        guard let tableView = coordinator.tableView else { return }
+        coordinator.emptyOverlay?.isHidden = !rows.isEmpty
+
+        let oldIDs = coordinator.displayedIDs
+        let newIDs = rows.map(\.id)
+        let newFingerprint = spacesFingerprint
+
+        if oldIDs == newIDs {
+            // No structural change. Content edits, delete and reorder were
+            // applied in place by the coordinator; only a Space display change
+            // needs a reload here (never mid-edit — the fingerprint is stable
+            // while editing, so the field editor is never dropped).
+            if coordinator.spacesFingerprint != newFingerprint {
+                coordinator.spacesFingerprint = newFingerprint
+                tableView.reloadData()
+            }
+            return
         }
-        .padding(.vertical, 6)
-        .contentShape(Rectangle())
-    }
 
-    /// First line: the rule type (match-type) picker, the value field, and a
-    /// trailing delete button.
-    private var matchLine: some View {
-        HStack(spacing: Self.columnSpacing) {
-            Picker("", selection: $row.matchType) {
-                ForEach(URLRulesEditor.MatchType.allCases) { type in
-                    Text(type.label).tag(type)
-                }
+        coordinator.displayedIDs = newIDs
+        coordinator.spacesFingerprint = newFingerprint
+
+        // A single blank row appended at the end is the "Add Rule" path: insert
+        // incrementally, scroll it into view, and focus its value field. A saved
+        // rule always has a non-empty value, so the initial load never matches
+        // and won't steal focus. Anything else falls back to a full reload.
+        if newIDs.count == oldIDs.count + 1,
+           Array(newIDs.prefix(oldIDs.count)) == oldIDs,
+           rows[newIDs.count - 1].value.isEmpty {
+            let newRow = newIDs.count - 1
+            let newID = newIDs[newRow]
+            tableView.insertRows(at: IndexSet(integer: newRow), withAnimation: .effectFade)
+            tableView.scrollRowToVisible(newRow)
+            // Resolve the row by id when the async fires (matching the drag
+            // path); the captured index could otherwise be stale if the row set
+            // changes before this runs. firstIndex is bounds-safe — a removed
+            // row just yields nil and we skip focusing.
+            DispatchQueue.main.async { [weak coordinator, weak tableView] in
+                guard let coordinator, let tableView,
+                      let row = coordinator.displayedIDs.firstIndex(of: newID),
+                      let cell = tableView.view(atColumn: 0, row: row,
+                                                makeIfNecessary: true) as? RuleCellView
+                else { return }
+                cell.beginEditingValue()
             }
-            .labelsHidden()
-            .pickerStyle(.menu)
-            .frame(width: Self.matchPickerWidth)
-            TextField(row.matchType.placeholder, text: $row.value)
-                .textFieldStyle(.roundedBorder)
-                .focused($valueFieldFocused)
-                .onTapGesture { valueFieldFocused = true }
-            Button(role: .destructive, action: onDelete) {
-                Image(systemName: "trash")
-            }
-            .buttonStyle(.borderless)
-            .frame(width: Self.deleteColumnWidth)
-            .help(NSLocalizedString("Remove rule", comment: "Tooltip for remove-rule button"))
+        } else {
+            tableView.reloadData()
         }
     }
 
-    /// Second line: an "Open in" label and the target-Space chooser, right-
-    /// aligned as a pair so the picker stops at the value field's trailing edge
-    /// and the label hugs its leading side.
-    private var destinationLine: some View {
-        HStack(spacing: Self.columnSpacing) {
-            Text(NSLocalizedString("Open in", comment: "Leading label for a URL rule's target Space"))
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .trailing)
-            Picker("", selection: targetSelection) {
-                ForEach(spaces, id: \.spaceId) { space in
-                    Label {
-                        Text(Self.spaceMenuTitle(space))
-                    } icon: {
-                        Image(systemName: Self.iconSymbol(for: space))
+    final class Coordinator: NSObject, NSTableViewDataSource, NSTableViewDelegate {
+        static let rowHeight: CGFloat = 70
+        var parent: RuleTableView
+        weak var tableView: NSTableView?
+        weak var emptyOverlay: NSView?
+        var displayedIDs: [UUID] = []
+        var spacesFingerprint: String = ""
+
+        init(_ parent: RuleTableView) { self.parent = parent }
+
+        func numberOfRows(in tableView: NSTableView) -> Int { parent.rows.count }
+
+        func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
+            let cell = tableView.makeView(withIdentifier: .ruleCell, owner: self) as? RuleCellView
+                ?? RuleCellView()
+            cell.identifier = .ruleCell
+            let id = parent.rows[row].id
+            cell.configure(row: parent.rows[row], spaces: parent.spaces,
+                           askSpaceTag: URLRulesEditor.askSpaceTag)
+            cell.onValueChange = { [weak self] newValue in
+                self?.mutate(id: id) { $0.value = newValue }
+            }
+            cell.onMatchTypeChange = { [weak self] newType in
+                self?.mutate(id: id) { $0.matchType = newType }
+            }
+            cell.onTargetChange = { [weak self] selection in
+                self?.mutate(id: id) { row in
+                    if selection == URLRulesEditor.askSpaceTag {
+                        row.askBeforeRouting = true
+                    } else {
+                        row.askBeforeRouting = false
+                        row.targetSpaceId = selection
                     }
-                    .tag(space.spaceId)
                 }
-                Divider()
-                Text(NSLocalizedString("Ask every time",
-                    comment: "Special target in the URL rule Space picker: prompt for a Space on each match"))
-                    .tag(URLRulesEditor.askSpaceTag)
             }
-            .labelsHidden()
-            .pickerStyle(.menu)
-            .fixedSize()
+            cell.onDelete = { [weak self] in self?.deleteRow(id: id) }
+            return cell
         }
-        // Stop the Space picker at the value field's trailing edge rather than
-        // running under the delete button.
-        .padding(.trailing, Self.deleteColumnWidth + Self.columnSpacing)
+
+        /// Applies a content edit in place — order/count unchanged, so the
+        /// follow-up `updateNSView` is a no-op and the field keeps focus.
+        private func mutate(id: UUID, _ change: (inout URLRulesEditor.Row) -> Void) {
+            guard let index = parent.rows.firstIndex(where: { $0.id == id }) else { return }
+            var updated = parent.rows
+            change(&updated[index])
+            parent.rows = updated
+        }
+
+        private func deleteRow(id: UUID) {
+            guard let index = parent.rows.firstIndex(where: { $0.id == id }) else { return }
+            var updated = parent.rows
+            updated.remove(at: index)
+            parent.rows = updated
+            displayedIDs = updated.map(\.id)
+            tableView?.removeRows(at: IndexSet(integer: index), withAnimation: .effectFade)
+        }
+
+        // MARK: Native drag-to-reorder
+
+        func tableView(_ tableView: NSTableView, pasteboardWriterForRow row: Int) -> NSPasteboardWriting? {
+            guard parent.rows.indices.contains(row) else { return nil }
+            let item = NSPasteboardItem()
+            // Serialize stable row identity (UUID), not the index — the index can
+            // go stale and an unchecked remove(at:)/insert(at:) would trap.
+            item.setString(parent.rows[row].id.uuidString, forType: .string)
+            return item
+        }
+
+        func tableView(_ tableView: NSTableView, validateDrop info: NSDraggingInfo,
+                       proposedRow row: Int,
+                       proposedDropOperation dropOperation: NSTableView.DropOperation) -> NSDragOperation {
+            guard (info.draggingSource as? NSTableView) === tableView else { return [] }
+            // Coerce a drop ONTO a row into an insertion ABOVE it, so the whole
+            // row body is a valid reorder target — not just the thin gap between
+            // rows. acceptDrop then receives a `.above` row it already handles.
+            if dropOperation == .on {
+                tableView.setDropRow(row, dropOperation: .above)
+            }
+            return .move
+        }
+
+        func tableView(_ tableView: NSTableView, acceptDrop info: NSDraggingInfo,
+                       row: Int, dropOperation: NSTableView.DropOperation) -> Bool {
+            // Resolve the source by stable id (not the serialized index) and
+            // bounds-check both ends, so a stale / out-of-range drop can't trap.
+            guard (info.draggingSource as? NSTableView) === tableView,
+                  let item = info.draggingPasteboard.pasteboardItems?.first,
+                  let idString = item.string(forType: .string),
+                  let sourceRow = parent.rows.firstIndex(where: { $0.id.uuidString == idString })
+            else { return false }
+            let target = max(0, min(row, parent.rows.count))
+            let destination = sourceRow < target ? target - 1 : target
+            guard destination != sourceRow else { return false }
+            var updated = parent.rows
+            let moved = updated.remove(at: sourceRow)
+            updated.insert(moved, at: destination)
+            parent.rows = updated
+            displayedIDs = updated.map(\.id)
+            tableView.beginUpdates()
+            tableView.moveRow(at: sourceRow, to: destination)
+            tableView.endUpdates()
+            return true
+        }
+    }
+}
+
+/// One two-line rule row, built from AppKit controls. Exposes per-control
+/// change closures that the table coordinator wires to the matching `Row` by
+/// id, so reordering never desyncs a control from its rule.
+private final class RuleCellView: NSTableCellView, NSTextFieldDelegate {
+    var onValueChange: ((String) -> Void)?
+    var onMatchTypeChange: ((URLRulesEditor.MatchType) -> Void)?
+    var onTargetChange: ((String) -> Void)?
+    var onDelete: (() -> Void)?
+
+    private static let matchTypes = URLRulesEditor.MatchType.allCases
+
+    private let matchTypePopup = NSPopUpButton(frame: .zero, pullsDown: false)
+    private let valueField = NSTextField()
+    private let deleteButton = NSButton()
+    private let openInLabel = NSTextField(labelWithString:
+        NSLocalizedString("Open in", comment: "Leading label for a URL rule's target Space"))
+    private let targetPopup = NSPopUpButton(frame: .zero, pullsDown: false)
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        buildLayout()
+    }
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    private func buildLayout() {
+        matchTypePopup.addItems(withTitles: Self.matchTypes.map(\.label))
+        matchTypePopup.target = self
+        matchTypePopup.action = #selector(matchTypeChanged)
+
+        valueField.isBezeled = true
+        valueField.bezelStyle = .roundedBezel
+        valueField.usesSingleLineMode = true
+        valueField.lineBreakMode = .byTruncatingTail
+        valueField.cell?.isScrollable = true
+        valueField.delegate = self
+
+        deleteButton.image = NSImage(systemSymbolName: "trash", accessibilityDescription:
+            NSLocalizedString("Remove rule", comment: "Tooltip for remove-rule button"))
+        deleteButton.isBordered = false
+        deleteButton.contentTintColor = .secondaryLabelColor
+        deleteButton.target = self
+        deleteButton.action = #selector(deleteClicked)
+        deleteButton.toolTip = NSLocalizedString("Remove rule", comment: "Tooltip for remove-rule button")
+
+        openInLabel.textColor = .secondaryLabelColor
+        openInLabel.font = .preferredFont(forTextStyle: .callout)
+
+        targetPopup.target = self
+        targetPopup.action = #selector(targetChanged)
+
+        let line1 = NSStackView(views: [matchTypePopup, valueField, deleteButton])
+        line1.orientation = .horizontal
+        line1.spacing = 10
+        line1.alignment = .centerY
+        line1.distribution = .fill
+
+        let spacer = NSView()
+        spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        let line2 = NSStackView(views: [spacer, openInLabel, targetPopup])
+        line2.orientation = .horizontal
+        line2.spacing = 8
+        line2.alignment = .centerY
+
+        let vstack = NSStackView(views: [line1, line2])
+        vstack.orientation = .vertical
+        vstack.spacing = 8
+        vstack.alignment = .leading
+        vstack.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(vstack)
+
+        valueField.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        valueField.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        NSLayoutConstraint.activate([
+            matchTypePopup.widthAnchor.constraint(equalToConstant: 150),
+            deleteButton.widthAnchor.constraint(equalToConstant: 22),
+            vstack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
+            vstack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
+            vstack.centerYAnchor.constraint(equalTo: centerYAnchor),
+            line1.widthAnchor.constraint(equalTo: vstack.widthAnchor),
+            line2.leadingAnchor.constraint(equalTo: vstack.leadingAnchor),
+            // Stop the Space popup at the value field's trailing edge (delete
+            // button width + spacing), matching the first line's columns.
+            line2.trailingAnchor.constraint(equalTo: vstack.trailingAnchor, constant: -32),
+        ])
     }
 
-    /// "Space name — Profile" for a Space option, so each entry shows which
-    /// profile it routes into alongside the Space name. Falls back to just the
-    /// name when the profile can't be resolved yet.
+    func configure(row: URLRulesEditor.Row, spaces: [SpaceModel], askSpaceTag: String) {
+        if let index = Self.matchTypes.firstIndex(of: row.matchType) {
+            matchTypePopup.selectItem(at: index)
+        }
+        valueField.stringValue = row.value
+        valueField.placeholderString = row.matchType.placeholder
+
+        let menu = NSMenu()
+        for space in spaces {
+            let item = NSMenuItem(title: Self.spaceMenuTitle(space), action: nil, keyEquivalent: "")
+            item.image = NSImage(systemSymbolName: Self.iconSymbol(for: space),
+                                 accessibilityDescription: nil)
+            item.representedObject = space.spaceId
+            menu.addItem(item)
+        }
+        menu.addItem(.separator())
+        let askItem = NSMenuItem(
+            title: NSLocalizedString("Ask every time",
+                comment: "Special target in the URL rule Space picker: prompt for a Space on each match"),
+            action: nil, keyEquivalent: "")
+        askItem.representedObject = askSpaceTag
+        menu.addItem(askItem)
+        targetPopup.menu = menu
+
+        let selectedTag = row.askBeforeRouting ? askSpaceTag : row.targetSpaceId
+        if let match = menu.items.first(where: { ($0.representedObject as? String) == selectedTag }) {
+            targetPopup.select(match)
+        } else if row.askBeforeRouting {
+            targetPopup.select(askItem)
+        } else {
+            // Auto-route rule whose target Space was deleted. Show an explicit
+            // disabled "unavailable" item (NOT a false "Ask every time") so the
+            // user must re-target it; if left as-is, save() drops it as before.
+            let missing = NSMenuItem(
+                title: NSLocalizedString("Target Space unavailable",
+                    comment: "URL rule target whose Space no longer exists"),
+                action: nil, keyEquivalent: "")
+            missing.isEnabled = false
+            missing.representedObject = row.targetSpaceId
+            menu.insertItem(missing, at: 0)
+            targetPopup.select(missing)
+        }
+    }
+
+    @objc private func matchTypeChanged() {
+        let type = Self.matchTypes[matchTypePopup.indexOfSelectedItem]
+        valueField.placeholderString = type.placeholder
+        onMatchTypeChange?(type)
+    }
+
+    @objc private func targetChanged() {
+        guard let tag = targetPopup.selectedItem?.representedObject as? String else { return }
+        onTargetChange?(tag)
+    }
+
+    @objc private func deleteClicked() { onDelete?() }
+
+    func controlTextDidChange(_ obj: Notification) { onValueChange?(valueField.stringValue) }
+
+    /// Focuses this row's value field — used to drop the cursor into a freshly
+    /// added rule so the user can type immediately.
+    func beginEditingValue() {
+        window?.makeFirstResponder(valueField)
+    }
+
+    /// "Space name — Profile" so each entry shows which profile it routes into.
     private static func spaceMenuTitle(_ space: SpaceModel) -> String {
         let profileName = ProfileManager.shared.profile(for: space.profileId)?.displayName ?? space.profileId
         guard !profileName.isEmpty else { return space.name }
         return "\(space.name) \u{2014} \(profileName)"
     }
 
-    /// SF Symbol shown beside each Space option; falls back to the generic
-    /// stack glyph when a Space carries no custom icon.
+    /// SF Symbol beside each Space option; generic stack glyph as a fallback.
     private static func iconSymbol(for space: SpaceModel) -> String {
         space.iconName.isEmpty ? "rectangle.stack" : space.iconName
     }
+}
+
+private extension NSUserInterfaceItemIdentifier {
+    static let ruleCell = NSUserInterfaceItemIdentifier("PhiURLRuleCell")
+    static let ruleColumn = NSUserInterfaceItemIdentifier("PhiURLRuleColumn")
 }
