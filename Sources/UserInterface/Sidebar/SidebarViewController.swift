@@ -1008,6 +1008,12 @@ class SidebarViewController: NSViewController {
 
         let host = ThemedHostingController(rootView: panel, themeSource: state.themeContext)
         host.view.translatesAutoresizingMaskIntoConstraints = false
+        // Fill the sidebar at its current width — never let the form's intrinsic
+        // size (the icon grid is wider than a narrow sidebar) push the sidebar
+        // wider while creating a Space.
+        if #available(macOS 13.0, *) {
+            host.sizingOptions = []
+        }
         addChild(host)
         view.addSubview(host.view)
         host.view.snp.makeConstraints { make in

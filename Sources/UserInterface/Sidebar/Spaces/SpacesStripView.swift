@@ -590,6 +590,10 @@ struct SpacesStripView: View {
             onDelete: { space in
                 isPickerOpen = false
                 confirmDelete(space)
+            },
+            onCreate: {
+                isPickerOpen = false
+                CreateSpacePanel.requestCreation(initialProfileId: activeSpace?.profileId)
             }
         )
     }
@@ -674,11 +678,13 @@ private struct SpacePickerPopup: View {
     let onSetTheme: (String, String?) -> Void
     let currentThemeId: (String) -> String?
     let onDelete: (SpaceModel) -> Void
+    let onCreate: () -> Void
 
     private static let popoverWidth: CGFloat = 240
 
     @State private var draggingSpaceId: String?
     @State private var orderedIds: [String] = []
+    @State private var isCreateHovering: Bool = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -713,6 +719,27 @@ private struct SpacePickerPopup: View {
                 }
                 .padding(.vertical, 6)
             }
+
+            Divider()
+
+            Button(action: onCreate) {
+                HStack(spacing: 8) {
+                    Image(systemName: "plus")
+                        .font(.system(size: 13, weight: .semibold))
+                        .frame(width: 16)
+                    Text(NSLocalizedString("New Space", comment: "Spaces picker - create a new Space"))
+                        .font(.system(size: 13))
+                    Spacer(minLength: 8)
+                }
+                .foregroundStyle(Color.primary)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(isCreateHovering ? Color.primary.opacity(0.08) : Color.clear)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .onHover { isCreateHovering = $0 }
         }
         .frame(width: Self.popoverWidth)
         .frame(maxHeight: 320)

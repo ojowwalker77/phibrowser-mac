@@ -32,6 +32,9 @@ struct CreateSpacePanel: View {
     let onClose: () -> Void
 
     @State private var name: String = ""
+    /// Icon/emoji pinned to the new Space, chosen from the same picker the
+    /// Spaces settings pane uses. Defaults to the picker's first Phi icon.
+    @State private var selectedIcon: IconPickerSelection = .defaultSelection
     @State private var selectedProfileId: String = ""
     /// Built-in theme id pinned to the new Space. Pre-selected in `onAppear`;
     /// the form always pins a concrete theme — no "follow global" option here.
@@ -63,16 +66,20 @@ struct CreateSpacePanel: View {
             formStack
                 .padding(.horizontal, 20)
                 .padding(.vertical, 24)
-                .frame(width: 300)
+                .frame(width: 320)
         case .sidebar:
             // Transparent so the themed visual-effect backdrop installed by
             // `SidebarViewController.showCreateSpaceOverlay` shows through —
             // the form then sits on the active Space's overlay color and
             // opacity instead of an opaque card that ignores the Space theme.
-            VStack(spacing: 0) {
-                Spacer(minLength: 0)
-                formStack.padding(.horizontal, 16)
-                Spacer(minLength: 0)
+            // Scrolls rather than centers: the embedded icon grid makes the form
+            // taller than a short sidebar, so the create button must stay
+            // reachable.
+            ScrollView {
+                formStack
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 20)
+                    .frame(maxWidth: .infinity)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .contentShape(Rectangle())
@@ -85,7 +92,13 @@ struct CreateSpacePanel: View {
             form
             actions
         }
+        // One bounded, centered column so every element shares a width and the
+        // form never stretches across a wide sidebar. In a narrower sidebar it
+        // shrinks to fit; the icon grid reflows to match.
+        .frame(maxWidth: Self.contentWidth)
     }
+
+    private static let contentWidth: CGFloat = 280
 
     // MARK: - Sections
 
@@ -108,8 +121,29 @@ struct CreateSpacePanel: View {
         VStack(spacing: 4) {
             nameField
             profileRow
+            iconBlock
             colorBlock
         }
+    }
+
+    /// Inline icon/emoji picker, mirroring the Spaces settings pane so creating a
+    /// Space offers the same chooser as editing one. A greedy `GeometryReader`
+    /// reports the real column width so the picker fills it exactly (a plain
+    /// `.frame(maxWidth:.infinity)` leaves the adaptive grid at its 1-column
+    /// minimum, centered).
+    private var iconBlock: some View {
+        GeometryReader { geo in
+            IconPicker(
+                selected: selectedIcon,
+                showsGroups: true,
+                width: geo.size.width,
+                onSelect: { selectedIcon = $0 }
+            )
+        }
+        .frame(height: IconPicker.preferredHeight)
+        .padding(.vertical, 6)
+        .background(Color.primary.opacity(0.04))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 
     private var nameField: some View {
@@ -313,7 +347,7 @@ struct CreateSpacePanel: View {
         let newSpaceId = manager.createSpace(
             name: finalName,
             colorHex: resolvedColorHex(),
-            iconName: "rectangle.stack",
+            iconName: selectedIcon.storageValue,
             profileId: profileId
         )
         // Pin the new Space's chosen theme. Persisted now; applied when its

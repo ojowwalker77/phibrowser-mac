@@ -8,24 +8,41 @@ import SwiftUI
 struct IconPicker: View {
     let selected: IconPickerSelection?
     let showsGroups: Bool
+    /// Explicit width for the picker. Nil keeps the fixed default (262pt / 8
+    /// columns) used by popovers and the settings pane. When set, the picker
+    /// fills exactly that width and the grid reflows to as many columns as fit —
+    /// the create-Space form measures its container and passes the width in.
+    let width: CGFloat?
     let onSelect: (IconPickerSelection) -> Void
 
     private let emojiCatalog: EmojiCatalog
 
     @State private var selectedTab: IconPickerTab
 
+    /// Fixed height callers can use to size a container around the picker.
+    static let preferredHeight: CGFloat = IconPickerMetrics.height
+
     init(selected: IconPickerSelection?,
          showsGroups: Bool,
+         width: CGFloat? = nil,
          emojiCatalog: EmojiCatalog = .shared,
          onSelect: @escaping (IconPickerSelection) -> Void) {
         self.selected = selected
         self.showsGroups = showsGroups
+        self.width = width
         self.emojiCatalog = emojiCatalog
         self.onSelect = onSelect
         _selectedTab = State(initialValue: selected?.isEmoji == true ? .emoji : .icon)
     }
 
+    private var resolvedWidth: CGFloat { width ?? IconPickerMetrics.width }
+
     var body: some View {
+        pickerBody
+            .frame(width: resolvedWidth, height: IconPickerMetrics.height)
+    }
+
+    private var pickerBody: some View {
         VStack(spacing: IconPickerMetrics.segmentToGridSpacing) {
             Picker("", selection: $selectedTab) {
                 Text("Icon").tag(IconPickerTab.icon)
@@ -46,12 +63,24 @@ struct IconPicker: View {
         }
         .padding(.top, IconPickerMetrics.topPadding)
         .padding(.bottom, IconPickerMetrics.bottomPadding)
-        .frame(width: IconPickerMetrics.width, height: IconPickerMetrics.height)
+    }
+
+    /// As many fixed-size columns as fit `resolvedWidth` when an explicit width
+    /// was given, else the fixed 8-column layout.
+    private var gridColumns: [GridItem] {
+        guard width != nil else { return IconPickerMetrics.columns }
+        let usable = resolvedWidth - 2 * IconPickerMetrics.gridHorizontalPadding
+        let unit = IconPickerMetrics.itemSize + IconPickerMetrics.rowSpacing
+        let count = max(1, Int((usable + IconPickerMetrics.rowSpacing) / unit))
+        return Array(
+            repeating: GridItem(.fixed(IconPickerMetrics.itemSize), spacing: IconPickerMetrics.rowSpacing),
+            count: count
+        )
     }
 
     private var phiIconGrid: some View {
         ScrollView {
-            LazyVGrid(columns: IconPickerMetrics.columns, spacing: IconPickerMetrics.rowSpacing) {
+            LazyVGrid(columns: gridColumns, spacing: IconPickerMetrics.rowSpacing) {
                 ForEach(PhiIconCatalog.allIds, id: \.self) { id in
                     IconPickerGridButton(
                         isSelected: selected == .phiIcon(id: id),
@@ -100,7 +129,7 @@ struct IconPicker: View {
     }
 
     private func emojiItemsGrid(_ items: [EmojiItem]) -> some View {
-        LazyVGrid(columns: IconPickerMetrics.columns, spacing: IconPickerMetrics.rowSpacing) {
+        LazyVGrid(columns: gridColumns, spacing: IconPickerMetrics.rowSpacing) {
             ForEach(items) { item in
                 EmojiPickerGridButton(
                     item: item,
