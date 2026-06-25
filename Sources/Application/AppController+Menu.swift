@@ -27,6 +27,7 @@ extension AppController {
     static let spacesDeleteProfileParentItemTag = 500016
     static let viewMenuSpacesToggleItemTag = 500017
     static let viewMenuSpacesToggleSeparatorTag = 500019
+    static let viewMenuPhiSectionSeparatorTag = 500023
     static let spacesProfileSeparatorTag = 500020
     static let deleteProfileSubmenuIdentifier = NSUserInterfaceItemIdentifier("phi.spaces.deleteProfile")
     static let spacesMenuItemTag = 500018
@@ -73,6 +74,8 @@ extension AppController {
                 submenu.items.removeAll { item in
                     item.tag == CommandWrapper.PHI_TOGGLE_SIDEBAR.rawValue ||
                     item.tag == CommandWrapper.PHI_TOGGLE_CHATBAR.rawValue ||
+                    item.tag == CommandWrapper.PHI_NEW_CONVERSATION.rawValue ||
+                    item.tag == AppController.viewMenuPhiSectionSeparatorTag ||
                     item.tag == AppController.toggleBookmarkBarItemTag ||
                     item.tag == AppController.toggleBookmarkBarOnNewTabItemTag ||
                     item.tag == AppController.layoutModeDefaultItemTag ||
@@ -84,7 +87,9 @@ extension AppController {
                 }
 
                 if submenu.items.last?.isSeparatorItem == false {
-                    submenu.addItem(NSMenuItem.separator())
+                    let topSeparator = NSMenuItem.separator()
+                    topSeparator.tag = AppController.viewMenuPhiSectionSeparatorTag
+                    submenu.addItem(topSeparator)
                 }
                 
                 let layoutTtitle = NSMenuItem.sectionHeader(title: NSLocalizedString("Layout Mode", comment: "View menu - Layout mode section header in View menu"))
@@ -112,7 +117,9 @@ extension AppController {
                 traditionalLayoutItem.target = self
                 submenu.addItem(traditionalLayoutItem)
 
-                submenu.addItem(NSMenuItem.separator())
+                let bookmarkBarSeparator = NSMenuItem.separator()
+                bookmarkBarSeparator.tag = AppController.viewMenuPhiSectionSeparatorTag
+                submenu.addItem(bookmarkBarSeparator)
                 let toggleBookmarkBarItem = NSMenuItem(title: NSLocalizedString("Always Show Bookmark Bar", comment: "View menu - Menu item to always show the bookmark bar"),
                                                    action: #selector(toggleBookmarkBar(_:)),
                                                    keyEquivalent: "b")
@@ -127,7 +134,9 @@ extension AppController {
                 toggleBookmarkBarOnNewTabItem.target = self
                 submenu.addItem(toggleBookmarkBarOnNewTabItem)
 
-                submenu.addItem(NSMenuItem.separator())
+                let sidebarSeparator = NSMenuItem.separator()
+                sidebarSeparator.tag = AppController.viewMenuPhiSectionSeparatorTag
+                submenu.addItem(sidebarSeparator)
 
                 let toggleSidebarItem = NSMenuItem(title: NSLocalizedString("Toggle Sidebar", comment: "View menu - Menu item to show or hide the sidebar"),
                                                    action: #selector(toggleSidebar(_:)),
