@@ -66,7 +66,7 @@ struct CreateSpacePanel: View {
             formStack
                 .padding(.horizontal, 20)
                 .padding(.vertical, 24)
-                .frame(width: 320)
+                .frame(width: Self.contentWidth + 40)
         case .sidebar:
             // Transparent so the themed visual-effect backdrop installed by
             // `SidebarViewController.showCreateSpaceOverlay` shows through —
@@ -75,14 +75,23 @@ struct CreateSpacePanel: View {
             // Scrolls rather than centers: the embedded icon grid makes the form
             // taller than a short sidebar, so the create button must stay
             // reachable.
-            ScrollView {
-                formStack
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 20)
-                    .frame(maxWidth: .infinity)
+            //
+            // A vertical ScrollView proposes its content's *ideal* width rather
+            // than its own, so the bounded column renders at full width and
+            // clips in a narrow sidebar — and never reflows when the divider is
+            // dragged. Read the live container width from an outer GeometryReader
+            // (which tracks the hosting view's bounds across resizes) and pin the
+            // scroll content to it so the form follows the sidebar width.
+            GeometryReader { geo in
+                ScrollView {
+                    formStack
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 20)
+                        .frame(width: geo.size.width)
+                }
+                .frame(width: geo.size.width, height: geo.size.height)
+                .contentShape(Rectangle())
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .contentShape(Rectangle())
         }
     }
 
@@ -98,7 +107,7 @@ struct CreateSpacePanel: View {
         .frame(maxWidth: Self.contentWidth)
     }
 
-    private static let contentWidth: CGFloat = 280
+    private static let contentWidth: CGFloat = 200
 
     // MARK: - Sections
 
@@ -211,14 +220,29 @@ struct CreateSpacePanel: View {
         .fixedSize()
     }
 
+    private static let themeDotSpacing: CGFloat = 4
+    private static let themeDotMaxRing: CGFloat = 22
+
     private var colorBlock: some View {
         VStack(spacing: 10) {
-            HStack(spacing: 4) {
-                ForEach(Theme.builtInThemes, id: \.id) { theme in
-                    themeDot(theme)
-                        .frame(maxWidth: .infinity)
+            // Size the swatches to the available width so the whole row always
+            // fits the bounded column (and shrinks with the sidebar). A fixed
+            // ring would give the row a hard minimum wider than a narrow column,
+            // overflowing it the way the reflowing icon grid never does.
+            GeometryReader { geo in
+                let count = Theme.builtInThemes.count
+                let gaps = Self.themeDotSpacing * CGFloat(max(count - 1, 0))
+                let slot = max(0, (geo.size.width - gaps) / CGFloat(max(count, 1)))
+                let ring = min(Self.themeDotMaxRing, slot)
+                HStack(spacing: Self.themeDotSpacing) {
+                    ForEach(Theme.builtInThemes, id: \.id) { theme in
+                        themeDot(theme, ringDiameter: ring)
+                            .frame(maxWidth: .infinity)
+                    }
                 }
+                .frame(width: geo.size.width, height: geo.size.height)
             }
+            .frame(height: Self.themeDotMaxRing)
             Text(selectedThemeName)
                 .font(.system(size: 11))
                 .foregroundStyle(Color.primary.opacity(0.5))
@@ -231,9 +255,11 @@ struct CreateSpacePanel: View {
         .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 
-    /// One picker dot for a built-in theme.
+    /// One picker dot for a built-in theme, sized to the row's computed ring so
+    /// the swatches scale with the column width. The inner dot keeps the ring's
+    /// 4pt selection margin.
     @ViewBuilder
-    private func themeDot(_ theme: Theme) -> some View {
+    private func themeDot(_ theme: Theme, ringDiameter: CGFloat) -> some View {
         let isPure = theme == .pure
         let accent = Color(theme.color(for: .themeColor, appearance: appearance))
         ThemeSwatchView(
@@ -242,8 +268,8 @@ struct CreateSpacePanel: View {
             selected: selectedThemeId == theme.id,
             title: nil,
             showsContrastBorder: isPure,
-            dotDiameter: 18,
-            ringDiameter: 22,
+            dotDiameter: max(ringDiameter - 4, 0),
+            ringDiameter: ringDiameter,
             action: { selectedThemeId = theme.id }
         )
     }
