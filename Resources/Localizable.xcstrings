@@ -639,6 +639,9 @@
     "Edit..." : {
       "comment" : "Edit bookmark url menu item title\nPinned tab context menu - Edit pinned tab menu item"
     },
+    "Emoji" : {
+
+    },
     "Empty" : {
       "comment" : "Bookmarks menu - Disabled placeholder item shown when a bookmark folder has no child bookmarks\nSearch Tabs - Empty bookmark folder placeholder\nSearch Tabs - Empty bookmark menu placeholder"
     },
@@ -788,6 +791,9 @@
     },
     "iCloud Passwords" : {
       "comment" : "Onboarding password manager - iCloud Passwords option"
+    },
+    "Icon" : {
+
     },
     "Image file not found" : {
       "comment" : "Image preview error"

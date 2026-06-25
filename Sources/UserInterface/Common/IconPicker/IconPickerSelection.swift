@@ -1,0 +1,52 @@
+// Copyright 2026 Phinomenon Inc.
+//
+// Use of this source code is governed by an Apache license that can be
+// found in the LICENSE file.
+
+import Foundation
+
+enum IconPickerSelection: Hashable, Identifiable {
+    case phiIcon(id: String)
+    case emoji(id: String, text: String)
+
+    static let defaultPhiIconId = "phi-icon-1"
+    static let defaultSelection = IconPickerSelection.phiIcon(id: defaultPhiIconId)
+
+    private static let phiIconPrefix = "phi:"
+    private static let emojiPrefix = "emoji:"
+
+    var id: String {
+        storageValue
+    }
+
+    var storageValue: String {
+        switch self {
+        case .phiIcon(let id):
+            return Self.phiIconPrefix + id
+        case .emoji(let id, _):
+            return Self.emojiPrefix + id
+        }
+    }
+
+    var isEmoji: Bool {
+        if case .emoji = self { return true }
+        return false
+    }
+
+    static func fromStorageValue(_ value: String,
+                                 emojiCatalog: EmojiCatalog = .shared) -> IconPickerSelection? {
+        if value.hasPrefix(Self.phiIconPrefix) {
+            let id = String(value.dropFirst(Self.phiIconPrefix.count))
+            guard PhiIconCatalog.allIds.contains(id) else { return nil }
+            return .phiIcon(id: id)
+        }
+
+        if value.hasPrefix(Self.emojiPrefix) {
+            let id = String(value.dropFirst(Self.emojiPrefix.count))
+            guard let text = emojiCatalog.text(for: id) else { return nil }
+            return .emoji(id: id, text: text)
+        }
+
+        return nil
+    }
+}

@@ -149,6 +149,11 @@
 		37FA01042FDA000100000004 /* LocalStoreCompatibilityController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37FA01142FDA000100000004 /* LocalStoreCompatibilityController.swift */; };
 		37FC8C922F335942004675B8 /* WebContentProgressBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37FC8C912F335942004675B8 /* WebContentProgressBarView.swift */; };
 		37FC8DAA2F39B2DE004675B8 /* LayoutModeSettingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37FC8DA92F39B2DE004675B8 /* LayoutModeSettingView.swift */; };
+		CD1100060000000000000001 /* IconPickerSelection.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD1100010000000000000001 /* IconPickerSelection.swift */; };
+		CD1100070000000000000001 /* PhiIconCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD1100020000000000000001 /* PhiIconCatalog.swift */; };
+		CD1100080000000000000001 /* EmojiCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD1100030000000000000001 /* EmojiCatalog.swift */; };
+		CD1100090000000000000001 /* IconPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD1100040000000000000001 /* IconPicker.swift */; };
+		CD11000B0000000000000001 /* emoji-catalog.json in Resources */ = {isa = PBXBuildFile; fileRef = CD11000A0000000000000001 /* emoji-catalog.json */; };
 		3BCDDE6FBABE4BD8A51F0127 /* TabGroupCellView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE7E61A49E8A472DB330779E /* TabGroupCellView.swift */; };
 		4508A9362EEFF2EB007C94E2 /* AccountWebWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4508A9352EEFF2EB007C94E2 /* AccountWebWindowController.swift */; };
 		4D454D4F5259000000000001 /* MemoryUsageModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D454D4F5259000000000002 /* MemoryUsageModels.swift */; };
@@ -792,6 +797,11 @@
 		CC59CE000002000000000002 /* SpacesStripView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpacesStripView.swift; sourceTree = "<group>"; };
 		CC59CE000003000000000002 /* ProfileManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileManager.swift; sourceTree = "<group>"; };
 		CC5C51F52FB5C5560044D255 /* credits.html */ = {isa = PBXFileReference; lastKnownFileType = text.html; path = credits.html; sourceTree = "<group>"; };
+		CD1100010000000000000001 /* IconPickerSelection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IconPickerSelection.swift; sourceTree = "<group>"; };
+		CD1100020000000000000001 /* PhiIconCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhiIconCatalog.swift; sourceTree = "<group>"; };
+		CD1100030000000000000001 /* EmojiCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmojiCatalog.swift; sourceTree = "<group>"; };
+		CD1100040000000000000001 /* IconPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IconPicker.swift; sourceTree = "<group>"; };
+		CD11000A0000000000000001 /* emoji-catalog.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "Emoji/emoji-catalog.json"; sourceTree = "<group>"; };
 		CC6335F62E4B29E000A176DA /* Logging.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Logging.swift; sourceTree = "<group>"; };
 		CC6335F82E4DF65700A176DA /* PhiLogFormatter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhiLogFormatter.swift; sourceTree = "<group>"; };
 		CC6336012E4EE43200A176DA /* PhiLogging.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = PhiLogging.h; sourceTree = "<group>"; };
@@ -1531,6 +1541,7 @@
 				37C1B2FF2EE672D500DD4496 /* LottieFiles */,
 				CC8B35202E81618F00C8A380 /* PhiBrowser-Info.plist */,
 				B0C4694D2E3B10E2007F0C7A /* Assets.xcassets */,
+				CD11000A0000000000000001 /* emoji-catalog.json */,
 				B0C469522E3B10E2007F0C7A /* PhiBrowser.entitlements */,
 				E10000000000000000000001 /* PhiBrowser-OpenSource.entitlements */,
 				37DEADB82F5FCDBC00129429 /* PhiBrowser-Canary.entitlements */,
@@ -1901,9 +1912,21 @@
 			path = AddressBar;
 			sourceTree = "<group>";
 		};
+		CD1100050000000000000001 /* IconPicker */ = {
+			isa = PBXGroup;
+			children = (
+				CD1100030000000000000001 /* EmojiCatalog.swift */,
+				CD1100040000000000000001 /* IconPicker.swift */,
+				CD1100010000000000000001 /* IconPickerSelection.swift */,
+				CD1100020000000000000001 /* PhiIconCatalog.swift */,
+			);
+			path = IconPicker;
+			sourceTree = "<group>";
+		};
 		CCBF8F362E653A4200B9A99E /* Common */ = {
 			isa = PBXGroup;
 			children = (
+				CD1100050000000000000001 /* IconPicker */,
 				8EF36C022F4E9E7000FCC91E /* Tabs */,
 				374BCE982F7157FD0043C656 /* TabAreaContextMenuHelper.swift */,
 				37B9780F2EF403AB007E0568 /* GradientBorderButton.swift */,
@@ -2195,6 +2218,7 @@
 				CC99097C2EBC9F090046BC81 /* login-bg.mp4 in Resources */,
 				CC5C51F62FB5C5560044D255 /* credits.html in Resources */,
 				3787811F2FE942E40028969F /* TimeMachineRollbackPolicy.json in Resources */,
+				CD11000B0000000000000001 /* emoji-catalog.json in Resources */,
 				8EC502152F67AF7F00CE7338 /* DownloadSafety.xcstrings in Resources */,
 				CC4BFB932E97991A00CC6162 /* Auth0.plist in Resources */,
 			);
@@ -2505,6 +2529,10 @@
 				37604F632F14C52300B9FB37 /* DefaultColors.swift in Sources */,
 				8E9024952FB4446100852B00 /* TabGroupChipMosaicView.swift in Sources */,
 				37B978102EF403AB007E0568 /* GradientBorderButton.swift in Sources */,
+				CD1100060000000000000001 /* IconPickerSelection.swift in Sources */,
+				CD1100070000000000000001 /* PhiIconCatalog.swift in Sources */,
+				CD1100080000000000000001 /* EmojiCatalog.swift in Sources */,
+				CD1100090000000000000001 /* IconPicker.swift in Sources */,
 				CC376D272EC6D5EE00270B93 /* DynamicColor+RGBA.swift in Sources */,
 				CC376D282EC6D5EE00270B93 /* DynamicColor+Deriving.swift in Sources */,
 				37C1B2862EE03C7300DD4496 /* DownloadsListViewController.swift in Sources */,
