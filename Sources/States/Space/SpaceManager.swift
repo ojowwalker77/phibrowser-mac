@@ -7,6 +7,169 @@ import Cocoa
 import Combine
 import Foundation
 
+private enum NativeWindowTabBarSuppressor {
+    private static let slotTabbingIdentifierPrefix = "phi.space.slot."
+
+    static func installIfNeeded() {
+        _ = install
+    }
+
+    private static let install: Void = {
+        if let tabBarClass = NSClassFromString("NSTabBar") {
+            swizzleInstanceMethod(
+                on: tabBarClass,
+                originalSelector: #selector(NSView.viewWillMove(toWindow:)),
+                replacementProviderClass: NSView.self,
+                replacementSelector: #selector(NSView.phi_spaceTabBar_viewWillMove(toWindow:))
+            )
+            swizzleInstanceMethod(
+                on: tabBarClass,
+                originalSelector: #selector(NSView.viewDidMoveToWindow),
+                replacementProviderClass: NSView.self,
+                replacementSelector: #selector(NSView.phi_spaceTabBar_viewDidMoveToWindow)
+            )
+            swizzleInstanceMethod(
+                on: tabBarClass,
+                originalSelector: #selector(NSView.layout),
+                replacementProviderClass: NSView.self,
+                replacementSelector: #selector(NSView.phi_spaceTabBar_layout)
+            )
+            swizzleInstanceMethod(
+                on: tabBarClass,
+                originalSelector: #selector(setter: NSView.isHidden),
+                replacementProviderClass: NSView.self,
+                replacementSelector: #selector(NSView.phi_spaceTabBar_setHidden(_:))
+            )
+        }
+
+        swizzleInstanceMethod(
+            on: NSWindow.self,
+            originalSelector: NSSelectorFromString("_setTabBarAccessoryViewController:"),
+            replacementProviderClass: NSWindow.self,
+            replacementSelector: #selector(NSWindow.phi_spaceTabBar_setTabBarAccessoryViewController(_:))
+        )
+    }()
+
+    private static func swizzleInstanceMethod(
+        on targetClass: AnyClass,
+        originalSelector: Selector,
+        replacementProviderClass: AnyClass,
+        replacementSelector: Selector
+    ) {
+        guard let originalMethod = class_getInstanceMethod(targetClass, originalSelector),
+              let replacementMethod = class_getInstanceMethod(replacementProviderClass, replacementSelector) else {
+            return
+        }
+
+        _ = class_addMethod(
+            targetClass,
+            originalSelector,
+            method_getImplementation(originalMethod),
+            method_getTypeEncoding(originalMethod)
+        )
+        guard class_addMethod(
+            targetClass,
+            replacementSelector,
+            method_getImplementation(replacementMethod),
+            method_getTypeEncoding(replacementMethod)
+        ),
+              let targetOriginalMethod = class_getInstanceMethod(targetClass, originalSelector),
+              let targetReplacementMethod = class_getInstanceMethod(targetClass, replacementSelector) else {
+            return
+        }
+
+        method_exchangeImplementations(targetOriginalMethod, targetReplacementMethod)
+    }
+
+    static func isManagedSlotWindow(_ window: NSWindow?) -> Bool {
+        window?.tabbingIdentifier.hasPrefix(slotTabbingIdentifierPrefix) == true
+    }
+
+    static func hideIfNativeTabBar(_ view: NSView, in window: NSWindow? = nil) {
+        guard isNativeTabBar(view),
+              isManagedSlotWindow(window ?? view.window) else {
+            return
+        }
+
+        if !view.isHidden {
+            view.isHidden = true
+        }
+        view.alphaValue = 0
+        view.wantsLayer = true
+        view.layer?.opacity = 0
+    }
+
+    static func hideNativeTabBarDescendants(of view: NSView, in window: NSWindow? = nil) {
+        hideIfNativeTabBar(view, in: window)
+        for subview in view.subviews {
+            hideNativeTabBarDescendants(of: subview, in: window)
+        }
+    }
+
+    static func containsNativeTabBar(in view: NSView) -> Bool {
+        if isNativeTabBar(view) {
+            return true
+        }
+
+        for subview in view.subviews {
+            if containsNativeTabBar(in: subview) {
+                return true
+            }
+        }
+
+        return false
+    }
+
+    private static func isNativeTabBar(_ view: NSView) -> Bool {
+        String(describing: type(of: view)) == "NSTabBar"
+    }
+}
+
+private extension NSWindow {
+    @objc func phi_spaceTabBar_setTabBarAccessoryViewController(
+        _ controller: NSTitlebarAccessoryViewController?
+    ) {
+        guard NativeWindowTabBarSuppressor.isManagedSlotWindow(self),
+              let controller,
+              NativeWindowTabBarSuppressor.containsNativeTabBar(in: controller.view) else {
+            phi_spaceTabBar_setTabBarAccessoryViewController(controller)
+            return
+        }
+
+        NativeWindowTabBarSuppressor.hideNativeTabBarDescendants(of: controller.view, in: self)
+        phi_spaceTabBar_setTabBarAccessoryViewController(nil)
+    }
+}
+
+private extension NSView {
+    @objc func phi_spaceTabBar_viewWillMove(toWindow newWindow: NSWindow?) {
+        NativeWindowTabBarSuppressor.hideIfNativeTabBar(self, in: newWindow)
+        phi_spaceTabBar_viewWillMove(toWindow: newWindow)
+        NativeWindowTabBarSuppressor.hideIfNativeTabBar(self, in: newWindow)
+    }
+
+    @objc func phi_spaceTabBar_viewDidMoveToWindow() {
+        phi_spaceTabBar_viewDidMoveToWindow()
+        NativeWindowTabBarSuppressor.hideIfNativeTabBar(self)
+    }
+
+    @objc func phi_spaceTabBar_layout() {
+        NativeWindowTabBarSuppressor.hideIfNativeTabBar(self)
+        phi_spaceTabBar_layout()
+        NativeWindowTabBarSuppressor.hideIfNativeTabBar(self)
+    }
+
+    @objc func phi_spaceTabBar_setHidden(_ hidden: Bool) {
+        if NativeWindowTabBarSuppressor.isManagedSlotWindow(window) {
+            phi_spaceTabBar_setHidden(true)
+            NativeWindowTabBarSuppressor.hideIfNativeTabBar(self)
+            return
+        }
+
+        phi_spaceTabBar_setHidden(hidden)
+    }
+}
+
 /// App-scoped owner of the Space list and per-window-group active-space
 /// selection.
 ///
@@ -215,7 +378,7 @@ final class SpaceManager: ObservableObject {
         // windowId-keyed intent yet because `mainBrowserWindowCreated`
         // fires inside `bridge.createBrowser` (see `currentSpawn` doc).
         if let ctx = currentSpawn, let slot = ctx.slot {
-            // Stash the frame/sidebar metadata against this windowId so
+            // Stash the sidebar metadata against this windowId so
             // `slot.registerWindow` (which runs inside the controller init,
             // also inside `createBrowser`) finds it.
             slot.absorbCurrentSpawn(ctx: ctx, windowId: windowId)
@@ -1307,6 +1470,13 @@ final class SpaceWindowSlot: ObservableObject {
         iconPickerRequestToken &+= 1
     }
 
+    /// AppKit tab-group identity for every Chromium NSWindow hosted by this
+    /// slot. This keeps all Space windows for one user-perceived window in
+    /// the same native tab group, so AppKit owns frame/fullscreen desktop
+    /// affinity while `SpaceWindowSlot` still owns Space selection and
+    /// animations.
+    private let tabbingIdentifier = "phi.space.slot.\(UUID().uuidString)"
+
     /// spaceId → controller dedicated to this slot for that Space.
     /// Populated lazily by `activate`'s spawn path and `registerWindow`.
     private(set) var windowsBySpaceId: [String: MainBrowserWindowController] = [:]
@@ -1361,6 +1531,11 @@ final class SpaceWindowSlot: ObservableObject {
     /// in sync with reality and tear down on unregister to avoid stale
     /// callbacks against deallocated controllers.
     private var keyObservationsByWindowId: [Int: NSObjectProtocol] = [:]
+
+    /// windowId → titlebar accessory KVO. AppKit recreates the native window
+    /// tab bar as a titlebar accessory when tab-group selection changes; remove
+    /// it synchronously as it appears to avoid a one-frame flash.
+    private var tabBarAccessoryObservationsByWindowId: [Int: NSKeyValueObservation] = [:]
 
     /// Space IDs whose imminent window close is driven by the user
     /// closing the last tab in the active Space (⌘W on tab / tab X
@@ -1607,12 +1782,12 @@ final class SpaceWindowSlot: ObservableObject {
                     visibleController = target
                 } else {
                     // Instant present (no slide) for `animated: false` callers:
-                    // front the target and order the leaving window out in the
-                    // same turn, then fire `onSwapSettled` with the target
-                    // already on screen and `visibleController` repointed — so a
+                    // front the target and hide the leaving window in the same
+                    // turn, then fire `onSwapSettled` with the target already
+                    // on screen and `visibleController` repointed — so a
                     // post-swap close (e.g. `deleteSpace`) lands off-screen.
-                    target.window?.makeKeyAndOrderFront(nil)
-                    previous?.window?.orderOut(nil)
+                    makeKeyAndOrderFrontHidingSlotTabBar(target.window)
+                    orderOutIfNotTabbedWithTarget(previous?.window, targetWindow: target.window)
                     visibleController = target
                     onSwapSettled?()
                 }
@@ -1774,7 +1949,7 @@ final class SpaceWindowSlot: ObservableObject {
                             targetColorHex: targetColorHex
                         )
                     }
-                    previous?.window?.orderOut(nil)
+                    self.orderOutIfNotTabbedWithTarget(previous?.window, targetWindow: registered.window)
                     // The spawned target is up and the leaving window is
                     // hidden — let a post-swap close (e.g. `deleteSpace`) run
                     // now that it lands off-screen. No-op for ordinary
@@ -1854,8 +2029,8 @@ final class SpaceWindowSlot: ObservableObject {
         // per-style function can snapshot OR a pre-captured override.
         // Without either, surface the target instantly.
         guard previousVisible || leavingSnapshotOverride != nil else {
-            targetWindow.makeKeyAndOrderFront(nil)
-            previousWindow?.orderOut(nil)
+            makeKeyAndOrderFrontHidingSlotTabBar(targetWindow)
+            orderOutIfNotTabbedWithTarget(previousWindow, targetWindow: targetWindow)
             onSwapSettled?()
             return
         }
@@ -1935,8 +2110,8 @@ final class SpaceWindowSlot: ObservableObject {
         windowSlideCancel?()
 
         let presentInstantly: () -> Void = {
-            targetWindow.makeKeyAndOrderFront(nil)
-            previousWindow?.orderOut(nil)
+            self.makeKeyAndOrderFrontHidingSlotTabBar(targetWindow)
+            self.orderOutIfNotTabbedWithTarget(previousWindow, targetWindow: targetWindow)
             onSwapSettled?()
         }
 
@@ -1992,8 +2167,12 @@ final class SpaceWindowSlot: ObservableObject {
         let finalize: () -> Void = { [weak self, weak prevSidebar, weak placeholder] in
             guard !didFinish else { return }
             didFinish = true
-            targetWindow.makeKeyAndOrderFront(nil)
-            previousWindow.orderOut(nil)
+            if let self {
+                self.makeKeyAndOrderFrontHidingSlotTabBar(targetWindow)
+            } else {
+                targetWindow.makeKeyAndOrderFront(nil)
+            }
+            self?.orderOutIfNotTabbedWithTarget(previousWindow, targetWindow: targetWindow)
             placeholder?.removeFromSuperview()
             self?.activeSidebarOverlay?.cancel()
             prevSidebar?.setSwitchBandContentHidden(false)
@@ -2221,8 +2400,8 @@ final class SpaceWindowSlot: ObservableObject {
         }
 
         guard let targetContent = targetWindow.contentView else {
-            targetWindow.makeKeyAndOrderFront(nil)
-            previousWindow?.orderOut(nil)
+            makeKeyAndOrderFrontHidingSlotTabBar(targetWindow)
+            orderOutIfNotTabbedWithTarget(previousWindow, targetWindow: targetWindow)
             onSwapSettled?()
             return
         }
@@ -2238,8 +2417,8 @@ final class SpaceWindowSlot: ObservableObject {
             previousImage = leavingSnapshotOverride
         }
         guard let previousImage else {
-            targetWindow.makeKeyAndOrderFront(nil)
-            previousWindow?.orderOut(nil)
+            makeKeyAndOrderFrontHidingSlotTabBar(targetWindow)
+            orderOutIfNotTabbedWithTarget(previousWindow, targetWindow: targetWindow)
             onSwapSettled?()
             return
         }
@@ -2250,8 +2429,8 @@ final class SpaceWindowSlot: ObservableObject {
         targetContent.layoutSubtreeIfNeeded()
 
         guard let targetImage = snapshotContent(of: targetContent) else {
-            targetWindow.makeKeyAndOrderFront(nil)
-            previousWindow?.orderOut(nil)
+            makeKeyAndOrderFrontHidingSlotTabBar(targetWindow)
+            orderOutIfNotTabbedWithTarget(previousWindow, targetWindow: targetWindow)
             onSwapSettled?()
             return
         }
@@ -2274,8 +2453,8 @@ final class SpaceWindowSlot: ObservableObject {
         targetContent.addSubview(overlay, positioned: .above, relativeTo: nil)
         activeSidebarOverlay = overlay
 
-        targetWindow.makeKeyAndOrderFront(nil)
-        previousWindow?.orderOut(nil)
+        makeKeyAndOrderFrontHidingSlotTabBar(targetWindow)
+        orderOutIfNotTabbedWithTarget(previousWindow, targetWindow: targetWindow)
 
         overlay.runAnimation(duration: Self.swapAnimationDuration) { [weak self, weak overlay] in
             overlay?.removeFromSuperview()
@@ -2357,8 +2536,8 @@ final class SpaceWindowSlot: ObservableObject {
               !targetContent.subviews.isEmpty,
               let leavingImage = leavingSnapshot else {
             targetWindow.setFrame(previousWindow.frame, display: false)
-            targetWindow.makeKeyAndOrderFront(nil)
-            previousWindow.orderOut(nil)
+            makeKeyAndOrderFrontHidingSlotTabBar(targetWindow)
+            orderOutIfNotTabbedWithTarget(previousWindow, targetWindow: targetWindow)
             onSwapSettled?()
             return
         }
@@ -2413,8 +2592,8 @@ final class SpaceWindowSlot: ObservableObject {
         for btn in targetButtons { btn.alphaValue = 0 }
         CATransaction.commit()
 
-        targetWindow.makeKeyAndOrderFront(nil)
-        previousWindow.orderOut(nil)
+        makeKeyAndOrderFrontHidingSlotTabBar(targetWindow)
+        orderOutIfNotTabbedWithTarget(previousWindow, targetWindow: targetWindow)
 
         isAnimatingWindowSlide = true
 
@@ -2515,6 +2694,171 @@ final class SpaceWindowSlot: ObservableObject {
         return NSImage(cgImage: cgImage, size: size)
     }
 
+    // MARK: - Native window tab group
+
+    /// Marks a Chromium NSWindow as belonging to this slot's native AppKit tab
+    /// group. The identifier is slot-scoped so automatic AppKit behavior never
+    /// merges windows across user-perceived Phi windows.
+    private func configureWindowForSlotTabGroup(_ window: NSWindow) {
+        NativeWindowTabBarSuppressor.installIfNeeded()
+        window.tabbingIdentifier = tabbingIdentifier
+        window.tabbingMode = .preferred
+    }
+
+    /// Reconciles every live Space window in this slot into one native tab
+    /// group. When the slot is already full screen, keep the existing full
+    /// screen window as the grouping anchor; anchoring on a freshly-spawned
+    /// normal window makes AppKit tear down the full screen Space before the
+    /// new window can join it as a tab.
+    private func syncSlotTabGroup(selecting selectedWindow: NSWindow? = nil) {
+        let windows = windowsBySpaceId.values.compactMap(\.window)
+        guard let anchor = slotTabGroupAnchor(selecting: selectedWindow, in: windows) else { return }
+
+        for window in windows {
+            configureWindowForSlotTabGroup(window)
+            inheritFullScreenTabEligibility(from: anchor, to: window)
+        }
+
+        for window in windows where window !== anchor {
+            guard !windowsShareTabGroup(anchor, window) else { continue }
+            anchor.addTabbedWindow(window, ordered: .below)
+        }
+
+        if let selectedWindow,
+           let tabGroup = selectedWindow.tabGroup,
+           tabGroup.windows.contains(where: { $0 === selectedWindow }) {
+            tabGroup.selectedWindow = selectedWindow
+        }
+        hideSlotTabBars(in: windows)
+    }
+
+    private func slotTabGroupAnchor(selecting selectedWindow: NSWindow?, in windows: [NSWindow]) -> NSWindow? {
+        if let visibleWindow = visibleController?.window,
+           visibleWindow.styleMask.contains(.fullScreen),
+           windows.contains(where: { $0 === visibleWindow }) {
+            return visibleWindow
+        }
+
+        if let fullScreenWindow = windows.first(where: { $0.styleMask.contains(.fullScreen) }) {
+            return fullScreenWindow
+        }
+
+        return selectedWindow ?? visibleController?.window ?? windows.first
+    }
+
+    private func inheritFullScreenTabEligibility(from anchor: NSWindow, to window: NSWindow) {
+        guard anchor.styleMask.contains(.fullScreen) else { return }
+
+        var behavior = window.collectionBehavior
+        behavior.remove(.fullScreenNone)
+        behavior.insert(.fullScreenPrimary)
+        window.collectionBehavior = behavior
+    }
+
+    private func makeKeyAndOrderFrontHidingSlotTabBar(_ window: NSWindow?) {
+        guard let window else { return }
+
+        hideSlotTabBars()
+        if let tabGroup = window.tabGroup,
+           tabGroup.windows.count > 1,
+           tabGroup.windows.contains(where: { $0 === window }) {
+            tabGroup.selectedWindow = window
+            hideSlotTabBars(in: tabGroup.windows)
+        }
+        removeNativeTabBarAccessories(from: window)
+
+        window.makeKeyAndOrderFront(nil)
+
+        removeNativeTabBarAccessories(from: window)
+        hideSlotTabBars()
+    }
+
+    private func observeNativeTabBarAccessories(for controller: MainBrowserWindowController) {
+        guard tabBarAccessoryObservationsByWindowId[controller.windowId] == nil,
+              let window = controller.window else {
+            return
+        }
+
+        tabBarAccessoryObservationsByWindowId[controller.windowId] = window.observe(
+            \.titlebarAccessoryViewControllers,
+            options: [.new]
+        ) { [weak self, weak window] _, _ in
+            guard let self, let window else { return }
+            self.removeNativeTabBarAccessories(from: window)
+        }
+        removeNativeTabBarAccessories(from: window)
+    }
+
+    /// AppKit hides the non-selected window in a tab group for us. Keep the
+    /// manual `orderOut` fallback only for windows that are not yet grouped,
+    /// preserving current behavior for cold/failed grouping paths.
+    private func orderOutIfNotTabbedWithTarget(_ previousWindow: NSWindow?, targetWindow: NSWindow?) {
+        guard let previousWindow else { return }
+        if windowsShareTabGroup(previousWindow, targetWindow) {
+            hideSlotTabBars()
+            return
+        }
+        previousWindow.orderOut(nil)
+    }
+
+    /// Used by restore-time callers that need to keep a sibling Space window
+    /// off-screen. If AppKit is already managing that sibling as a non-selected
+    /// tab in this slot's tab group, doing nothing preserves the group.
+    func orderOutIfNotManagedBySlotTabGroup(_ controller: MainBrowserWindowController) {
+        guard let window = controller.window else { return }
+        if isTabbedWithAnySibling(window) {
+            hideSlotTabBars()
+            return
+        }
+        window.orderOut(nil)
+    }
+
+    /// AppKit does not expose a public setter for `NSWindowTabGroup`'s tab bar.
+    /// The tab bar is installed as a titlebar accessory, so keep this
+    /// compatibility shim narrow and local to the native tab-group experiment.
+    private func hideSlotTabBars(in windows: [NSWindow]? = nil) {
+        let targetWindows = windows ?? windowsBySpaceId.values.compactMap(\.window)
+        for window in targetWindows {
+            removeNativeTabBarAccessories(from: window)
+        }
+
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            let targetWindows = windows ?? self.windowsBySpaceId.values.compactMap(\.window)
+            for window in targetWindows {
+                self.removeNativeTabBarAccessories(from: window)
+            }
+        }
+    }
+
+    private func removeNativeTabBarAccessories(from window: NSWindow) {
+        for index in window.titlebarAccessoryViewControllers.indices.reversed() {
+            let accessory = window.titlebarAccessoryViewControllers[index]
+            guard NativeWindowTabBarSuppressor.containsNativeTabBar(in: accessory.view) else { continue }
+            NativeWindowTabBarSuppressor.hideNativeTabBarDescendants(of: accessory.view, in: window)
+            window.removeTitlebarAccessoryViewController(at: index)
+        }
+    }
+
+    private func isTabbedWithAnySibling(_ window: NSWindow) -> Bool {
+        windowsBySpaceId.values.contains { sibling in
+            guard let siblingWindow = sibling.window,
+                  siblingWindow !== window else { return false }
+            return windowsShareTabGroup(window, siblingWindow)
+        }
+    }
+
+    private func windowsShareTabGroup(_ lhs: NSWindow?, _ rhs: NSWindow?) -> Bool {
+        guard let lhs,
+              let rhs,
+              lhs !== rhs,
+              let lhsGroup = lhs.tabGroup,
+              let rhsGroup = rhs.tabGroup else {
+            return false
+        }
+        return lhsGroup === rhsGroup
+    }
+
     // MARK: - Registration (called by SpaceManager / MainBrowserWindowController)
 
     /// Registers (or replaces) the controller hosting `spaceId` in this slot.
@@ -2547,6 +2891,7 @@ final class SpaceWindowSlot: ObservableObject {
             manager?.persistSlotsSnapshot()
         }
         if let window = controller.window {
+            observeNativeTabBarAccessories(for: controller)
             // Follow the user across macOS desktops. Each sibling NSWindow
             // is tied to whatever desktop it was last shown on; without
             // this, dragging the visible window to a new desktop and then
@@ -2582,7 +2927,9 @@ final class SpaceWindowSlot: ObservableObject {
         // the frame, and the target window surfaces at its own old position.
         // The original `visibleController == nil` branch is preserved for
         // the very first registration in a slot.
-        if visibleController == nil || spaceId == activeSpaceId {
+        let shouldBecomeVisible = visibleController == nil || spaceId == activeSpaceId
+        syncSlotTabGroup(selecting: shouldBecomeVisible ? controller.window : visibleController?.window)
+        if shouldBecomeVisible {
             visibleController = controller
         }
         // A profile-change respawn left the replaced window on screen until
@@ -2668,6 +3015,7 @@ final class SpaceWindowSlot: ObservableObject {
         if let token = keyObservationsByWindowId.removeValue(forKey: controller.windowId) {
             NotificationCenter.default.removeObserver(token)
         }
+        tabBarAccessoryObservationsByWindowId.removeValue(forKey: controller.windowId)?.invalidate()
         let wasVisible = (visibleController === controller)
         if wasVisible {
             let siblingWithTabs = isTabDriven ? firstSiblingWithTabs() : nil
@@ -2675,10 +3023,8 @@ final class SpaceWindowSlot: ObservableObject {
                 // Tab-driven close with a viable sibling: hand off to
                 // the sibling instead of tearing the slot down.
                 // `visibleController` is left pointing at the closing
-                // controller so `activate` captures its frame as the
-                // inherited frame for the target before performing the
-                // swap. The pre-close composite snapshot is threaded in
-                // so the per-style animation can run even after the
+                // controller so the pre-close composite snapshot can be
+                // threaded into the per-style animation even after the
                 // closing window's GPU surface has been drained.
                 AppLogInfo("[SpaceWindowSlot] tab-driven close of \(spaceId); switching to sibling \(siblingWithTabs)")
                 activate(spaceId: siblingWithTabs, leavingSnapshotOverride: leavingSnapshot)
@@ -2721,6 +3067,7 @@ final class SpaceWindowSlot: ObservableObject {
         if let token = keyObservationsByWindowId.removeValue(forKey: controller.windowId) {
             NotificationCenter.default.removeObserver(token)
         }
+        tabBarAccessoryObservationsByWindowId.removeValue(forKey: controller.windowId)?.invalidate()
         manager?.pushSpaceStateToChromium()
         manager?.persistSlotsSnapshot()
         if removeSlotIfEmpty, windowsBySpaceId.isEmpty {
@@ -2832,6 +3179,7 @@ final class SpaceWindowSlot: ObservableObject {
 
     private func handleWindowDidBecomeKey(spaceId: String) {
         guard let controller = windowsBySpaceId[spaceId] else { return }
+        hideSlotTabBars()
         let previousSpaceId = activeSpaceId
         let previous = visibleController
 
@@ -3022,6 +3370,10 @@ final class SpaceWindowSlot: ObservableObject {
             NotificationCenter.default.removeObserver(token)
         }
         visibleFrameObservers.removeAll()
+        for observation in tabBarAccessoryObservationsByWindowId.values {
+            observation.invalidate()
+        }
+        tabBarAccessoryObservationsByWindowId.removeAll()
     }
 
     deinit {
@@ -3099,4 +3451,3 @@ private final class SidebarSwapOverlay: NSView {
         removeFromSuperview()
     }
 }
-

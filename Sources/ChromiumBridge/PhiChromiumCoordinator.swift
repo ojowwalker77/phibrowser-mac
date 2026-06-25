@@ -397,7 +397,11 @@ extension PhiChromiumCoordinator: PhiChromiumBridgeDelegate {
                     return resolvedSlot.activeSpaceId == spaceId
                 }()
                 if !isActiveForSlot {
-                    mainWindowController.window?.orderOut(nil)
+                    if let resolvedSlot {
+                        resolvedSlot.orderOutIfNotManagedBySlotTabGroup(mainWindowController)
+                    } else {
+                        mainWindowController.window?.orderOut(nil)
+                    }
                     AppLogInfo("🌐 [Chromium] Restored sibling Space window kept hidden — spaceId=\(spaceId), activeSpaceId=\(resolvedSlot?.activeSpaceId ?? "nil")")
                 }
             } else {
