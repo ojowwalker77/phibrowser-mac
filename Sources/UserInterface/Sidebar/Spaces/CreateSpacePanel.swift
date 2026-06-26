@@ -75,9 +75,12 @@ struct CreateSpacePanel: View {
             // `SidebarViewController.showCreateSpaceOverlay` shows through —
             // the form then sits on the active Space's overlay color and
             // opacity instead of an opaque card that ignores the Space theme.
-            // Scrolls rather than centers: the embedded icon grid makes the form
-            // taller than a short sidebar, so the create button must stay
-            // reachable.
+            // Vertically centered when the form is shorter than the sidebar, but
+            // still scrolls when the embedded icon grid makes it taller than a
+            // short sidebar so the create button stays reachable: pinning a
+            // `minHeight` of the container expands the content frame to the
+            // sidebar height (SwiftUI centers within it by default) while letting
+            // it grow past that height to drive the ScrollView.
             //
             // A vertical ScrollView proposes its content's *ideal* width rather
             // than its own, so the bounded column renders at full width and
@@ -91,6 +94,7 @@ struct CreateSpacePanel: View {
                         .padding(.horizontal, 16)
                         .padding(.vertical, 20)
                         .frame(width: geo.size.width)
+                        .frame(minHeight: geo.size.height)
                 }
                 .frame(width: geo.size.width, height: geo.size.height)
                 .contentShape(Rectangle())
