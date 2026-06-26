@@ -1788,6 +1788,22 @@ final class SpaceWindowSlot: ObservableObject {
                 if target.browserState.tabs.isEmpty {
                     target.browserState.createQuickLookupTab()
                 }
+                // After a cold-launch restore into fullscreen,
+                // `reconcileRestoreVisibility` hard-`orderOut`s the sibling
+                // Space windows, which AppKit pops out of this slot's native
+                // tab group. The swap below assumes the target is still a tab
+                // in the fullscreen window's group — surfacing a detached,
+                // normal-styleMask window while the leaving window owns its own
+                // macOS fullscreen Space makes macOS spawn a blank fullscreen
+                // Space (the black workspace in Mission Control). Rebuild the
+                // group first, anchored on the fullscreen window
+                // (`slotTabGroupAnchor`) and keeping the leaving window selected
+                // so the slide animation still reads it as front, so the target
+                // re-enters the fullscreen group and the swap selects a tab in
+                // the same Space instead of creating a new one.
+                if slotHasFullScreenWindow {
+                    syncSlotTabGroup(selecting: previous?.window)
+                }
                 if animated {
                     performSwap(
                         from: previous,
@@ -2764,6 +2780,21 @@ final class SpaceWindowSlot: ObservableObject {
         }
 
         return selectedWindow ?? visibleController?.window ?? windows.first
+    }
+
+    /// True when any window in this slot is currently in native macOS
+    /// fullscreen. In fullscreen the slot's whole native tab group shares one
+    /// macOS Space, so a sibling Space window that has been detached from the
+    /// group must be re-attached before it is surfaced (a cold-launch restore
+    /// reconcile hard-`orderOut`s siblings, which AppKit pops out of the group
+    /// — see `reconcileRestoreVisibility`). Surfacing a still-detached window
+    /// while the leaving window owns its own fullscreen Space otherwise makes
+    /// macOS spawn a blank fullscreen Space. Consumed by `activate`'s switch
+    /// path.
+    private var slotHasFullScreenWindow: Bool {
+        windowsBySpaceId.values.contains {
+            $0.window?.styleMask.contains(.fullScreen) == true
+        }
     }
 
     private func inheritFullScreenTabEligibility(from anchor: NSWindow, to window: NSWindow) {
