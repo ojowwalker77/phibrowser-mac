@@ -248,6 +248,13 @@ struct SpacesSettingsView: View {
                         }
                     }
 
+                    VStack(alignment: .leading, spacing: 8) {
+                        sectionHeader(NSLocalizedString("Routing", comment: "Spaces settings - routing section header"))
+                        SettingsDetailCard {
+                            urlRulesRow
+                        }
+                    }
+
                     if isDefault {
                         Text(NSLocalizedString("The default Space can't be moved to another profile or deleted.",
                                                comment: "Spaces settings - default Space limits note"))
@@ -265,6 +272,32 @@ struct SpacesSettingsView: View {
                 .themedForeground(.textSecondary)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+    }
+
+    /// Opens the universal URL Rules editor (the same window the Spaces menu's
+    /// "URL Rules…" item opens). The editor lists every Space's rules, so it's a
+    /// jump-off point rather than a per-Space control.
+    private var urlRulesRow: some View {
+        Button {
+            AppController.shared?.openURLRulesEditor(nil)
+        } label: {
+            HStack(spacing: 8) {
+                Text(NSLocalizedString("URL Rules\u{2026}",
+                                       comment: "Spaces settings - button that opens the URL rules editor"))
+                    .font(.system(size: 13))
+                    .themedForeground(.textPrimary)
+                Spacer(minLength: 8)
+                Image(systemName: "arrow.up.forward")
+                    .font(.system(size: 11, weight: .semibold))
+                    .themedForeground(.textSecondary)
+            }
+            .padding(.vertical, 12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(NSLocalizedString("Open the URL rules editor",
+                                comment: "Spaces settings - tooltip for the URL rules button"))
     }
 
     // MARK: - Selection
