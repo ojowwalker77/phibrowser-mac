@@ -238,6 +238,7 @@ struct CreateSpacePanel: View {
     private static let themeColumnSpacing: CGFloat = 8
     private static let themeRowSpacing: CGFloat = 12
     private static let themeDotRing: CGFloat = 30
+    private static let followGlobalToggleHeight: CGFloat = 30
 
     private var colorBlock: some View {
         let columns = Array(
@@ -247,8 +248,14 @@ struct CreateSpacePanel: View {
         return VStack(spacing: 14) {
             // A "Follow Global" toggle above the swatches: it and the theme dots
             // form one selection group, so the new Space either follows the
-            // global theme or pins one of the eight built-ins.
-            followGlobalToggle
+            // global theme or pins one of the eight built-ins. A GeometryReader
+            // gives the row width so the toggle insets its ends to line up with
+            // the first/last dot rather than the wider grid bounds.
+            GeometryReader { geo in
+                followGlobalToggle
+                    .padding(.horizontal, followGlobalToggleInset(forWidth: geo.size.width))
+            }
+            .frame(height: Self.followGlobalToggleHeight)
             // Lay the eight built-in themes out as two rows of four rather than a
             // single cramped strip, so each swatch is big enough to read its hue
             // and tap comfortably. Flexible columns spread the swatches evenly
@@ -271,6 +278,17 @@ struct CreateSpacePanel: View {
         .padding(.vertical, 12)
         .background(Color.primary.opacity(0.04))
         .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
+    /// Horizontal inset that lines the full-width toggle up with the swatch row:
+    /// each flexible column centers a `themeDotRing`-wide dot, leaving half the
+    /// leftover column width as slack between the outer dots and the row's edges.
+    /// Matching that slack puts the toggle's ends under the first/last dot.
+    private func followGlobalToggleInset(forWidth width: CGFloat) -> CGFloat {
+        guard width > 0 else { return 0 }
+        let gaps = Self.themeColumnSpacing * CGFloat(Self.themeColumns - 1)
+        let column = (width - gaps) / CGFloat(Self.themeColumns)
+        return max(0, (column - Self.themeDotRing) / 2)
     }
 
     /// Full-width "Follow Global" toggle above the swatch grid. It and the theme
@@ -306,7 +324,7 @@ struct CreateSpacePanel: View {
                 }
             }
             .padding(.horizontal, 10)
-            .frame(height: 30)
+            .frame(height: Self.followGlobalToggleHeight)
             .frame(maxWidth: .infinity)
             .background(isSelected ? Self.accentColor.opacity(0.14) : Color.primary.opacity(0.05))
             .clipShape(RoundedRectangle(cornerRadius: 8))
