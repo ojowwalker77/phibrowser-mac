@@ -185,15 +185,45 @@ struct ProfilesSettingsView: View {
                 .font(.system(size: 12))
                 .themedForeground(.textSecondary)
         } else {
-            Picker("", selection: searchBinding(profileId)) {
-                ForEach(searchEngines) { engine in
-                    Text(engine.name).tag(engine.id)
+            // Custom pill matching the download-location control (and the Spaces
+            // pane's themeControl) so both rows' selectors share one height,
+            // style, and trailing edge instead of the native picker's taller,
+            // differently-inset bezel.
+            Menu {
+                Picker("", selection: searchBinding(profileId)) {
+                    ForEach(searchEngines) { engine in
+                        Text(engine.name).tag(engine.id)
+                    }
                 }
+                .pickerStyle(.inline)
+                .labelsHidden()
+            } label: {
+                HStack(spacing: 6) {
+                    Text(selectedEngineName)
+                        .font(.system(size: 13))
+                        .themedForeground(.textPrimary)
+                        .lineLimit(1)
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.system(size: 9, weight: .medium))
+                        .themedForeground(.textSecondary)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(Color.primary.opacity(0.06))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
             }
-            .labelsHidden()
-            .pickerStyle(.menu)
+            // .button + .plain renders the label exactly as given (like the
+            // download Button's pill); .borderlessButton would impose a native
+            // popup look instead, dropping the pill and its trailing chevron.
+            .menuStyle(.button)
+            .buttonStyle(.plain)
+            .menuIndicator(.hidden)
             .fixedSize()
         }
+    }
+
+    private var selectedEngineName: String {
+        searchEngines.first(where: { $0.id == defaultEngineId })?.name ?? ""
     }
 
     @ViewBuilder
@@ -246,9 +276,6 @@ struct ProfilesSettingsView: View {
             DataLink(page: "privacy",
                      title: NSLocalizedString("Privacy and Security", comment: "Profiles settings - data link to privacy settings"),
                      systemImage: "lock.shield"),
-            DataLink(page: "passwords",
-                     title: NSLocalizedString("Passwords", comment: "Profiles settings - data link to password manager"),
-                     systemImage: "key"),
             DataLink(page: "payments",
                      title: NSLocalizedString("Credit Cards", comment: "Profiles settings - data link to payment methods"),
                      systemImage: "creditcard"),
@@ -319,14 +346,19 @@ struct ProfilesSettingsView: View {
         loadDetail(profileId)
     }
 
-    /// Loads the selected profile's search engines and download location. Both
-    /// round-trips guard on the still-selected profile so a fast profile switch
-    /// can't let a slow off-profile load clobber the newer selection.
+    /// Loads the selected profile's search engines and download location and
+    /// swaps the new values in place. The previously shown controls stay put
+    /// until the new data arrives — no clear-and-spinner on switch — so changing
+    /// profiles doesn't flash: the bridge always answers a runloop later, which
+    /// used to make the wiped, mid-load state briefly visible. Only the first
+    /// load, when there's nothing cached to keep, shows the loading placeholder.
+    ///
+    /// Both round-trips guard on the still-selected profile so a fast profile
+    /// switch can't let a slow off-profile load clobber the newer selection.
     private func loadDetail(_ profileId: String) {
-        isLoadingDetail = true
-        searchEngines = []
-        defaultEngineId = ""
-        downloadPath = ""
+        // Keep whatever's on screen; only show the loading state when there's
+        // nothing cached to keep (first load).
+        isLoadingDetail = searchEngines.isEmpty
         profileManager.searchEngines(forProfile: profileId) { engines in
             guard selectedProfileId == profileId else { return }
             searchEngines = engines

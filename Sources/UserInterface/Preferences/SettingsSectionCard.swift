@@ -89,6 +89,11 @@ struct SettingsDefaultBadge: View {
         Text(NSLocalizedString("Default", comment: "Settings - badge marking the default Space or Profile"))
             .font(.system(size: 10, weight: .medium))
             .themedForeground(.textSecondary)
+            // Never wrap or compress: under tight row width (e.g. the Spaces list
+            // row, where the profile picker takes space) the badge must keep its
+            // pill on one line and let the name truncate instead.
+            .lineLimit(1)
+            .fixedSize()
             .padding(.horizontal, 6)
             .padding(.vertical, 2)
             .background(Color.secondary.opacity(0.15), in: Capsule())

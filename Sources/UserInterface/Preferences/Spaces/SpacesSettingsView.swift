@@ -98,6 +98,17 @@ struct SpacesSettingsView: View {
             .frame(height: 34)
         }
         .settingsCardChrome()
+        // Fallback drop target spanning the whole list panel. Per-row delegates
+        // own reordering and take precedence within their bounds; this catches
+        // any drop that lands off every row — the dragged row's own hidden slot,
+        // the list padding, or the empty area below the last row (e.g. dropping
+        // the last Space back at the end). Without it, `draggingSpaceId` would
+        // never reset there and the hidden source row would stay invisible.
+        .onDrop(of: [.text], delegate: SpaceListResetDropDelegate(
+            draggingSpaceId: $draggingSpaceId,
+            orderedIds: $orderedIds,
+            commit: { spaceManager.reorder(spaceIds: $0) }
+        ))
     }
 
     /// Rows in drag order: the local `orderedIds` snapshot (rearranged live as a
@@ -152,11 +163,21 @@ struct SpacesSettingsView: View {
         .background(isSelected ? Color.accentColor.opacity(0.15) : Color.clear)
         .clipShape(RoundedRectangle(cornerRadius: 6))
         .contentShape(Rectangle())
-        .opacity(draggingSpaceId == space.spaceId ? 0.5 : 1)
+        // Use an explicit drag preview (not the implicit view snapshot): the
+        // snapshot inherited this row's .opacity regardless of modifier order,
+        // so dimming the source to remove the duplicate also blanked the drag
+        // image and the item vanished. The explicit preview always renders at
+        // full opacity, independent of the in-list row below.
         .onDrag {
             draggingSpaceId = space.spaceId
             return NSItemProvider(object: space.spaceId as NSString)
+        } preview: {
+            spaceDragPreview(space)
         }
+        // Hide the row left behind while it's the one being dragged; its slot
+        // stays as the drop gap and the floating preview is what's dragged. This
+        // removes the second faint card (the "two shadows").
+        .opacity(draggingSpaceId == space.spaceId ? 0 : 1)
         .onDrop(of: [.text], delegate: SpaceRowDropDelegate(
             targetSpaceId: space.spaceId,
             draggingSpaceId: $draggingSpaceId,
@@ -182,6 +203,49 @@ struct SpacesSettingsView: View {
             tint: Color.primary
         )
         .frame(width: size, height: size)
+    }
+
+    /// The floating image shown under the cursor while a Space row is dragged.
+    /// Mirrors the list row — drag handle, icon, name, Default badge, and the
+    /// profile selector — at the same width, so the lifted preview looks like
+    /// the item it came from rather than a smaller content-hugging chip. A
+    /// dedicated, full-opacity view because the implicit snapshot inherited the
+    /// dimmed in-list row and blanked the dragged item.
+    private func spaceDragPreview(_ space: SpaceModel) -> some View {
+        let isDefault = space.spaceId == LocalStore.defaultSpaceId
+        let profileName = profileManager.profile(for: space.profileId)?.displayName ?? ""
+        return HStack(spacing: 8) {
+            Image(systemName: "line.3.horizontal")
+                .font(.system(size: 12, weight: .medium))
+                .themedForeground(.textSecondary)
+            spaceSwatch(space, size: 20)
+            Text(space.name)
+                .font(.system(size: 13))
+                .themedForeground(.textPrimary)
+                .lineLimit(1)
+            if isDefault {
+                SettingsDefaultBadge()
+            }
+            Spacer(minLength: 4)
+            // Static stand-in for the row's profile picker (a drag image is
+            // never interactive); matches its label and trailing chevron.
+            HStack(spacing: 4) {
+                Text(profileName)
+                    .font(.system(size: 13))
+                    .themedForeground(.textPrimary)
+                    .lineLimit(1)
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.system(size: 9, weight: .medium))
+                    .themedForeground(.textSecondary)
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        // The list panel is 300 wide and the row stack is inset by 6 on each
+        // side, so the row — and therefore this preview — is 288 wide.
+        .frame(width: 288, alignment: .leading)
+        .themedBackground(.settingItemBackground)
+        .clipShape(RoundedRectangle(cornerRadius: 6))
     }
 
     private func toolbarButton(systemName: String,
@@ -499,5 +563,28 @@ struct SpacesSettingsView: View {
         alert.addButton(withTitle: NSLocalizedString("Cancel", comment: "Cancel button"))
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         spaceManager.deleteSpace(spaceId: space.spaceId)
+    }
+}
+
+/// Fallback drop target spanning the whole Space list. The per-row
+/// `SpaceRowDropDelegate`s handle live reordering; this one exists only to end a
+/// drag whose drop lands off every row (e.g. back on the dragged row's own
+/// hidden slot, or in the list's padding). Without it, `draggingSpaceId` would
+/// never reset there and the hidden source row would stay invisible. It does no
+/// reordering of its own — it just clears the drag and commits the order the row
+/// delegates already arranged.
+private struct SpaceListResetDropDelegate: DropDelegate {
+    @Binding var draggingSpaceId: String?
+    @Binding var orderedIds: [String]
+    let commit: ([String]) -> Void
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        DropProposal(operation: .move)
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        draggingSpaceId = nil
+        commit(orderedIds)
+        return true
     }
 }
