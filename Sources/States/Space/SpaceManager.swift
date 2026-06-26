@@ -2833,6 +2833,67 @@ final class SpaceWindowSlot: ObservableObject {
         window.orderOut(nil)
     }
 
+    /// Re-asserts this slot's one-visible-window invariant after a cold-launch
+    /// session-restore burst. Scheduled (coalesced) by
+    /// `PhiChromiumCoordinator.mainBrowserWindowCreated` for every restored
+    /// window.
+    ///
+    /// On session restore a slot owns several Chromium windows (one per Space
+    /// ever surfaced). Chromium surfaces every one with its own
+    /// `makeKeyAndOrderFront` post-construction, and keeps re-ordering them as
+    /// their restored tabs finish loading, so multiple of the slot's windows
+    /// end up on screen at once — selecting the active native tab is NOT enough
+    /// to drop the others behind it. The reconcile runs over a few runloop
+    /// turns (Chromium's re-orders trail window creation by up to ~2s) and each
+    /// pass orders every non-active window off screen, then re-fronts the
+    /// active one.
+    private var restoreVisibilityReconcileScheduled = false
+    func scheduleRestoreVisibilityReconcile() {
+        guard !restoreVisibilityReconcileScheduled else { return }
+        restoreVisibilityReconcileScheduled = true
+        for delay in [0.0, 0.4, 1.2, 3.0] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                guard let self else { return }
+                if delay == 3.0 { self.restoreVisibilityReconcileScheduled = false }
+                self.reconcileRestoreVisibility()
+            }
+        }
+    }
+
+    private func reconcileRestoreVisibility() {
+        // `activeSpaceId` names the Space that belongs on screen (it tracks the
+        // restored windows' key events; a genuine mid-restore user switch also
+        // lands here, and showing that Space while hiding the rest stays
+        // correct). Bail when the active Space's window hasn't restored yet; a
+        // later restored window reschedules the pass.
+        guard let activeId = activeSpaceId,
+              let activeController = windowsBySpaceId[activeId],
+              let activeWindow = activeController.window else { return }
+        // Order every still-on-screen sibling off. `isVisible` stays true for a
+        // background native tab but flips to false once ordered out, so this is
+        // self-limiting: only windows Chromium (re-)surfaced are touched, and a
+        // settled slot does no work. A hard `orderOut` — not tab selection — is
+        // what reliably hides them, at the cost of detaching them from the
+        // native tab group (rebuilt by `syncSlotTabGroup` on the next switch).
+        var hidCount = 0
+        for (siblingSpaceId, controller) in windowsBySpaceId where siblingSpaceId != activeId {
+            guard let window = controller.window, window.isVisible else { continue }
+            window.orderOut(nil)
+            hidCount += 1
+        }
+        visibleController = activeController
+        // Re-front the active window only when something was actually hidden (or
+        // it isn't the selected tab yet), so settled passes don't repeatedly
+        // steal key focus.
+        if hidCount > 0 || activeWindow.tabGroup?.selectedWindow !== activeWindow {
+            makeKeyAndOrderFrontHidingSlotTabBar(activeWindow)
+        }
+        updateWindowsMenuExclusion()
+        if hidCount > 0 {
+            AppLogInfo("[SpaceWindowSlot] restore reconcile: showing \(activeId), hid \(hidCount) sibling window(s)")
+        }
+    }
+
     /// Keeps the macOS Window menu (and Dock window list) showing exactly one
     /// entry per user-perceived window: the slot's visible Space. The sibling
     /// Space windows are real NSWindows tabbed into the slot's group but hidden

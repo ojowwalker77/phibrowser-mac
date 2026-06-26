@@ -334,6 +334,10 @@ extension PhiChromiumCoordinator: PhiChromiumBridgeDelegate {
         // and the two can disagree.
         let resolvedSlot: SpaceWindowSlot?
         let spaceId: String
+        // Tracks whether this window came back through Chromium session restore
+        // — the only path that surfaces several windows into one slot, and so
+        // the only one that needs the post-restore visibility reconcile below.
+        var isRestoredWindow = false
         if browserType == .normal {
             if let claim = SpaceManager.shared.claimPendingSpawn(forWindowId: Int(windowId)) {
                 resolvedSlot = claim.slot
@@ -353,6 +357,7 @@ extension PhiChromiumCoordinator: PhiChromiumBridgeDelegate {
                 resolvedSlot = restored.slot
                 spaceId = SpaceManager.shared.spaceId(boundTo: profileId,
                                                       preferring: restored.spaceId)
+                isRestoredWindow = true
             } else {
                 let initial = SpaceManager.shared.keySlot?.activeSpaceId
                     ?? SpaceManager.shared.persistedActiveSpaceId
@@ -404,6 +409,17 @@ extension PhiChromiumCoordinator: PhiChromiumBridgeDelegate {
                         mainWindowController.window?.orderOut(nil)
                     }
                     AppLogInfo("🌐 [Chromium] Restored sibling Space window kept hidden — spaceId=\(spaceId), activeSpaceId=\(resolvedSlot?.activeSpaceId ?? "nil")")
+                }
+                // The eager hide above runs INSIDE Chromium's window-created
+                // callback — before Chromium's post-construction
+                // ShowInactive()/Show() re-orders this NSWindow on screen (see
+                // the note above). On session restore a slot owns several
+                // windows and Chromium surfaces every one, so that later
+                // re-order undoes the eager hide and the inactive Space windows
+                // linger. Re-assert the slot's one-visible-window invariant on
+                // the next runloop turn, after Chromium finishes showing them.
+                if isRestoredWindow {
+                    resolvedSlot?.scheduleRestoreVisibilityReconcile()
                 }
             } else {
                 AppLogInfo("🌐 Shadow window controller initialized but hidden.")
