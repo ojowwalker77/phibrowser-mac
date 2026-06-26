@@ -123,6 +123,11 @@ struct SpacesStripView: View {
     private static let horizontalPadding: CGFloat = 10
     private static let iconSize: CGFloat = 14
     private static let iconHitSize: CGFloat = 22
+    /// Uniform hit-target width of every item in the single-row strip — pips,
+    /// the "…" overflow affordance, and the add button — and the gap between
+    /// them. Drives the fit arithmetic in `visiblePipCount`.
+    private static let stripItemWidth: CGFloat = 24
+    private static let stripSpacing: CGFloat = 4
 
     /// Preset palette used for new-Space creation. Ordered so successive new
     /// Spaces are visually distinct without forcing the user into a color
@@ -183,7 +188,7 @@ struct SpacesStripView: View {
             }
         }
         .popover(isPresented: $isPickerOpen, arrowEdge: .top) {
-            pickerPopup
+            pickerPopup()
         }
     }
 
@@ -305,24 +310,36 @@ struct SpacesStripView: View {
     /// popover used to host. A large number of Spaces can overflow the row; the
     /// common handful fit within the sidebar width.
     private var iconStrip: some View {
-        HStack(spacing: 4) {
-            ForEach(stripOrderedSpaces, id: \.spaceId) { space in
-                spacePip(for: space)
-                    .opacity(stripDraggingId == space.spaceId ? 0.5 : 1)
-                    .onDrag {
-                        stripDraggingId = space.spaceId
-                        return NSItemProvider(object: space.spaceId as NSString)
-                    }
-                    .onDrop(of: [.text], delegate: SpaceRowDropDelegate(
-                        targetSpaceId: space.spaceId,
-                        draggingSpaceId: $stripDraggingId,
-                        orderedIds: $stripOrderedIds,
-                        commit: { manager.reorder(spaceIds: $0) }
-                    ))
+        // Single row that never wraps: show as many leading pips as fit, then a
+        // trailing "…" affordance once any are hidden (it opens the picker with
+        // the full list). The add button stays pinned to the right via a Spacer.
+        GeometryReader { geo in
+            let visibleCount = visiblePipCount(availableWidth: geo.size.width)
+            let hasOverflow = visibleCount < stripOrderedSpaces.count
+            HStack(spacing: Self.stripSpacing) {
+                ForEach(stripOrderedSpaces.prefix(visibleCount), id: \.spaceId) { space in
+                    spacePip(for: space)
+                        .opacity(stripDraggingId == space.spaceId ? 0.5 : 1)
+                        .onDrag {
+                            stripDraggingId = space.spaceId
+                            return NSItemProvider(object: space.spaceId as NSString)
+                        }
+                        .onDrop(of: [.text], delegate: SpaceRowDropDelegate(
+                            targetSpaceId: space.spaceId,
+                            draggingSpaceId: $stripDraggingId,
+                            orderedIds: $stripOrderedIds,
+                            commit: { manager.reorder(spaceIds: $0) }
+                        ))
+                }
+                if hasOverflow {
+                    moreButton(excludedSpaceIds: Set(stripOrderedSpaces.prefix(visibleCount).map(\.spaceId)))
+                }
+                Spacer(minLength: 4)
+                addButton
             }
-            Spacer(minLength: 4)
-            addButton
+            .frame(width: geo.size.width, height: rowHeight, alignment: .leading)
         }
+        .frame(height: rowHeight)
         .onAppear { stripOrderedIds = manager.spaces.map(\.spaceId) }
         .onChange(of: manager.spaces.map(\.spaceId)) { ids in
             // Leave an in-flight drag's local rearrangement alone; the drop's
@@ -330,6 +347,27 @@ struct SpacesStripView: View {
             guard stripDraggingId == nil else { return }
             stripOrderedIds = ids
         }
+    }
+
+    /// How many leading pips fit on the single row, reserving room for the
+    /// trailing add button and — when any pips are hidden — a "…" affordance.
+    /// All strip items share a uniform width, so the count is pure arithmetic.
+    private func visiblePipCount(availableWidth: CGFloat) -> Int {
+        let total = stripOrderedSpaces.count
+        guard total > 0 else { return 0 }
+        let item = Self.stripItemWidth
+        let spacing = Self.stripSpacing
+        func width(_ items: Int) -> CGFloat {
+            items <= 0 ? 0 : CGFloat(items) * item + CGFloat(items - 1) * spacing
+        }
+        // Room left of the add button (which keeps a small gap before it).
+        let budget = availableWidth - item - spacing
+        // Everything fits with no "…"?
+        if width(total) <= budget { return total }
+        // Overflowing: reserve a "…" slot and fit as many leading pips as possible.
+        var count = total - 1
+        while count > 0, width(count + 1) > budget { count -= 1 }
+        return max(count, 0)
     }
 
     /// Pips in drag order: the local `stripOrderedIds` snapshot (rearranged live
@@ -517,6 +555,28 @@ struct SpacesStripView: View {
         .help(NSLocalizedString("New Space", comment: "Tooltip for the add-Space button in the sidebar Spaces strip"))
     }
 
+    /// Overflow affordance shown when the row can't fit every Space. Opens a
+    /// popover listing only the Spaces that didn't fit (`excludedSpaceIds` are the
+    /// pips already on screen) with no "New Space" row — creation stays on the
+    /// strip's own "+" button.
+    private func moreButton(excludedSpaceIds: Set<String>) -> some View {
+        Button {
+            isIconPickerOpen = false
+            isPickerOpen.toggle()
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(.system(size: Self.iconSize, weight: .semibold))
+                .foregroundStyle(Color.secondary)
+                .frame(width: Self.stripItemWidth, height: rowHeight)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(NSLocalizedString("More Spaces", comment: "Tooltip for the overflow button that opens the full Spaces list"))
+        .popover(isPresented: $isPickerOpen, arrowEdge: .bottom) {
+            pickerPopup(excludedSpaceIds: excludedSpaceIds, showsCreate: false)
+        }
+    }
+
     /// Per-Space management, mirroring the popover rows so dropping the ellipsis
     /// popover from the sidebar doesn't strip the edits it used to host.
     @ViewBuilder
@@ -567,10 +627,13 @@ struct SpacesStripView: View {
         )
     }
 
-    /// The Space-switcher popover content, shared by the sidebar's ellipsis
-    /// affordance and the horizontal strip's compact chip.
+    /// The Space-switcher popover content. The horizontal chip lists every Space
+    /// with a "New Space" row; the sidebar's "…" overflow popover passes the
+    /// already-shown pip ids to `excludedSpaceIds` and `showsCreate: false`, so it
+    /// only surfaces the Spaces that didn't fit and leaves creation to the strip's
+    /// own "+" button.
     @ViewBuilder
-    private var pickerPopup: some View {
+    private func pickerPopup(excludedSpaceIds: Set<String> = [], showsCreate: Bool = true) -> some View {
         SpacePickerPopup(
             manager: manager,
             slot: slot,
@@ -594,7 +657,9 @@ struct SpacesStripView: View {
             onCreate: {
                 isPickerOpen = false
                 CreateSpacePanel.requestCreation(initialProfileId: activeSpace?.profileId)
-            }
+            },
+            excludedSpaceIds: excludedSpaceIds,
+            showsCreate: showsCreate
         )
     }
 
@@ -679,6 +744,13 @@ private struct SpacePickerPopup: View {
     let currentThemeId: (String) -> String?
     let onDelete: (SpaceModel) -> Void
     let onCreate: () -> Void
+    /// Spaces already shown as pips in the strip, hidden from this list so the
+    /// overflow popover only surfaces the Spaces that didn't fit. Empty for the
+    /// horizontal chip, which lists every Space.
+    var excludedSpaceIds: Set<String> = []
+    /// Whether to show the trailing "New Space" row. Off for the sidebar overflow
+    /// popover, which sits next to the strip's own "+" button.
+    var showsCreate: Bool = true
 
     private static let popoverWidth: CGFloat = 240
 
@@ -720,26 +792,28 @@ private struct SpacePickerPopup: View {
                 .padding(.vertical, 6)
             }
 
-            Divider()
+            if showsCreate {
+                Divider()
 
-            Button(action: onCreate) {
-                HStack(spacing: 8) {
-                    Image(systemName: "plus")
-                        .font(.system(size: 13, weight: .semibold))
-                        .frame(width: 16)
-                    Text(NSLocalizedString("New Space", comment: "Spaces picker - create a new Space"))
-                        .font(.system(size: 13))
-                    Spacer(minLength: 8)
+                Button(action: onCreate) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "plus")
+                            .font(.system(size: 13, weight: .semibold))
+                            .frame(width: 16)
+                        Text(NSLocalizedString("New Space", comment: "Spaces picker - create a new Space"))
+                            .font(.system(size: 13))
+                        Spacer(minLength: 8)
+                    }
+                    .foregroundStyle(Color.primary)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(isCreateHovering ? Color.primary.opacity(0.08) : Color.clear)
+                    .contentShape(Rectangle())
                 }
-                .foregroundStyle(Color.primary)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(isCreateHovering ? Color.primary.opacity(0.08) : Color.clear)
-                .contentShape(Rectangle())
+                .buttonStyle(.plain)
+                .onHover { isCreateHovering = $0 }
             }
-            .buttonStyle(.plain)
-            .onHover { isCreateHovering = $0 }
         }
         .frame(width: Self.popoverWidth)
         .frame(maxHeight: 320)
@@ -756,12 +830,18 @@ private struct SpacePickerPopup: View {
     /// while a drag hovers across rows), with any Space the snapshot doesn't
     /// know yet appended in strip order.
     private var orderedSpaces: [SpaceModel] {
-        guard !orderedIds.isEmpty else { return manager.spaces }
-        let byId = Dictionary(uniqueKeysWithValues: manager.spaces.map { ($0.spaceId, $0) })
-        var result = orderedIds.compactMap { byId[$0] }
-        let known = Set(orderedIds)
-        result.append(contentsOf: manager.spaces.filter { !known.contains($0.spaceId) })
-        return result
+        let ordered: [SpaceModel]
+        if orderedIds.isEmpty {
+            ordered = manager.spaces
+        } else {
+            let byId = Dictionary(uniqueKeysWithValues: manager.spaces.map { ($0.spaceId, $0) })
+            var result = orderedIds.compactMap { byId[$0] }
+            let known = Set(orderedIds)
+            result.append(contentsOf: manager.spaces.filter { !known.contains($0.spaceId) })
+            ordered = result
+        }
+        guard !excludedSpaceIds.isEmpty else { return ordered }
+        return ordered.filter { !excludedSpaceIds.contains($0.spaceId) }
     }
 
     private func iconColor(for space: SpaceModel) -> Color {
