@@ -986,6 +986,30 @@ struct SpaceIconView: View {
     private var emojiFrameSize: CGSize {
         CGSize(width: size + 4, height: size + 8)
     }
+
+    /// A menu-ready icon for a Space's stored icon value, for use as an
+    /// `NSMenuItem.image`. SF Symbols — including the empty-icon and legacy
+    /// fallback — stay template images that invert with menu selection; phi-icons
+    /// and emoji, which `NSImage(systemSymbolName:)` can't resolve, are rasterized
+    /// from this view so they show in menus too. Call on the main thread (menu
+    /// builds are synchronous on it); `ImageRenderer` is main-actor-bound.
+    @MainActor
+    static func menuImage(for storedValue: String, size: CGFloat = 16) -> NSImage? {
+        let stored = storedValue.isEmpty ? "rectangle.stack" : storedValue
+        if let symbolImage = NSImage(systemSymbolName: stored, accessibilityDescription: nil) {
+            return symbolImage
+        }
+        let icon = SpaceIconView(
+            storedValue: stored,
+            size: size,
+            symbolWeight: .semibold,
+            tint: Color(nsColor: .labelColor)
+        )
+        .frame(width: size + 2, height: size + 2)
+        let renderer = ImageRenderer(content: icon)
+        renderer.scale = NSScreen.main?.backingScaleFactor ?? 2
+        return renderer.nsImage
+    }
 }
 
 /// SpaceModel.iconName may be either an IconPicker storage value or the legacy

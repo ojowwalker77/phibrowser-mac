@@ -660,8 +660,10 @@ private final class RuleCellView: NSTableCellView, NSTextFieldDelegate {
         let menu = NSMenu()
         for space in spaces {
             let item = NSMenuItem(title: Self.spaceMenuTitle(space), action: nil, keyEquivalent: "")
-            item.image = NSImage(systemSymbolName: Self.iconSymbol(for: space),
-                                 accessibilityDescription: nil)
+            // Render through SpaceIconView so phi-icons / emoji (which
+            // `NSImage(systemSymbolName:)` can't resolve) show here too, matching
+            // the Spaces switcher menu — not just legacy SF Symbol icons.
+            item.image = SpaceIconView.menuImage(for: space.iconName)
             item.representedObject = space.spaceId
             menu.addItem(item)
         }
@@ -720,11 +722,6 @@ private final class RuleCellView: NSTableCellView, NSTextFieldDelegate {
         let profileName = ProfileManager.shared.profile(for: space.profileId)?.displayName ?? space.profileId
         guard !profileName.isEmpty else { return space.name }
         return "\(space.name) \u{2014} \(profileName)"
-    }
-
-    /// SF Symbol beside each Space option; generic stack glyph as a fallback.
-    private static func iconSymbol(for space: SpaceModel) -> String {
-        space.iconName.isEmpty ? "rectangle.stack" : space.iconName
     }
 }
 

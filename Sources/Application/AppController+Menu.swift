@@ -987,31 +987,13 @@ extension AppController {
         return title
     }
 
-    /// A menu-ready icon for a Space. SF Symbols — including the empty-icon
-    /// fallback and legacy rows — become template images that invert with menu
-    /// selection; emoji and phi-icons, which `NSImage(systemSymbolName:)` can't
-    /// resolve, are rendered from `SpaceIconView` so they show in the menu too.
+    /// A menu-ready icon for a Space, shared with the URL rules editor's target
+    /// picker. Always called on the main thread during menu tracking, but this
+    /// synchronous menu-build path isn't `@MainActor`-isolated, so assume the
+    /// isolation `SpaceIconView.menuImage` requires rather than ripple the
+    /// annotation through it.
     private func spaceMenuIcon(for storedValue: String) -> NSImage? {
-        let stored = storedValue.isEmpty ? "rectangle.stack" : storedValue
-        if let symbolImage = NSImage(systemSymbolName: stored, accessibilityDescription: nil) {
-            return symbolImage
-        }
-        let size: CGFloat = 16
-        let icon = SpaceIconView(
-            storedValue: stored,
-            size: size,
-            symbolWeight: .semibold,
-            tint: Color(nsColor: .labelColor)
-        )
-        .frame(width: size + 2, height: size + 2)
-        // Always called on the main thread during menu tracking; ImageRenderer is
-        // main-actor-bound, so assume the isolation rather than ripple @MainActor
-        // through the synchronous menu-build path.
-        return MainActor.assumeIsolated {
-            let renderer = ImageRenderer(content: icon)
-            renderer.scale = NSScreen.main?.backingScaleFactor ?? 2
-            return renderer.nsImage
-        }
+        MainActor.assumeIsolated { SpaceIconView.menuImage(for: storedValue) }
     }
 
     private func applyEffectiveShortcut(_ command: CommandWrapper, to item: NSMenuItem) {
@@ -1118,8 +1100,7 @@ extension AppController {
                 item.target = self
                 item.representedObject = space.spaceId
                 item.state = (space.spaceId == activeSpaceId) ? .on : .off
-                let symbol = space.iconName.isEmpty ? "rectangle.stack" : space.iconName
-                item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
+                item.image = spaceMenuIcon(for: space.iconName)
                 menu.addItem(item)
             }
         }
