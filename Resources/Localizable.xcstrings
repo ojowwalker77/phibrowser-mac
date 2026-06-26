@@ -360,6 +360,9 @@
     "Change Icon" : {
       "comment" : "Spaces menu - Submenu to change the active Space's icon"
     },
+    "Change Icon…" : {
+      "comment" : "Opens the icon/emoji picker for a Space\nSpaces menu - opens the icon/emoji picker below the active Space's icon\nTab-area menu - opens the icon/emoji picker below the active Space's icon"
+    },
     "Change Name" : {
       "comment" : "Account settings - Dialog title for changing user name"
     },
@@ -439,7 +442,7 @@
       "comment" : "Tab group context menu - Collapse an expanded group"
     },
     "Color" : {
-      "comment" : "General settings - Theme color row title"
+      "comment" : "General settings - Theme color row title\nSpaces settings - theme color row label"
     },
     "Color appearance" : {
       "comment" : "General settings - Color appearance row title"
@@ -548,6 +551,9 @@
     },
     "DEBUG Test Mode" : {
 
+    },
+    "Default" : {
+      "comment" : "Settings - badge marking the default Space or Profile"
     },
     "Delete" : {
       "comment" : "Delete bookmark menu item\nDestructive button\nDestructive menu item"
@@ -826,7 +832,7 @@
       "comment" : "Onboarding password manager - iCloud Passwords option"
     },
     "Icon" : {
-      "comment" : "Spaces settings - icon row label"
+      "comment" : "Spaces settings - icon section header"
     },
     "Image file not found" : {
       "comment" : "Image preview error"
@@ -963,6 +969,9 @@
     "More Settings" : {
       "comment" : "Address bar menu - Settings submenu item to open settings page\nExtension list - Website settings item to open more settings"
     },
+    "More Spaces" : {
+      "comment" : "Tooltip for the overflow button that opens the full Spaces list"
+    },
     "Move Tabs to Group" : {
       "comment" : "Tab multi-selection context menu - submenu to move selected tabs to an existing tab group"
     },
@@ -1015,7 +1024,7 @@
       "comment" : "Profile picker item to create a new profile\nSpaces menu - Create a new browser profile"
     },
     "New Space" : {
-      "comment" : "Spaces settings - new Space tooltip"
+      "comment" : "Spaces picker - create a new Space\nSpaces settings - new Space tooltip\nTooltip for the add-Space button in the sidebar Spaces strip"
     },
     "New Space…" : {
       "comment" : "Spaces menu - Create a new Space"
@@ -1137,6 +1146,9 @@
     "Open Tabs" : {
       "comment" : "Search Tabs - Open tabs section title"
     },
+    "Open the URL rules editor" : {
+      "comment" : "Spaces settings - tooltip for the URL rules button"
+    },
     "Open User Data Directory" : {
       "comment" : "Debug menu item to reveal the current user's data storage directory in Finder"
     },
@@ -1249,7 +1261,7 @@
       "comment" : "Profiles settings - data link to privacy settings"
     },
     "Profile" : {
-      "comment" : "Label for the profile picker in the create-Space panel\nSpaces settings - profile row label"
+      "comment" : "Label for the profile picker in the create-Space panel"
     },
     "Profile name" : {
       "comment" : "Placeholder for the profile-name field"
@@ -1391,6 +1403,9 @@
     },
     "Right URL" : {
       "comment" : "Bookmark editor - Label for the right (secondary) URL input field on a split-view bookmark"
+    },
+    "Routing" : {
+      "comment" : "Spaces settings - routing section header"
     },
     "Run" : {
       "comment" : "Notification card run button - Executes the suggested action"
@@ -1542,6 +1557,9 @@
     "The local IM service is unavailable. Check whether Phi Sentinel started normally and the IM service is running." : {
       "comment" : "IM Channels - Message shown when im-server is not connected"
     },
+    "The name cannot be empty." : {
+      "comment" : "Validation shown when the profile name is left blank"
+    },
     "The Phi user data folder was not found. Continuing will still remove other local application data and quit." : {
       "comment" : "Debug clear data - Alert body when Phi folder is missing; clearing will still proceed for other locations"
     },
@@ -1549,7 +1567,7 @@
       "comment" : "Help menu - Time Machine restore error when a selected backup disappears"
     },
     "Theme" : {
-      "comment" : "General settings - Theme section title\nSpaces settings - theme row label"
+      "comment" : "General settings - Theme section title\nSpaces settings - theme section header"
     },
     "This replaces the Phi user data folder with the archive and restarts Phi. Save your work first." : {
       "comment" : "Debug import user data - Confirmation alert body warning data replacement and relaunch"
@@ -1642,7 +1660,7 @@
       "comment" : "Title of the universal URL rules editor\nWindow title for the universal URL rules editor"
     },
     "URL Rules…" : {
-      "comment" : "Spaces menu - Open the universal URL routing rules editor"
+      "comment" : "Spaces menu - Open the universal URL routing rules editor\nSpaces settings - button that opens the URL rules editor"
     },
     "URLs matching any rule will open in the assigned Space, no matter where you click or type them." : {
       "comment" : "Subtitle of the universal URL rules editor"

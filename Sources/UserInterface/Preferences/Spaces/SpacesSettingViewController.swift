@@ -14,8 +14,7 @@ import SnapKit
 class SpacesSettingViewController: NSViewController, SettingsPane {
     var paneIdentifier: Settings.PaneIdentifier = .spaces
     var paneTitle: String = NSLocalizedString("Spaces", comment: "Settings - Tab title for profiles and spaces management")
-    var toolbarItemIcon: NSImage = NSImage(systemSymbolName: "square.stack",
-                                           accessibilityDescription: nil) ?? NSImage()
+    var toolbarItemIcon: NSImage = NSImage(resource: .settingSpaceIcon)
     let hostingController = SpacesSettingHostingViewController()
 
     override func viewDidLoad() {

@@ -13,8 +13,7 @@ import SnapKit
 class ProfilesSettingViewController: NSViewController, SettingsPane {
     var paneIdentifier: Settings.PaneIdentifier = .profiles
     var paneTitle: String = NSLocalizedString("Profiles", comment: "Settings - Tab title for profiles management")
-    var toolbarItemIcon: NSImage = NSImage(systemSymbolName: "person.2",
-                                           accessibilityDescription: nil) ?? NSImage()
+    var toolbarItemIcon: NSImage = NSImage(resource: .settingProfileIcon)
     let hostingController = ProfilesSettingHostingViewController()
 
     override func viewDidLoad() {

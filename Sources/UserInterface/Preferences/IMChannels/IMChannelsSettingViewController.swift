@@ -10,7 +10,7 @@ import SnapKit
 class IMChannelsSettingViewController: NSViewController, SettingsPane {
     var paneIdentifier = Settings.PaneIdentifier.imchannels
     var paneTitle: String = NSLocalizedString("Phi Link", comment: "Settings - Tab title for Phi Link settings")
-    var toolbarItemIcon: NSImage = NSImage(systemSymbolName: "bubble.left.and.text.bubble.right", accessibilityDescription: "Phi Link") ?? NSImage()
+    var toolbarItemIcon: NSImage = NSImage(resource: .settingLinkIcon)
 
     let hostingController = IMChannelsSettingHostingViewController()
 
