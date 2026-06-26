@@ -73,3 +73,10 @@ struct DefaultExtensionManifestWriter {
         }
     }
 }
+
+/// Chrome Web Store id of Apple's iCloud Passwords extension. Single source of
+/// truth shared by the OOBE password-manager screen and the per-new-profile
+/// auto-install in `ProfileManager`.
+enum PhiExtensionID {
+    static let icloudPasswords = "pejdijmoenmkgeppbflobdenhhabjlaj"
+}

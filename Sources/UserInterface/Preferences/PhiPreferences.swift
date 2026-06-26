@@ -222,4 +222,28 @@ extension PhiPreferences {
             UserDefaults.standard.register(defaults: defaults)
         }
     }
+
+    // MARK: - Password Manager Settings
+
+    /// Records the user's OOBE password-manager choice so newly created
+    /// profiles can mirror it. `true` when the user picked iCloud Passwords
+    /// during onboarding; new profiles then auto-install the iCloud extension.
+    enum PasswordManagerSettings: String, CaseIterable {
+        case autoInstallICloudPasswords
+
+        var defaultValue: Bool {
+            switch self {
+            case .autoInstallICloudPasswords:
+                return false
+            }
+        }
+
+        func loadValue() -> Bool {
+            UserDefaults.standard.bool(forKey: rawValue, default: defaultValue)
+        }
+
+        func save(_ value: Bool) {
+            UserDefaults.standard.set(value, forKey: rawValue)
+        }
+    }
 }

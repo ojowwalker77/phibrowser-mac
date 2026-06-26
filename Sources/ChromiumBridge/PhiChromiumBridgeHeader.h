@@ -626,6 +626,13 @@ typedef NS_ENUM(NSUInteger, PhiOmniboxSuggestionDisposition) {
 - (void)installExtensionsWithIds:(NSArray<NSString *> *)extensionIds
                         windowId:(int64_t)windowId;
 
+/// Install one or more Chrome Web Store extensions into a specific profile,
+/// resolved by its on-disk basename. The profile must already be loaded (call
+/// `ensureProfileLoaded:` first). Mirrors the OOBE iCloud Passwords choice onto
+/// newly created profiles. Results report via extensionInstallResult:status:.
+- (void)installExtensionsWithIds:(NSArray<NSString *> *)extensionIds
+                       profileId:(NSString *)profileId;
+
 - (NSArray <id<BookmarkWrapper>> *)getAllBookmarksWithWindowId:(int64_t)windowId;
 - (void)removeAllBookmarksWithWindowId:(int64_t)windowId;
 - (void)bookmarkCurrentTabWithWindowId:(int64_t)windowId;

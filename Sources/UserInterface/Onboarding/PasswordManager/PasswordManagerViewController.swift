@@ -16,7 +16,7 @@ class PasswordManagerViewController: OnboardingBaseViewController {
         var extensionId: String? {
             switch self {
             case .icloudPasswords:
-                return "pejdijmoenmkgeppbflobdenhhabjlaj"
+                return PhiExtensionID.icloudPasswords
             case .manual:
                 return nil
             }
@@ -163,7 +163,9 @@ class PasswordManagerViewController: OnboardingBaseViewController {
     // MARK: - Actions
 
     override func nextButtonTapped(_ sender: NSButton? = nil) {
-        if selectedManager == .icloudPasswords {
+        let wantsICloud = (selectedManager == .icloudPasswords)
+        PhiPreferences.PasswordManagerSettings.autoInstallICloudPasswords.save(wantsICloud)
+        if wantsICloud {
             installExtension()
         }
         nextClosure?(true)
