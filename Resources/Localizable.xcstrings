@@ -1120,7 +1120,7 @@
       "comment" : "General settings - Theme opacity row title for adjusting the selected theme overlay transparency"
     },
     "Open as Split" : {
-      "comment" : "Bookmark context menu - Open this bookmark as a new tab paired with the current tab in a split\nTab context menu - Open a new tab as the second pane in a split with this tab"
+      "comment" : "Bookmark context menu - Open this bookmark as a new tab paired with the current tab in a split\nTab context menu - Open a new tab as the second pane in a split with this tab\nTab multi-selection context menu - split exactly two selected tabs into paired panes"
     },
     "Open in" : {
       "comment" : "Leading label for a URL rule's target Space"

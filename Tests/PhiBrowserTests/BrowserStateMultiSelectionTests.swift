@@ -338,6 +338,36 @@ final class BrowserStateMultiSelectionTests: XCTestCase {
         XCTAssertEqual(targets.map(\.guid), [1, 3])
     }
 
+    func testMultiSelectionSplitPairRequiresExactlyTwoPlainTabs() throws {
+        let state = try makeState()
+        seed(state, guids: [1, 2, 3])
+        state.focuseTab(state.tabs[0])
+        state.toggleMultiSelection(for: state.tabs[1])
+
+        XCTAssertEqual(state.multiSelectionSplitPair?.left.guid, 1)
+        XCTAssertEqual(state.multiSelectionSplitPair?.right.guid, 2)
+
+        state.toggleMultiSelection(for: state.tabs[2])
+
+        XCTAssertNil(state.multiSelectionSplitPair)
+    }
+
+    func testMultiSelectionSplitPairRejectsExistingSplitPane() throws {
+        let state = try makeState()
+        seed(state, guids: [1, 2, 3])
+        state.splits = [
+            SplitGroup(id: "split-1-2",
+                       primaryTabId: 1,
+                       secondaryTabId: 2,
+                       layout: .vertical,
+                       ratio: 0.5)
+        ]
+        state.focuseTab(state.tabs[0])
+        state.toggleMultiSelection(for: state.tabs[1])
+
+        XCTAssertNil(state.multiSelectionSplitPair)
+    }
+
     func testClosingSelectedTabPrunesSelection() throws {
         let state = try makeState()
         seed(state, guids: [1, 2, 3])

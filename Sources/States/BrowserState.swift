@@ -1017,6 +1017,33 @@ class BrowserState {
     }
 
     @MainActor
+    var multiSelectionSplitPair: (left: Tab, right: Tab)? {
+        let tabs = orderedMultiSelectedTabs
+        guard tabs.count == 2 else { return nil }
+        guard tabs.allSatisfy({ tab in
+            !tab.isPinned &&
+            !isBookmarkBackedTab(tab) &&
+            splitGroup(forTabId: tab.guid) == nil
+        }) else {
+            return nil
+        }
+        return (tabs[0], tabs[1])
+    }
+
+    @MainActor
+    func openMultiSelectedTabsAsSplit() {
+        guard let pair = multiSelectionSplitPair else { return }
+        makeTabNormalOpened(tabId: pair.left.guid)
+        makeTabNormalOpened(tabId: pair.right.guid)
+        guard createSplit(leftTabId: pair.left.guid,
+                          rightTabId: pair.right.guid,
+                          layout: .vertical) != nil else {
+            return
+        }
+        clearMultiSelection()
+    }
+
+    @MainActor
     func duplicateMultiSelectedTabs() {
         let tabs = orderedMultiSelectedTabs
         clearMultiSelection()
