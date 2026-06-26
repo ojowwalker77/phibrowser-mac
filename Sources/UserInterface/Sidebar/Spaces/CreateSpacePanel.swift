@@ -49,12 +49,13 @@ struct CreateSpacePanel: View {
         styledContent
             .onAppear {
                 selectedProfileId = resolvedInitialProfileId
-                // Pre-select the active Space's pinned theme, falling back to
-                // the current global theme when it follows global. The form has
-                // no "follow global" option, so a concrete theme is always
-                // pre-selected (and pinned on create).
-                let inherited = manager.activeSpaceId.flatMap { manager.themeId(forSpaceId: $0) }
-                selectedThemeId = inherited ?? ThemeManager.shared.currentTheme.id
+                // Give every new Space a fresh random look out of the box — a
+                // random Phi icon and a random built-in theme — so Spaces are
+                // visually distinct instead of all defaulting to the same first
+                // icon and the inherited theme. The user can still override both
+                // before creating; whatever is selected is pinned on create.
+                selectedIcon = .phiIcon(id: PhiIconCatalog.allIds.randomElement() ?? PhiIconCatalog.allIds[0])
+                selectedThemeId = Theme.builtInThemes.randomElement()?.id ?? Theme.default.id
                 DispatchQueue.main.async { nameFocused = true }
             }
     }
@@ -157,7 +158,7 @@ struct CreateSpacePanel: View {
             )
         }
         .frame(height: IconPicker.preferredHeight)
-        .padding(.vertical, 6)
+        .padding(.vertical, 2)
         .background(Color.primary.opacity(0.04))
         .clipShape(RoundedRectangle(cornerRadius: 8))
     }
@@ -227,58 +228,79 @@ struct CreateSpacePanel: View {
         .fixedSize()
     }
 
-    private static let themeDotSpacing: CGFloat = 4
-    private static let themeDotMaxRing: CGFloat = 22
+    private static let themeColumns = 4
+    private static let themeColumnSpacing: CGFloat = 8
+    private static let themeRowSpacing: CGFloat = 12
+    private static let themeDotRing: CGFloat = 30
 
     private var colorBlock: some View {
-        VStack(spacing: 10) {
-            // Size the swatches to the available width so the whole row always
-            // fits the bounded column (and shrinks with the sidebar). A fixed
-            // ring would give the row a hard minimum wider than a narrow column,
-            // overflowing it the way the reflowing icon grid never does.
-            GeometryReader { geo in
-                let count = Theme.builtInThemes.count
-                let gaps = Self.themeDotSpacing * CGFloat(max(count - 1, 0))
-                let slot = max(0, (geo.size.width - gaps) / CGFloat(max(count, 1)))
-                let ring = min(Self.themeDotMaxRing, slot)
-                HStack(spacing: Self.themeDotSpacing) {
-                    ForEach(Theme.builtInThemes, id: \.id) { theme in
-                        themeDot(theme, ringDiameter: ring)
-                            .frame(maxWidth: .infinity)
-                    }
+        let columns = Array(
+            repeating: GridItem(.flexible(), spacing: Self.themeColumnSpacing),
+            count: Self.themeColumns
+        )
+        return VStack(spacing: 14) {
+            // Lay the eight built-in themes out as two rows of four rather than a
+            // single cramped strip, so each swatch is big enough to read its hue
+            // and tap comfortably. Flexible columns spread the swatches evenly
+            // across the bounded column and shrink with the sidebar.
+            LazyVGrid(columns: columns, spacing: Self.themeRowSpacing) {
+                ForEach(Theme.builtInThemes, id: \.id) { theme in
+                    themeDot(theme, ringDiameter: Self.themeDotRing)
                 }
-                .frame(width: geo.size.width, height: geo.size.height)
             }
-            .frame(height: Self.themeDotMaxRing)
+            // The current theme's name, as a plain muted caption beneath the
+            // swatches.
             Text(selectedThemeName)
-                .font(.system(size: 11))
+                .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(Color.primary.opacity(0.5))
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
+                .animation(.easeInOut(duration: 0.15), value: selectedThemeId)
         }
         .padding(.horizontal, 8)
-        .padding(.vertical, 10)
+        .padding(.vertical, 12)
         .background(Color.primary.opacity(0.04))
         .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 
-    /// One picker dot for a built-in theme, sized to the row's computed ring so
-    /// the swatches scale with the column width. The inner dot keeps the ring's
-    /// 4pt selection margin.
+    /// One picker dot for a built-in theme. The colored dot keeps a 3pt margin
+    /// inside the ring; the selected swatch carries a check for an unmistakable
+    /// read that the ring alone can't give against a same-hue dot.
     @ViewBuilder
     private func themeDot(_ theme: Theme, ringDiameter: CGFloat) -> some View {
         let isPure = theme == .pure
         let accent = Color(theme.color(for: .themeColor, appearance: appearance))
-        ThemeSwatchView(
-            fillColor: isPure ? .white : accent,
-            ringColor: accent,
-            selected: selectedThemeId == theme.id,
-            title: nil,
-            showsContrastBorder: isPure,
-            dotDiameter: max(ringDiameter - 4, 0),
-            ringDiameter: ringDiameter,
-            action: { selectedThemeId = theme.id }
-        )
+        let isSelected = selectedThemeId == theme.id
+        let dot = max(ringDiameter - 6, 0)
+        Button {
+            selectedThemeId = theme.id
+        } label: {
+            Circle()
+                .fill(isPure ? Color.white : accent)
+                .frame(width: dot, height: dot)
+                .frame(width: ringDiameter, height: ringDiameter)
+                .overlay {
+                    Circle()
+                        .stroke(Color.black.opacity(isPure ? 0.12 : 0), lineWidth: 0.5)
+                        .frame(width: dot, height: dot)
+                }
+                .overlay {
+                    if isSelected {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: max(dot * 0.5, 8), weight: .bold))
+                            .foregroundStyle(isPure ? Color.black.opacity(0.55) : Color.white)
+                    }
+                }
+                .overlay {
+                    Circle()
+                        .stroke(isSelected ? accent : Color.clear, lineWidth: 2)
+                }
+                .shadow(color: Color.black.opacity(0.12), radius: 3, y: 1)
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .help(theme.name)
+        .animation(.easeInOut(duration: 0.15), value: isSelected)
     }
 
     /// Name of the currently-selected theme.

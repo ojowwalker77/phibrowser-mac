@@ -65,15 +65,23 @@ struct IconPicker: View {
         .padding(.bottom, IconPickerMetrics.bottomPadding)
     }
 
-    /// As many fixed-size columns as fit `resolvedWidth` when an explicit width
-    /// was given, else the fixed 8-column layout.
+    /// As many columns as fit `resolvedWidth` when an explicit width was given,
+    /// else the fixed 8-column layout. The reflow path packs the *most* icons a
+    /// row can hold at their natural size and lets flexible columns share the
+    /// leftover, so the row fills the box edge-to-edge. Sizing each column to a
+    /// full item+gap unit instead fits one fewer column and leaves the whole grid
+    /// centered with wide left/right margins that read as stray padding in a
+    /// narrow sidebar. The column `spacing` here is the horizontal gap only — the
+    /// `LazyVGrid`'s own `spacing:` controls row spacing — so a tight reflow gap
+    /// doesn't change the vertical rhythm.
+    private static let reflowColumnSpacing: CGFloat = 2
+
     private var gridColumns: [GridItem] {
         guard width != nil else { return IconPickerMetrics.columns }
         let usable = resolvedWidth - 2 * IconPickerMetrics.gridHorizontalPadding
-        let unit = IconPickerMetrics.itemSize + IconPickerMetrics.rowSpacing
-        let count = max(1, Int((usable + IconPickerMetrics.rowSpacing) / unit))
+        let count = max(1, Int(usable / IconPickerMetrics.itemSize))
         return Array(
-            repeating: GridItem(.fixed(IconPickerMetrics.itemSize), spacing: IconPickerMetrics.rowSpacing),
+            repeating: GridItem(.flexible(minimum: 0), spacing: Self.reflowColumnSpacing),
             count: count
         )
     }
@@ -173,15 +181,15 @@ private enum IconPickerTab: Hashable {
 
 private enum IconPickerMetrics {
     static let width: CGFloat = 262
-    static let height: CGFloat = 256
-    static let topPadding: CGFloat = 12
-    static let bottomPadding: CGFloat = 12
+    static let height: CGFloat = 248
+    static let topPadding: CGFloat = 8
+    static let bottomPadding: CGFloat = 8
     static let segmentWidth: CGFloat = 128
     static let segmentHeight: CGFloat = 26
     static let segmentToGridSpacing: CGFloat = 4
     static let gridHeight: CGFloat = 202
-    static let gridHorizontalPadding: CGFloat = 13
-    static let gridVerticalPadding: CGFloat = 13
+    static let gridHorizontalPadding: CGFloat = 8
+    static let gridVerticalPadding: CGFloat = 8
     static let itemSize: CGFloat = 26
     static let iconSize: CGFloat = 16
     static let emojiFontSize: CGFloat = 16
@@ -232,13 +240,22 @@ private struct IconPickerGridButton<Content: View>: View {
     @ViewBuilder
     private var background: some View {
         let hoverColor = ThemedColor.themeColorOnHover.swiftUIColor(theme: theme, appearance: appearance)
+        let accent = ThemedColor.themeColor.swiftUIColor(theme: theme, appearance: appearance)
+        let shape = RoundedRectangle(cornerRadius: IconPickerMetrics.itemCornerRadius, style: .continuous)
 
-        RoundedRectangle(cornerRadius: IconPickerMetrics.itemCornerRadius, style: .continuous)
+        shape
             .fill(
                 isSelected
-                    ? hoverColor.opacity(0.4)
+                    ? hoverColor.opacity(0.5)
                     : (isHovering ? hoverColor.opacity(0.24) : Color.clear)
             )
+            // A crisp accent border marks the selected cell. The low-opacity fill
+            // alone vanishes when the picker sits on the Space's themed sidebar
+            // backdrop (a same-hue tint); the saturated, full-opacity border keeps
+            // a visible edge on any background.
+            .overlay {
+                shape.strokeBorder(isSelected ? accent : Color.clear, lineWidth: 1.5)
+            }
     }
 }
 
