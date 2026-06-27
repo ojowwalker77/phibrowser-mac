@@ -24,8 +24,9 @@ class ImportFromOtherBrowserViewController: OnboardingBaseViewController {
     var dataTypesPerBrowser: [BrowserType: [String]]?
     var phase = Phase.importor
     private let displayMode: DisplayMode
-    private let targetProfileId: String
-    private let targetWindowId: Int?
+    private var targetProfileId: String
+    private var targetSpaceId: String
+    private var targetWindowId: Int?
     
     private var viewWidth: CGFloat { displayMode == .login ? 640 : 500 }
     private var viewHeight: CGFloat { displayMode == .login ? 800 : 625 }
@@ -45,25 +46,40 @@ class ImportFromOtherBrowserViewController: OnboardingBaseViewController {
     init(
         displayMode: DisplayMode = .login,
         targetProfileId: String = LocalStore.defaultProfileId,
+        targetSpaceId: String = LocalStore.defaultSpaceId,
         targetWindowId: Int? = nil
     ) {
         self.displayMode = displayMode
         self.targetProfileId = targetProfileId
+        self.targetSpaceId = targetSpaceId
         self.targetWindowId = targetWindowId
         super.init(nibName: nil, bundle: nil)
     }
-    
+
     required init?(coder: NSCoder) {
         self.displayMode = .login
         self.targetProfileId = LocalStore.defaultProfileId
+        self.targetSpaceId = LocalStore.defaultSpaceId
         self.targetWindowId = nil
         super.init(coder: coder)
     }
     
     private lazy var importer = BrowserDataImporter(
         targetProfileId: targetProfileId,
+        targetSpaceId: targetSpaceId,
         targetWindowId: targetWindowId
     )
+
+    /// Retargets this single import window when it is re-invoked from another
+    /// Space. No-op while an import is in flight, so the running import keeps the
+    /// destination it was started for and only the window is brought forward.
+    func rebindTarget(profileId: String, spaceId: String, windowId: Int?) {
+        guard !importer.isImporting else { return }
+        targetProfileId = profileId
+        targetSpaceId = spaceId
+        targetWindowId = windowId
+        importer.updateTarget(profileId: profileId, spaceId: spaceId, windowId: windowId)
+    }
     /// Browsers that have been configured with data types (returned from data type page).
     private(set) var configuredBrowsers: Set<BrowserType> = []
     private var chromeProfiles: [BrowserDataImporter.ChromeProfileInfo] = []
@@ -441,11 +457,16 @@ class ImportFromOtherBrowserViewController: OnboardingBaseViewController {
 
         if !configuredBrowsers.isEmpty {
             Task {
-                await importer.startImportData(
+                // A repeat trigger (e.g. rapid double-click) is ignored by the
+                // importer's reentrancy guard, which returns false; only advance
+                // the UI when this call actually started the import, so the window
+                // is not closed out from under the in-flight one.
+                let didStart = await importer.startImportData(
                     Array(configuredBrowsers),
                     chromeProfileDirectory: selectedChromeProfile?.directory,
                     dataTypesPerBrowser: dataTypesPerBrowser
                 )
+                guard didStart else { return }
                 await MainActor.run {
                     onCompletion?()
                 }

@@ -224,12 +224,12 @@ extension LocalStore {
     }
 
     /// Persists bookmarks imported from Arc into the local store.
-    func saveArcBookmarksToLocalStore(_ bookmarks: [ArcDataParserTool.Bookmark], profileId: String) async {
+    func saveArcBookmarksToLocalStore(_ bookmarks: [ArcDataParserTool.Bookmark], profileId: String, spaceId: String = LocalStore.defaultSpaceId) async {
         await performBackgroundWriteAndWait { [weak self] context in
             guard let self else { return }
             do {
                 guard let profile = try self.profile(with: profileId, in: context, createIfNeeded: true),
-                      let root = try self.bookmarkRoot(profileId: profileId, spaceId: Self.defaultSpaceId, in: context, createIfNeeded: true) else { return }
+                      let root = try self.bookmarkRoot(profileId: profileId, spaceId: spaceId, in: context, createIfNeeded: true) else { return }
 
                 let now = Date()
                 let importRoot = TabDataModel(
@@ -296,12 +296,12 @@ extension LocalStore {
         }
     }
     
-    func saveChromiumBookmarksToLocalStore(_ bookmarks: [BookmarkWrapper], profileId: String) async {
+    func saveChromiumBookmarksToLocalStore(_ bookmarks: [BookmarkWrapper], profileId: String, spaceId: String = LocalStore.defaultSpaceId) async {
         await performBackgroundWriteAndWait { [weak self] context in
             guard let self else { return }
             do {
                 guard let profile = try self.profile(with: profileId, in: context, createIfNeeded: true),
-                      let root = try self.bookmarkRoot(profileId: profileId, spaceId: Self.defaultSpaceId, in: context, createIfNeeded: true) else { return }
+                      let root = try self.bookmarkRoot(profileId: profileId, spaceId: spaceId, in: context, createIfNeeded: true) else { return }
                 guard let bookmarksBar = bookmarks.first(where: { $0.title == "Bookmarks Bar" }) else {
                     AppLogError("Bookmarks Bar not found in Chromium bookmarks")
                     return
@@ -363,11 +363,11 @@ extension LocalStore {
         }
     }
 
-    func reorderImportedBrowserFolders(profileId: String) async {
+    func reorderImportedBrowserFolders(profileId: String, spaceId: String = LocalStore.defaultSpaceId) async {
         await performBackgroundWriteAndWait { [weak self] context in
             guard let self else { return }
             do {
-                guard let root = try self.bookmarkRoot(profileId: profileId, spaceId: Self.defaultSpaceId, in: context, createIfNeeded: false) else { return }
+                guard let root = try self.bookmarkRoot(profileId: profileId, spaceId: spaceId, in: context, createIfNeeded: false) else { return }
                 let rootChildren = try self.children(of: root, in: context)
 
                 let rankedImportFolders = rootChildren.enumerated().compactMap { offset, child -> (Int, Int, TabDataModel)? in

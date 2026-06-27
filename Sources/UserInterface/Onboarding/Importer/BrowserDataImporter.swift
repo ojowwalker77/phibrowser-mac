@@ -21,9 +21,16 @@ class BrowserDataImporter {
         let email: String?
     }
 
-    let targetProfileId: String
-    let targetWindowId: Int?
-    
+    private(set) var targetProfileId: String
+    private(set) var targetSpaceId: String
+    private(set) var targetWindowId: Int?
+
+    /// True from the moment an import starts until its deferred bookmark
+    /// persistence finishes. While true the target must not be rebound, or the
+    /// pending snapshot would be saved into the newly-bound Space instead of
+    /// the one the running import was started for.
+    private(set) var isImporting = false
+
     // Continuations for active import requests, keyed by browser type.
     private var importContinuations: [BrowserType: CheckedContinuation<Bool, Never>] = [:]
     private let continuationQueue = DispatchQueue(label: "com.phibrowser.import.continuation")
@@ -32,8 +39,9 @@ class BrowserDataImporter {
     @Published private(set) var phase: Phase = .waiting
     @Published var status: String = ""
     
-    init(targetProfileId: String = LocalStore.defaultProfileId, targetWindowId: Int? = nil) {
+    init(targetProfileId: String = LocalStore.defaultProfileId, targetSpaceId: String = LocalStore.defaultSpaceId, targetWindowId: Int? = nil) {
         self.targetProfileId = targetProfileId
+        self.targetSpaceId = targetSpaceId
         self.targetWindowId = targetWindowId
         NotificationCenter.default.addObserver(
             self,
@@ -46,16 +54,41 @@ class BrowserDataImporter {
     deinit {
         NotificationCenter.default.removeObserver(self)
     }
-    
-    /// Starts importing data from the selected browsers.
+
+    /// Retargets a future import to a different window/profile/Space when the
+    /// single import window is re-invoked from another Space. Callers must skip
+    /// this while `isImporting` is true so the in-flight import keeps its
+    /// original destination.
+    func updateTarget(profileId: String, spaceId: String, windowId: Int?) {
+        targetProfileId = profileId
+        targetSpaceId = spaceId
+        targetWindowId = windowId
+    }
+
+    /// Starts importing data from the selected browsers. Returns `false` only
+    /// when the call was ignored because an import is already in flight, so the
+    /// caller can skip its completion handler instead of advancing/closing the
+    /// UI out from under the running import.
     @MainActor
-    func startImportData(_ options: [BrowserType], chromeProfileDirectory: String? = nil, dataTypesPerBrowser: [BrowserType: [String]]? = nil) async {
+    @discardableResult
+    func startImportData(_ options: [BrowserType], chromeProfileDirectory: String? = nil, dataTypesPerBrowser: [BrowserType: [String]]? = nil) async -> Bool {
         // Prefer the caller-provided window so Chromium import state follows the initiating window/profile.
         guard let windowId = targetWindowId ?? MainBrowserWindowControllersManager.shared.getFirstAvailableWindowId() else {
             AppLogError("No available window for import")
-            return
+            return true
         }
-        
+
+        // Reentrancy gate: a second start (rapid double-click, repeated action
+        // dispatch, programmatic re-call) while an import is unresolved would
+        // overwrite the BrowserType-keyed continuation and race the shared
+        // Chromium bookmark staging. @MainActor plus setting the flag with no
+        // preceding await makes this check atomic against a queued second call.
+        // Returning false lets the caller skip its completion for this ignored start.
+        guard !isImporting else {
+            AppLogInfo("Import already in progress; ignoring re-entrant start")
+            return false
+        }
+        isImporting = true
         failedImports.removeAll()
 
         // Only clear bookmarks if at least one browser is importing bookmarks
@@ -116,8 +149,13 @@ class BrowserDataImporter {
                     windowId: windowId,
                     arcBookmarks: arcBookmarks
                 )
+                await MainActor.run { self.isImporting = false }
             }
+        } else {
+            isImporting = false
         }
+
+        return true
     }
     
     
@@ -237,18 +275,21 @@ class BrowserDataImporter {
             .localStorage
             .saveChromiumBookmarksToLocalStore(
                 bookmarkWrappers ?? [],
-                profileId: targetProfileId
+                profileId: targetProfileId,
+                spaceId: targetSpaceId
             )
 
         if !arcBookmarks.isEmpty {
             await AccountController.shared.account?.localStorage.saveArcBookmarksToLocalStore(
                 arcBookmarks,
-                profileId: targetProfileId
+                profileId: targetProfileId,
+                spaceId: targetSpaceId
             )
         }
 
         await AccountController.shared.account?.localStorage.reorderImportedBrowserFolders(
-            profileId: targetProfileId
+            profileId: targetProfileId,
+            spaceId: targetSpaceId
         )
     }
 

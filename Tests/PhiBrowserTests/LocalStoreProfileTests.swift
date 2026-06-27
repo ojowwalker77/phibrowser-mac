@@ -249,10 +249,89 @@ final class LocalStoreProfileTests: XCTestCase {
     }
 
     func testBrowserDataImporterStoresTargetContext() {
-        let importer = BrowserDataImporter(targetProfileId: "Work", targetWindowId: 42)
+        let importer = BrowserDataImporter(
+            targetProfileId: "Work",
+            targetSpaceId: "space-work",
+            targetWindowId: 42
+        )
 
         XCTAssertEqual(importer.targetProfileId, "Work")
+        XCTAssertEqual(importer.targetSpaceId, "space-work")
         XCTAssertEqual(importer.targetWindowId, 42)
+
+        // Omitting targetSpaceId must default to the default Space so existing
+        // call sites (e.g. onboarding) keep their pre-Spaces behavior.
+        let defaultImporter = BrowserDataImporter(targetProfileId: "Work")
+        XCTAssertEqual(defaultImporter.targetSpaceId, LocalStore.defaultSpaceId)
+    }
+
+    /// Bookmarks imported into a non-default Space must land under that Space's
+    /// bookmark root, and must not leak into the default Space. Exercises the
+    /// `spaceId` thread-through added for T1. The Chromium path shares the same
+    /// `bookmarkRoot(spaceId:)` change but its `BookmarkWrapper` input is a
+    /// framework type that cannot be constructed in a unit test, so the Arc
+    /// path stands in for the shared behavior.
+    func testSaveArcBookmarksToLocalStoreLandsInTargetSpace() async throws {
+        let store = try makeStore()
+        let targetSpaceId = "space-secondary"
+
+        let bookmark = ArcDataParserTool.Bookmark(
+            guid: "arc-1",
+            title: "Example",
+            url: "https://example.com",
+            isFolder: false
+        )
+
+        await store.saveArcBookmarksToLocalStore(
+            [bookmark],
+            profileId: LocalStore.defaultProfileId,
+            spaceId: targetSpaceId
+        )
+
+        // Imported bookmarks land in the target Space...
+        let targetRootChildren = store.fetchBookmarks(
+            parentId: nil,
+            profileId: LocalStore.defaultProfileId,
+            spaceId: targetSpaceId
+        )
+        XCTAssertEqual(targetRootChildren.count, 1, "Exactly one import folder should be created in the target Space.")
+        let importFolder = try XCTUnwrap(targetRootChildren.first)
+        XCTAssertEqual(importFolder.spaceId, targetSpaceId)
+
+        let importedBookmarks = store.fetchBookmarks(
+            parentId: importFolder.guid,
+            profileId: LocalStore.defaultProfileId,
+            spaceId: targetSpaceId
+        )
+        XCTAssertEqual(importedBookmarks.map { $0.title }, ["Example"])
+        XCTAssertEqual(importedBookmarks.first?.spaceId, targetSpaceId)
+
+        // ...and not into the default Space.
+        let defaultRootChildren = store.fetchBookmarks(
+            parentId: nil,
+            profileId: LocalStore.defaultProfileId,
+            spaceId: LocalStore.defaultSpaceId
+        )
+        XCTAssertTrue(defaultRootChildren.isEmpty, "Importing into a non-default Space must not touch the default Space.")
+    }
+
+    /// The single import window is retargeted (not duplicated) when re-invoked
+    /// from another Space. `updateTarget` is the seam that swaps the destination
+    /// window/profile/Space — including across profiles — that `rebindTarget`
+    /// drives once an import is no longer in flight.
+    func testBrowserDataImporterUpdateTargetRetargetsDestination() {
+        let importer = BrowserDataImporter(
+            targetProfileId: "Default",
+            targetSpaceId: "space-A",
+            targetWindowId: 1
+        )
+        XCTAssertFalse(importer.isImporting)
+
+        importer.updateTarget(profileId: "Work", spaceId: "space-B", windowId: 2)
+
+        XCTAssertEqual(importer.targetProfileId, "Work")
+        XCTAssertEqual(importer.targetSpaceId, "space-B")
+        XCTAssertEqual(importer.targetWindowId, 2)
     }
 
     private func makeStore() throws -> LocalStore {

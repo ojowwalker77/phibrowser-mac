@@ -517,10 +517,25 @@ extension MainBrowserWindowController: NSMenuItemValidation {
         window.makeKeyAndOrderFront(nil)
     }
     
+    /// Stable key for associating the long-lived import view controller with its
+    /// window, so a re-invocation can retarget it (see `objc_setAssociatedObject`).
+    private static var importVCAssociationKey: UInt8 = 0
+
     func showImportDataWindow() {
         let identifier = NSUserInterfaceItemIdentifier("Phi Import Data Window")
-        // Check if import window already exists
+        // The import window is a singleton. Re-invoking import from another Space
+        // retargets the existing window to the current context — unless an import
+        // is already running, in which case it is only brought forward so the
+        // in-flight import keeps its destination — rather than opening a second
+        // window, which would let two imports race over shared bookmark staging.
         if let existingWindow = NSApp.windows.first(where: { $0.identifier == identifier }) {
+            if let vc = objc_getAssociatedObject(existingWindow, &MainBrowserWindowController.importVCAssociationKey) as? ImportFromOtherBrowserViewController {
+                vc.rebindTarget(
+                    profileId: browserState.profileId,
+                    spaceId: browserState.spaceId,
+                    windowId: browserState.windowId
+                )
+            }
             existingWindow.makeKeyAndOrderFront(nil)
             return
         }
@@ -528,6 +543,7 @@ extension MainBrowserWindowController: NSMenuItemValidation {
         let vc = ImportFromOtherBrowserViewController(
             displayMode: .normal,
             targetProfileId: browserState.profileId,
+            targetSpaceId: browserState.spaceId,
             targetWindowId: browserState.windowId
         )
         vc.onCompletion = { [weak vc] in
@@ -549,7 +565,7 @@ extension MainBrowserWindowController: NSMenuItemValidation {
         window.makeKeyAndOrderFront(nil)
 
         // Keep vc alive while window is open (window.contentViewController changes during navigation)
-        objc_setAssociatedObject(window, "importVC", vc, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+        objc_setAssociatedObject(window, &MainBrowserWindowController.importVCAssociationKey, vc, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
 
         // Data type selection flow for standalone import window
         var dataTypeVCs: [BrowserType: ImportDataTypeViewController] = [:]
