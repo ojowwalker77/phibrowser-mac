@@ -1516,6 +1516,16 @@ final class SpaceWindowSlot: ObservableObject {
         }
     }
 
+    /// Set while a window-driven slot close is cascading its windows shut,
+    /// one per runloop turn, via `cascadeCloseRemainingWindows`. While set,
+    /// each window's `unregisterWindow` just drops it from the map instead of
+    /// re-running the hand-off/cascade logic, so the controlled sequence owns
+    /// the order and timing. Serializing is what makes the teardown reliable:
+    /// closing several windows of one native tab group in a single
+    /// synchronous loop let AppKit's tab-bar selection promotion drop a
+    /// programmatic `close()`, stranding a background Space with live tabs.
+    private var isCascadingSlotClose = false
+
     /// windowId → spaceId we asked Chromium to spawn that window for, for
     /// THIS slot. `activate(spaceId:)` populates this synchronously right
     /// after calling `bridge.createBrowserWithWindowType` so the asynchronous
@@ -3104,21 +3114,32 @@ final class SpaceWindowSlot: ObservableObject {
         }
     }
 
-    /// Drops the controller for `spaceId`. When the closed controller
-    /// was the slot's `visibleController`, behavior splits on whether
-    /// the close was tab-driven or window-driven:
+    /// Drops the controller for `spaceId`. Behavior splits on whether the
+    /// close was tab-driven or window-driven:
     ///
-    /// - Tab-driven (the user just closed the last tab in this Space)
+    /// - Tab-driven (the user just closed the last tab in the visible Space)
     ///   AND another Space in the slot still has tabs: activate that
     ///   sibling. The user-perceived window stays alive showing the
     ///   sibling Space's content.
     /// - Otherwise (user closed the window itself, OR every other
-    ///   Space is also empty): iterate every sibling Space and call
-    ///   `NSWindow.close()` directly so the entire user-perceived
-    ///   window goes away as a unit. If this leaves SpaceManager with
-    ///   no slots at all, the slot is simply dropped and the app keeps
-    ///   running with no windows (closing a window never quits the app;
-    ///   only Cmd+Q / the Quit menu item terminate).
+    ///   Space is also empty): tear down every remaining Space via
+    ///   `cascadeCloseRemainingWindows`, which calls `NSWindow.close()` one
+    ///   window per runloop turn so the entire user-perceived window goes away
+    ///   as a unit. Serializing matters — closing all of one native tab
+    ///   group's windows in a single synchronous loop let AppKit drop a
+    ///   programmatic close and strand a background Space with live tabs. If
+    ///   this leaves SpaceManager with no slots at all, the slot is simply
+    ///   dropped and the app keeps running with no windows (closing a window
+    ///   never quits the app; only Cmd+Q / the Quit menu item terminate).
+    ///
+    /// The window-driven cascade fires even when the closed controller was
+    /// not the tracked `visibleController`, as long as the close was not
+    /// tab-driven: in the slot's native tab group `visibleController` can lag
+    /// AppKit's selected tab, and gating the cascade on `wasVisible` alone let
+    /// a real window close strand the slot's other Spaces with live tabs.
+    /// Background closes that should NOT cascade (deleteSpace / changeProfile /
+    /// respawnWindow) evict the controller first, so they early-return on the
+    /// identity guard below and never reach this branch.
     ///
     /// `NSWindow.close()` (not `performClose:`) is used for the cascade
     /// because the user has already decided to close the window; a
@@ -3146,27 +3167,51 @@ final class SpaceWindowSlot: ObservableObject {
             NotificationCenter.default.removeObserver(token)
         }
         tabBarAccessoryObservationsByWindowId.removeValue(forKey: controller.windowId)?.invalidate()
+        // A window the controlled slot teardown is closing. It is already out
+        // of the map (above); don't re-run a hand-off/cascade — the driver
+        // (`cascadeCloseRemainingWindows`) already issued closes for the rest.
+        // Just finish the slot once this drains the last window.
+        if isCascadingSlotClose {
+            if windowsBySpaceId.isEmpty {
+                isCascadingSlotClose = false
+                manager?.removeSlot(self)
+            }
+            return
+        }
         let wasVisible = (visibleController === controller)
-        if wasVisible {
-            let siblingWithTabs = isTabDriven ? firstSiblingWithTabs() : nil
-            if let siblingWithTabs {
-                // Tab-driven close with a viable sibling: hand off to
-                // the sibling instead of tearing the slot down.
-                // `visibleController` is left pointing at the closing
-                // controller so the pre-close composite snapshot can be
-                // threaded into the per-style animation even after the
-                // closing window's GPU surface has been drained.
-                AppLogInfo("[SpaceWindowSlot] tab-driven close of \(spaceId); switching to sibling \(siblingWithTabs)")
-                activate(spaceId: siblingWithTabs, leavingSnapshotOverride: leavingSnapshot)
+        // A tab-driven hand-off only applies to the visible window closing —
+        // computed (and `firstSiblingWithTabs` only consulted) in that case.
+        let siblingWithTabs = (wasVisible && isTabDriven) ? firstSiblingWithTabs() : nil
+        if let siblingWithTabs {
+            // Tab-driven close with a viable sibling: hand off to
+            // the sibling instead of tearing the slot down.
+            // `visibleController` is left pointing at the closing
+            // controller so the pre-close composite snapshot can be
+            // threaded into the per-style animation even after the
+            // closing window's GPU surface has been drained.
+            AppLogInfo("[SpaceWindowSlot] tab-driven close of \(spaceId); switching to sibling \(siblingWithTabs)")
+            activate(spaceId: siblingWithTabs, leavingSnapshotOverride: leavingSnapshot)
+        } else if wasVisible || !isTabDriven {
+            // Window-driven slot close. Two ways in:
+            //  - the visible window closed (window-driven, or tab-driven with
+            //    no viable sibling), or
+            //  - a non-tab-driven close landed on a controller that wasn't the
+            //    tracked `visibleController`. In the slot's native tab group
+            //    `visibleController` can lag AppKit's actually-selected tab, so
+            //    a real window close would otherwise slip through both branches
+            //    and strand the other Spaces with live tabs.
+            // Either way the user closed the window, so tear down every
+            // remaining Space in the slot, one by one, leaving no background
+            // Space holding live tabs. Legitimate background closes
+            // (deleteSpace / changeProfile / respawnWindow) evict first and
+            // never reach here (identity guard at the top of this method).
+            visibleController = nil
+            if windowsBySpaceId.isEmpty {
+                AppLogInfo("[SpaceWindowSlot] window-driven close of \(spaceId); no siblings")
             } else {
-                // Window-driven OR tab-driven-but-no-sibling: cascade
-                // every remaining Space in the slot.
-                visibleController = nil
-                let siblings = Array(windowsBySpaceId.values)
-                AppLogInfo("[SpaceWindowSlot] window-driven close of \(spaceId); cascading \(siblings.count) sibling(s)")
-                for sibling in siblings {
-                    sibling.window?.close()
-                }
+                AppLogInfo("[SpaceWindowSlot] window-driven close of \(spaceId); cascading \(windowsBySpaceId.count) sibling(s) via Chromium")
+                isCascadingSlotClose = true
+                cascadeCloseRemainingWindows()
             }
         }
         if windowsBySpaceId.isEmpty {
@@ -3179,6 +3224,35 @@ final class SpaceWindowSlot: ObservableObject {
             // rebuilds a window+slot on the persisted active Space. Cmd+Q /
             // the Quit menu item remain the explicit way to fully quit.
             manager?.removeSlot(self)
+        }
+    }
+
+    /// Drives a window-driven slot teardown: closes every window still
+    /// registered to this slot through Chromium (`chrome::ExecuteCommand` →
+    /// `BrowserWindow::Close`), the same path the user's own window close
+    /// takes.
+    ///
+    /// AppKit's `NSWindow.close()` dropped the teardown of hidden,
+    /// tab-grouped browser windows unpredictably — with several Spaces in a
+    /// slot, some survived with live tabs — because closing several windows of
+    /// one native tab group races AppKit's tab-bar selection promotion, even
+    /// when serialized one per runloop turn. Routing each close through
+    /// Chromium tears each Browser down deterministically and independently of
+    /// the AppKit tab group. Each teardown later re-enters `unregisterWindow`,
+    /// which (under `isCascadingSlotClose`) just drops that window from the
+    /// map; the last drop clears the flag and removes the slot.
+    ///
+    /// Trade-off vs. the old AppKit path: `IDC_CLOSE_WINDOW` honors
+    /// `beforeunload`, so a background Space with an unsaved-changes prompt can
+    /// surface a dialog — the same behavior the visible window already has.
+    private func cascadeCloseRemainingWindows() {
+        let bridge = ChromiumLauncher.sharedInstance().bridge
+        // Snapshot: each close re-enters `unregisterWindow` (which mutates the
+        // map). Stale windowIds resolve to no browser and no-op in the bridge.
+        for controller in Array(windowsBySpaceId.values) {
+            bridge?.executeCommand(
+                Int32(CommandWrapper.IDC_CLOSE_WINDOW.rawValue),
+                windowId: Int64(controller.windowId))
         }
     }
 
