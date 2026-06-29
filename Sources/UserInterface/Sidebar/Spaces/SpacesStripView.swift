@@ -312,6 +312,14 @@ struct SpacesStripView: View {
             .frame(width: geo.size.width, height: rowHeight, alignment: .leading)
         }
         .frame(height: rowHeight)
+        // Reset a drag that ends off every pip (Spacer / add button / "…" /
+        // padding) so the lifted pip doesn't stay dimmed and `stripOrderedIds`
+        // re-sync doesn't stay frozen until the next drag. See the delegate doc.
+        .onDrop(of: [.text], delegate: SpaceListResetDropDelegate(
+            draggingSpaceId: $stripDraggingId,
+            orderedIds: $stripOrderedIds,
+            commit: { manager.reorder(spaceIds: $0) }
+        ))
         .onAppear { stripOrderedIds = manager.spaces.map(\.spaceId) }
         .onChange(of: manager.spaces.map(\.spaceId)) { ids in
             // Leave an in-flight drag's local rearrangement alone; the drop's
@@ -706,6 +714,14 @@ private struct SpacePickerPopup: View {
         }
         .frame(width: Self.popoverWidth)
         .frame(maxHeight: 320)
+        // Reset a drag that ends off every row (the create row / list padding)
+        // so the lifted row doesn't stay dimmed and `orderedIds` re-sync doesn't
+        // stay frozen until the next drag. See the delegate doc.
+        .onDrop(of: [.text], delegate: SpaceListResetDropDelegate(
+            draggingSpaceId: $draggingSpaceId,
+            orderedIds: $orderedIds,
+            commit: { manager.reorder(spaceIds: $0) }
+        ))
         .onAppear { orderedIds = manager.spaces.map(\.spaceId) }
         .onChange(of: manager.spaces.map(\.spaceId)) { ids in
             // Don't fight an in-flight drag's local rearrangement; the
@@ -778,6 +794,34 @@ struct SpaceRowDropDelegate: DropDelegate {
             )
         }
     }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        DropProposal(operation: .move)
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        draggingSpaceId = nil
+        commit(orderedIds)
+        return true
+    }
+}
+
+/// Catch-all reset for a Space drag that ends off every row. The per-row
+/// `SpaceRowDropDelegate`s own reordering and take precedence within their
+/// bounds; this fallback, attached to the enclosing container, catches a drop
+/// that lands on the surrounding chrome (the strip's Spacer / add button / "…"
+/// affordance / padding, or the picker's create row and list padding). Without
+/// it `draggingSpaceId` would never reset there, leaving the lifted row dimmed
+/// and freezing the local `orderedIds` re-sync until the next drag. It does no
+/// reordering of its own — it just clears the drag and commits the order the row
+/// delegates already arranged. (A hard Esc-cancel or a drop fully outside the
+/// container still self-heals on the next drag's `onDrag`, which has no SwiftUI
+/// cancel hook.) Shared by the sidebar strip, the picker popover, and the
+/// Spaces settings list.
+struct SpaceListResetDropDelegate: DropDelegate {
+    @Binding var draggingSpaceId: String?
+    @Binding var orderedIds: [String]
+    let commit: ([String]) -> Void
 
     func dropUpdated(info: DropInfo) -> DropProposal? {
         DropProposal(operation: .move)

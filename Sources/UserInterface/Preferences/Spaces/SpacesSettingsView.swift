@@ -566,25 +566,6 @@ struct SpacesSettingsView: View {
     }
 }
 
-/// Fallback drop target spanning the whole Space list. The per-row
-/// `SpaceRowDropDelegate`s handle live reordering; this one exists only to end a
-/// drag whose drop lands off every row (e.g. back on the dragged row's own
-/// hidden slot, or in the list's padding). Without it, `draggingSpaceId` would
-/// never reset there and the hidden source row would stay invisible. It does no
-/// reordering of its own — it just clears the drag and commits the order the row
-/// delegates already arranged.
-private struct SpaceListResetDropDelegate: DropDelegate {
-    @Binding var draggingSpaceId: String?
-    @Binding var orderedIds: [String]
-    let commit: ([String]) -> Void
-
-    func dropUpdated(info: DropInfo) -> DropProposal? {
-        DropProposal(operation: .move)
-    }
-
-    func performDrop(info: DropInfo) -> Bool {
-        draggingSpaceId = nil
-        commit(orderedIds)
-        return true
-    }
-}
+// The whole-list fallback drop target (`SpaceListResetDropDelegate`) is shared
+// with the sidebar strip and picker; it lives next to `SpaceRowDropDelegate` in
+// SpacesStripView.swift.

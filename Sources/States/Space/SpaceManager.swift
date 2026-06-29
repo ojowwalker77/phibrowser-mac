@@ -369,6 +369,12 @@ final class SpaceManager: ObservableObject {
         if keySlot === slot {
             keySlot = slots.last
         }
+        // Drop any restore-snapshot reattach binding pointing at this slot.
+        // `restoredSlotsByIndex` holds a STRONG reference, consulted only during
+        // the launch grace period; without this a slot the user closes
+        // mid-session would be retained here (and never deinit) until the next
+        // account bind clears the map.
+        restoredSlotsByIndex = restoredSlotsByIndex.filter { $0.value !== slot }
     }
 
     /// Walks every slot looking for one that recorded a pending spawn
