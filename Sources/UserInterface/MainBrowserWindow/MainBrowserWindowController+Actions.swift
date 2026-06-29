@@ -530,11 +530,22 @@ extension MainBrowserWindowController: NSMenuItemValidation {
         // window, which would let two imports race over shared bookmark staging.
         if let existingWindow = NSApp.windows.first(where: { $0.identifier == identifier }) {
             if let vc = objc_getAssociatedObject(existingWindow, &MainBrowserWindowController.importVCAssociationKey) as? ImportFromOtherBrowserViewController {
+                // Reopening a CLOSED singleton reuses the same VC; clear the previous
+                // import's stale selection/status so it starts fresh. A MINIATURIZED
+                // window also reports isVisible == false but is a restore, not a reopen,
+                // so preserve its in-progress work and just deminiaturize it below.
+                // (resetForReuse also no-ops internally while an import is in flight.)
+                if !existingWindow.isVisible && !existingWindow.isMiniaturized {
+                    vc.resetForReuse()
+                }
                 vc.rebindTarget(
                     profileId: browserState.profileId,
                     spaceId: browserState.spaceId,
                     windowId: browserState.windowId
                 )
+            }
+            if existingWindow.isMiniaturized {
+                existingWindow.deminiaturize(nil)
             }
             existingWindow.makeKeyAndOrderFront(nil)
             return
@@ -564,33 +575,8 @@ extension MainBrowserWindowController: NSMenuItemValidation {
         window.contentViewController = vc
         window.makeKeyAndOrderFront(nil)
 
-        // Keep vc alive while window is open (window.contentViewController changes during navigation)
+        // Keep vc alive and discoverable for the window's lifetime: the singleton
+        // re-invocation path looks it up via this associated object to rebindTarget.
         objc_setAssociatedObject(window, &MainBrowserWindowController.importVCAssociationKey, vc, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
-
-        // Data type selection flow for standalone import window
-        var dataTypeVCs: [BrowserType: ImportDataTypeViewController] = [:]
-
-        vc.onBrowserSelected = { [weak vc, weak window] browser, chromeDir in
-            guard let vc, let window else { return }
-            let dtvc = dataTypeVCs[browser] ?? ImportDataTypeViewController(browserType: browser, displayMode: .normal)
-            dataTypeVCs[browser] = dtvc
-            dtvc.onReturn = { [weak vc, weak window] hasSelection in
-                guard let vc, let window else { return }
-                if hasSelection {
-                    vc.markBrowserConfigured(browser)
-                } else {
-                    vc.unmarkBrowserConfigured(browser)
-                    dataTypeVCs.removeValue(forKey: browser)
-                }
-                // Collect data types and pass to VC
-                var dataTypesPerBrowser: [BrowserType: [String]] = [:]
-                for (b, dtvc) in dataTypeVCs {
-                    dataTypesPerBrowser[b] = dtvc.selectedDataTypeStrings()
-                }
-                vc.dataTypesPerBrowser = dataTypesPerBrowser.isEmpty ? nil : dataTypesPerBrowser
-                window.contentViewController = vc
-            }
-            window.contentViewController = dtvc
-        }
     }
 }

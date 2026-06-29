@@ -466,6 +466,22 @@ final class LocalStoreProfileTests: XCTestCase {
         XCTAssertNil(BrowserDataImporter.arcBookmarkRoot(options: [.arc], arcSpace: space, wantsBookmarks: false))
     }
 
+    func testProjectDataTypesDropsEmptyBrowsersAndNilsWhenAllEmpty() {
+        // Nothing selected anywhere → nil.
+        XCTAssertNil(ImportFromOtherBrowserViewController.projectDataTypes([:]))
+        XCTAssertNil(ImportFromOtherBrowserViewController.projectDataTypes([.chrome: [], .safari: []]))
+
+        // Non-empty browsers project to sorted rawValue arrays; empty ones dropped.
+        let result = ImportFromOtherBrowserViewController.projectDataTypes([
+            .chrome: [.bookmarks, .history],
+            .safari: [],
+            .arc: [.cookies],
+        ])
+        XCTAssertEqual(result?[.chrome], ["favorites", "history"])  // bookmarks rawValue is "favorites", sorted
+        XCTAssertEqual(result?[.arc], ["cookies"])
+        XCTAssertNil(result?[.safari])  // empty set omitted
+    }
+
     private func makeStore() throws -> LocalStore {
         let directory = try makeTemporaryStoreDirectory()
         return LocalStore(account: Account(userID: UUID().uuidString), storeDirectoryURL: directory)

@@ -47,10 +47,6 @@ class OnboardingWindowController: NSWindowController {
 
     private lazy var importViewController: ImportFromOtherBrowserViewController = {
         let vc = ImportFromOtherBrowserViewController()
-        vc.onBrowserSelected = { [weak self] browser, chromeDir in
-            guard let self else { return }
-            self.showDataTypePage(for: browser, chromeProfileDir: chromeDir)
-        }
         vc.onCompletion = { [weak self] in
             guard let self else { return }
             self.showPasswordManagerPage()
@@ -132,58 +128,6 @@ class OnboardingWindowController: NSWindowController {
         contentViewController = contentVc
     }
     
-    // MARK: - Import Data Type Flow
-
-    private var dataTypeVCs: [BrowserType: ImportDataTypeViewController] = [:]
-    private var chromeProfileDirectories: [BrowserType: String] = [:]
-
-    private func showDataTypePage(for browser: BrowserType, chromeProfileDir: String?) {
-        // If Chrome profile changed, discard previous data type VC
-        if browser == .chrome,
-           let oldDir = chromeProfileDirectories[.chrome],
-           oldDir != chromeProfileDir {
-            dataTypeVCs.removeValue(forKey: browser)
-        }
-
-        if let dir = chromeProfileDir {
-            chromeProfileDirectories[browser] = dir
-        }
-
-        let vc = dataTypeVC(for: browser)
-        setContent(vc)
-    }
-
-    private func dataTypeVC(for browser: BrowserType) -> ImportDataTypeViewController {
-        if let existing = dataTypeVCs[browser] {
-            return existing
-        }
-
-        let vc = ImportDataTypeViewController(browserType: browser)
-
-        vc.onReturn = { [weak self] hasSelection in
-            guard let self else { return }
-            if hasSelection {
-                self.importViewController.markBrowserConfigured(browser)
-            } else {
-                self.importViewController.unmarkBrowserConfigured(browser)
-                self.dataTypeVCs.removeValue(forKey: browser)
-            }
-            self.updateDataTypesOnImportVC()
-            self.setContent(self.importViewController)
-        }
-
-        dataTypeVCs[browser] = vc
-        return vc
-    }
-
-    private func updateDataTypesOnImportVC() {
-        var dataTypesPerBrowser: [BrowserType: [String]] = [:]
-        for (browser, vc) in dataTypeVCs {
-            dataTypesPerBrowser[browser] = vc.selectedDataTypeStrings()
-        }
-        importViewController.dataTypesPerBrowser = dataTypesPerBrowser.isEmpty ? nil : dataTypesPerBrowser
-    }
-
     // MARK: - Content Management
 
     private func setContent(_ vc: NSViewController) {
