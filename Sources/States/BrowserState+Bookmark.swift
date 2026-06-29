@@ -235,10 +235,13 @@ extension BrowserState {
         // falling through to `createTab` here opens a fresh bookmark
         // tab, which `handleBookmarkTabOpened` rebinds cleanly.
         if realBookmark.isOpened,
-           let wrapper = realBookmark.webContentWrapper,
            let boundTab = tabs.first(where: { $0.guidInLocalDB == realBookmark.guid }),
+           let wrapper = boundTab.webContentWrapper,
            splitGroup(forTabId: boundTab.guid) == nil {
             wrapper.setAsActiveTab()
+            MainActor.assumeIsolated {
+                focuseTab(boundTab)
+            }
         } else {
             createTab(URLProcessor.processUserInput(url), customGuid: realBookmark.guid, focusAfterCreate: true)
         }

@@ -894,6 +894,11 @@ class BrowserState {
             focuseTab(tab)
             return true
         }
+        if let activeTab = focusingTab, isBookmarkBackedTab(activeTab) {
+            clearMultiSelection()
+            focuseTab(tab)
+            return true
+        }
         // A group overview is a separate surface where multi-selection is
         // disabled: a Cmd+click activates the tab (which dismisses the
         // overview) rather than toggling the selection.

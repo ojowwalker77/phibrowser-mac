@@ -3,6 +3,7 @@
 // Use of this source code is governed by an Apache license that can be
 // found in the LICENSE file.
 
+import AppKit
 import XCTest
 @testable import Phi
 
@@ -322,6 +323,54 @@ final class BrowserStateMultiSelectionTests: XCTestCase {
         XCTAssertFalse(state.multiSelection.isActive)
     }
 
+    func testOpenExistingBookmarkAfterCommandClickNormalTabRestoresBookmarkFocus() throws {
+        let state = try makeState()
+        let bookmarkGuid = "bookmark-1"
+        state.localStore.createBookmark(url: "https://bookmark.example",
+                                        title: "Bookmark",
+                                        profileId: state.profileId,
+                                        parentId: nil,
+                                        guid: bookmarkGuid,
+                                        spaceId: state.spaceId)
+        guard waitUntil(condition: {
+            state.bookmarkManager.bookmark(withGuid: bookmarkGuid) != nil
+        }) else { return }
+        guard let bookmark = state.bookmarkManager.bookmark(withGuid: bookmarkGuid) else {
+            return XCTFail("Bookmark was not indexed.")
+        }
+
+        let normalTab = Tab(guid: 1,
+                            url: "https://normal.example",
+                            isActive: false,
+                            index: 0)
+        let bookmarkWrapper = TestWebContentWrapper(urlString: "https://bookmark.example")
+        let bookmarkTab = Tab(guid: 2,
+                              url: "https://bookmark.example",
+                              isActive: false,
+                              index: 1,
+                              title: "Bookmark",
+                              webContentView: bookmarkWrapper,
+                              customGuid: bookmarkGuid)
+        state.tabs = [normalTab, bookmarkTab]
+        bookmark.isOpened = true
+        bookmark.chromiumTabGuid = bookmarkTab.guid
+        state.updateNormalTabs()
+
+        state.focuseTab(bookmarkTab)
+        state.toggleMultiSelection(for: normalTab)
+
+        XCTAssertEqual(state.focusingTab?.guid, normalTab.guid)
+        XCTAssertFalse(state.multiSelection.isActive)
+
+        state.openBookmark(bookmark)
+
+        XCTAssertEqual(state.focusingTab?.guid, bookmarkTab.guid)
+        XCTAssertTrue(bookmarkTab.isActive)
+        XCTAssertFalse(normalTab.isActive)
+        XCTAssertEqual(bookmarkWrapper.setAsActiveTabCallCount, 1)
+        XCTAssertFalse(state.multiSelection.isActive)
+    }
+
     func testAddToGroupDedupsTabsAlreadyInThatGroup() throws {
         let state = try makeState()
         state.tabs = [
@@ -381,4 +430,64 @@ final class BrowserStateMultiSelectionTests: XCTestCase {
 
         XCTAssertEqual(state.multiSelection.guids, [3])
     }
+}
+
+private final class TestWebContentWrapper: NSObject, WebContentWrapper {
+    @objc dynamic weak var nativeView: NSView?
+    @objc dynamic var isLoading = false
+    @objc dynamic var loadingState = PhiTabLoadingState(rawValue: 0)!
+    @objc dynamic var isFocused = false
+    @objc dynamic var loadProgress: CGFloat = 1
+    @objc dynamic var favIconURL: String?
+    @objc dynamic var favIconData: Data?
+    @objc dynamic var favIconRevision = 0
+    @objc dynamic var canGoBack = false
+    @objc dynamic var canGoForward = false
+    @objc dynamic var title: String?
+    @objc dynamic var urlString: String?
+    @objc dynamic var securityInfo: [String: Any]?
+    @objc dynamic var isCurrentlyAudible = false
+    @objc dynamic var isAudioMuted = false
+    @objc dynamic var isCapturingAudio = false
+    @objc dynamic var isCapturingVideo = false
+    @objc dynamic var isCapturingWindow = false
+    @objc dynamic var isCapturingDisplay = false
+    @objc dynamic var isCapturingTab = false
+    @objc dynamic var isBeingMirrored = false
+    @objc dynamic var isSharingScreen = false
+    @objc dynamic var isInContentFullscreen = false
+
+    private(set) var setAsActiveTabCallCount = 0
+
+    init(urlString: String?) {
+        self.urlString = urlString
+        super.init()
+    }
+
+    func close() {}
+    func reload() {}
+    func reloadBypassingCache() {}
+    func goBack() {}
+    func goForward() {}
+    func stopLoading() {}
+    func navigate(toURL urlString: String) { self.urlString = urlString }
+    func setAsActiveTab() { setAsActiveTabCallCount += 1 }
+    func moveSelf(to newIndex: Int, selectAfterMove: Bool) {}
+    func moveSelf(toNewWindow activateNewWindow: Bool) {}
+    func moveSelf(toWindow targetWindowId: Int64, at insertIndex: Int) {}
+    func moveSelf(toWindow targetWindowId: Int64,
+                  andAddToGroupTokenHex targetGroupTokenHex: String,
+                  beforeTabId anchorTabId: Int64) {}
+    func moveSelf(toWindow targetWindowId: Int64,
+                  andAddToGroupTokenHex targetGroupTokenHex: String,
+                  afterTabId anchorTabId: Int64) {}
+    func moveSplit(toNewWindow activateNewWindow: Bool) {}
+    func moveSplit(toWindow targetWindowId: Int64, at insertIndex: Int) {}
+    func updateTabCustomValue(_ customValue: String) {}
+    func focus() {}
+    func restoreFocus() {}
+    func updateSecurityState(_ securityState: [AnyHashable: Any]) {}
+    func setAudioMuted(_ muted: Bool) {}
+    func muteAudio() {}
+    func unmuteAudio() {}
 }
