@@ -115,12 +115,16 @@ class SidebarViewController: NSViewController {
     /// constructed before the controller assigns itself in
     /// `MainBrowserWindowController.init`), fall back to the manager's
     /// `keySlot` so the strip stays functional rather than crashing.
+    /// The slot driving this sidebar's Spaces strip, resolved once so the
+    /// create-Space overlay can flip the same instance's `isCreatingSpace`
+    /// flag that the strip observes (see `showCreateSpaceOverlay`).
+    private lazy var spacesStripSlot: SpaceWindowSlot = state.windowController?.slot
+        ?? SpaceManager.shared.keySlot
+        ?? SpaceManager.shared.createSlot(initialSpaceId: nil)
+
     private lazy var spacesStripHostingController: ThemedHostingController<SpacesStripView> = {
-        let slot = state.windowController?.slot
-            ?? SpaceManager.shared.keySlot
-            ?? SpaceManager.shared.createSlot(initialSpaceId: nil)
         let hostingController = ThemedHostingController(
-            rootView: SpacesStripView(manager: SpaceManager.shared, slot: slot, rowHeight: SpacesStripView.sidebarHeight),
+            rootView: SpacesStripView(manager: SpaceManager.shared, slot: spacesStripSlot, rowHeight: SpacesStripView.sidebarHeight),
             themeSource: state.themeContext
         )
         if #available(macOS 13.0, *) {
@@ -1023,6 +1027,10 @@ class SidebarViewController: NSViewController {
         host.view.alphaValue = 0
         createSpaceOverlay = host
         createSpaceOverlayBackdrop = backdrop
+        // Suppress the Spaces-strip hover card while the form covers the strip —
+        // the floating tooltip panel sits above the overlay, so a pip hovered
+        // just before it opened would otherwise linger on top of the form.
+        spacesStripSlot.isCreatingSpace = true
         NSAnimationContext.runAnimationGroup { context in
             context.duration = 0.18
             context.allowsImplicitAnimation = true
@@ -1036,6 +1044,7 @@ class SidebarViewController: NSViewController {
         let backdrop = createSpaceOverlayBackdrop
         createSpaceOverlay = nil
         createSpaceOverlayBackdrop = nil
+        spacesStripSlot.isCreatingSpace = false
         NSAnimationContext.runAnimationGroup({ context in
             context.duration = 0.15
             context.allowsImplicitAnimation = true

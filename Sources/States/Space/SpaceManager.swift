@@ -1542,6 +1542,12 @@ final class SpaceWindowSlot: ObservableObject {
         iconPickerRequestToken &+= 1
     }
 
+    /// True while this window's inline "Create a Space" overlay covers the
+    /// sidebar. The Spaces strip observes it to suppress its hover tooltip,
+    /// which renders in a floating panel above the overlay and would otherwise
+    /// linger over the form (see `SpacesStripView.isHoverCardPresented`).
+    @Published var isCreatingSpace: Bool = false
+
     /// AppKit tab-group identity for every Chromium NSWindow hosted by this
     /// slot. This keeps all Space windows for one user-perceived window in
     /// the same native tab group, so AppKit owns frame/fullscreen desktop

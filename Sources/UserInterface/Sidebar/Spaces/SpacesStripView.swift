@@ -423,10 +423,12 @@ struct SpacesStripView: View {
     }
 
     /// A pip's hover card shows while it (and only it) is hovered, and never
-    /// during a reorder drag or while its icon picker is open so the card doesn't
-    /// trail the cursor or fight the picker. `.onHover` drives `hoveredSpaceId`.
+    /// during a reorder drag, while its icon picker is open, or while the
+    /// Create-a-Space overlay covers the strip — so the card doesn't trail the
+    /// cursor, fight the picker, or linger over the form. `.onHover` drives
+    /// `hoveredSpaceId`.
     private func isHoverCardPresented(for space: SpaceModel) -> Bool {
-        hoveredSpaceId == space.spaceId && stripDraggingId == nil && iconEditSpaceId == nil
+        hoveredSpaceId == space.spaceId && stripDraggingId == nil && iconEditSpaceId == nil && !slot.isCreatingSpace
     }
 
     /// Presents the icon/emoji picker anchored to a pip when its right-click
