@@ -336,6 +336,7 @@
 		CC8B74BE2EA8B66E0075F58C /* Sentry.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC8B74BD2EA8B66E0075F58C /* Sentry.swift */; };
 		CC8B74C02EA8BF490075F58C /* CrashSample.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC8B74BF2EA8BF490075F58C /* CrashSample.swift */; };
 		CC8B76B12EA8D7B70075F58C /* AppController+Debug.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC8B76B02EA8D7B70075F58C /* AppController+Debug.swift */; };
+		CC8B76B32EA8D7B70075F58C /* AppController+UserDataBackup.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC8B76B22EA8D7B70075F58C /* AppController+UserDataBackup.swift */; };
 		CC98F89C2E8BC71800DAD237 /* Settings.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC98F89B2E8BC71800DAD237 /* Settings.swift */; };
 		CC98F89F2E8BC79B00DAD237 /* AccountSettingViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC98F89D2E8BC79B00DAD237 /* AccountSettingViewController.swift */; };
 		CC98F8A22E8BCE0900DAD237 /* AppController+Settings.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC98F8A12E8BCE0900DAD237 /* AppController+Settings.swift */; };
@@ -821,6 +822,7 @@
 		CC8B74BD2EA8B66E0075F58C /* Sentry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sentry.swift; sourceTree = "<group>"; };
 		CC8B74BF2EA8BF490075F58C /* CrashSample.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrashSample.swift; sourceTree = "<group>"; };
 		CC8B76B02EA8D7B70075F58C /* AppController+Debug.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppController+Debug.swift"; sourceTree = "<group>"; };
+		CC8B76B22EA8D7B70075F58C /* AppController+UserDataBackup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppController+UserDataBackup.swift"; sourceTree = "<group>"; };
 		CC98F89B2E8BC71800DAD237 /* Settings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Settings.swift; sourceTree = "<group>"; };
 		CC98F89D2E8BC79B00DAD237 /* AccountSettingViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountSettingViewController.swift; sourceTree = "<group>"; };
 		CC98F8A12E8BCE0900DAD237 /* AppController+Settings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppController+Settings.swift"; sourceTree = "<group>"; };
@@ -1634,6 +1636,7 @@
 				CCDEC82E2E83D6B200D91BE9 /* AppController+Sparkle.swift */,
 				CC98F8A12E8BCE0900DAD237 /* AppController+Settings.swift */,
 				CC8B76B02EA8D7B70075F58C /* AppController+Debug.swift */,
+				CC8B76B22EA8D7B70075F58C /* AppController+UserDataBackup.swift */,
 				CC9AF3432EC192BC00C27C98 /* AppControlle+LaunchInfo.swift */,
 				CCBF0F9F2ECEC1AE005E729B /* AppController+Deeplink.swift */,
 				3703C9832F6956E600E7CF6D /* SentinelHelper.swift */,
@@ -2308,6 +2311,7 @@
 				CCD3246D2EB1EFB600AA0B85 /* PinnedExtensionItem.swift in Sources */,
 				CCB53DD02E6EC437004BF233 /* OmniBoxContainerViewController.swift in Sources */,
 				CC8B76B12EA8D7B70075F58C /* AppController+Debug.swift in Sources */,
+				CC8B76B32EA8D7B70075F58C /* AppController+UserDataBackup.swift in Sources */,
 				CCBF8F352E61AB3A00B9A99E /* SideAddressBar.swift in Sources */,
 				CC24EF082E89251D00CE9DD7 /* AuthManager.swift in Sources */,
 				8EC70E162F0BBF3D009FE2CD /* BookmarkItemView.swift in Sources */,

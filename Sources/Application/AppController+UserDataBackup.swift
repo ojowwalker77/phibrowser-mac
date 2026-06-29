@@ -1,0 +1,725 @@
+// Copyright 2026 Phinomenon Inc.
+//
+// Use of this source code is governed by an Apache license that can be
+// found in the LICENSE file.
+
+import AppKit
+import Foundation
+import SwiftData
+import UniformTypeIdentifiers
+
+extension AppController {
+    private enum PhiUserDataBackupPromptResult {
+        case cancel
+        case skipBackup
+        case performBackup
+    }
+
+    private struct PhiUserDataImportStaging {
+        let stagingURL: URL
+        let extractedPhiURL: URL
+        let referencedProfileIds: Set<String>
+
+        func cleanup() {
+            try? FileManager.default.removeItem(at: stagingURL)
+        }
+    }
+
+    private struct PhiUserDataProfileRepairResult {
+        let profileIdRemaps: [String: String]
+        let createdProfileIds: [String]
+    }
+
+    @MainActor
+    @objc func clearAllUserData(_ sender: Any?) {
+        beginClearUserDataFlow(includeAuthReset: true)
+    }
+
+    @MainActor
+    @objc func exportUserData(_ sender: Any?) {
+        _ = performPhiUserDataBackupExport()
+    }
+
+    @MainActor
+    @objc func importUserDataFromBackup(_ sender: Any?) {
+        let confirm = NSAlert()
+        confirm.messageText = NSLocalizedString("Import Phi User Data?", comment: "Debug import user data - Confirmation alert title before replacing Phi user data from zip")
+        confirm.informativeText = NSLocalizedString("This replaces the Phi user data folder with the archive and restarts Phi. Save your work first.", comment: "Debug import user data - Confirmation alert body warning data replacement and relaunch")
+        confirm.alertStyle = .warning
+        confirm.addButton(withTitle: NSLocalizedString("Import...", comment: "Debug import user data - Alert button to open file picker for zip backup"))
+        confirm.addButton(withTitle: NSLocalizedString("Cancel", comment: "Debug import user data - Alert button to cancel importing user data"))
+        guard confirm.runModal() == .alertFirstButtonReturn else {
+            return
+        }
+
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = false
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowedContentTypes = [.zip]
+        panel.title = NSLocalizedString("Select Phi User Data Backup", comment: "Debug import user data - NSOpenPanel title for choosing a Phi user data zip")
+
+        guard panel.runModal() == .OK, let zipURL = panel.url else {
+            return
+        }
+
+        do {
+            let staging = try Self.preparePhiUserDataImport(from: zipURL)
+            AppLogInfo("[Debug] Phi user data import prepared: archive=\(zipURL.path) referencedProfiles=\(Self.formatProfileIds(staging.referencedProfileIds))")
+            Self.createMissingChromiumProfiles(for: staging.referencedProfileIds) { [weak self] result in
+                guard let self else {
+                    staging.cleanup()
+                    return
+                }
+                switch result {
+                case .success(let repairResult):
+                    do {
+                        AppLogInfo("[Debug] Phi user data import applying profile remaps: \(Self.formatProfileIdRemaps(repairResult.profileIdRemaps))")
+                        try Self.applyImportedProfileIdRemaps(repairResult.profileIdRemaps, in: staging.extractedPhiURL)
+                        AppLogInfo("[Debug] Phi user data import replacing Phi data directory")
+                        try Self.replacePhiUserDataDirectory(withExtractedPhiAt: staging.extractedPhiURL)
+                        staging.cleanup()
+                        AppLogInfo("[Debug] Phi user data imported from \(zipURL.path), relaunching")
+                        Self.relaunchPhiApplication()
+                    } catch {
+                        Self.rollbackCreatedChromiumProfiles(repairResult.createdProfileIds) {
+                            staging.cleanup()
+                            self.presentPhiUserDataImportFailure(error)
+                        }
+                    }
+                case .failure(let error):
+                    staging.cleanup()
+                    presentPhiUserDataImportFailure(error)
+                }
+            }
+        } catch {
+            presentPhiUserDataImportFailure(error)
+        }
+    }
+
+    @MainActor
+    private func beginClearUserDataFlow(includeAuthReset: Bool) {
+        guard showQuitAlert() else {
+            return
+        }
+
+        switch promptBackupBeforeClearingPhiUserData() {
+        case .cancel:
+            return
+        case .skipBackup:
+            break
+        case .performBackup:
+            guard performPhiUserDataBackupExport() else {
+                return
+            }
+        }
+
+        _clearUserData()
+        if includeAuthReset {
+            AuthManager.shared.clearLocalCredentials()
+            LoginController.shared.phase = .login
+        }
+        NSApp.terminate(nil)
+    }
+
+    @MainActor
+    private func promptBackupBeforeClearingPhiUserData() -> PhiUserDataBackupPromptResult {
+        let alert = NSAlert()
+        alert.messageText = NSLocalizedString("Back Up User Data First?", comment: "Debug clear data - Alert title asking whether to export Phi user data before clearing")
+        alert.informativeText = NSLocalizedString("You can save a zip of your Phi user data folder before local files are removed and the app quits.", comment: "Debug clear data - Alert body explaining optional zip backup before clearing user data")
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: NSLocalizedString("Backup...", comment: "Debug clear data - Alert button to open the save panel for a Phi user data zip"))
+        alert.addButton(withTitle: NSLocalizedString("Skip Backup", comment: "Debug clear data - Alert button to clear data without creating a backup zip"))
+        alert.addButton(withTitle: NSLocalizedString("Cancel", comment: "Debug clear data - Alert button to cancel clearing user data"))
+        switch alert.runModal() {
+        case .alertFirstButtonReturn:
+            return .performBackup
+        case .alertSecondButtonReturn:
+            return .skipBackup
+        default:
+            return .cancel
+        }
+    }
+
+    @MainActor
+    private func performPhiUserDataBackupExport() -> Bool {
+        let fm = FileManager.default
+        let phiPath = FileSystemUtils.phiBrowserDataDirectory()
+
+        if !fm.fileExists(atPath: phiPath) {
+            let alert = NSAlert()
+            alert.messageText = NSLocalizedString("No Phi User Data to Back Up", comment: "Debug clear data - Alert title when the Phi data folder is missing before backup")
+            alert.informativeText = NSLocalizedString("The Phi user data folder was not found. Continuing will still remove other local application data and quit.", comment: "Debug clear data - Alert body when Phi folder is missing; clearing will still proceed for other locations")
+            alert.alertStyle = .informational
+            alert.addButton(withTitle: NSLocalizedString("OK", comment: "Generic - OK button to dismiss an alert"))
+            alert.runModal()
+            return true
+        }
+
+        let panel = NSSavePanel()
+        panel.canCreateDirectories = true
+        panel.allowedContentTypes = [.zip]
+        panel.nameFieldStringValue = defaultPhiUserDataBackupFileName()
+        panel.title = NSLocalizedString("Back Up Phi User Data", comment: "Debug clear data - NSSavePanel title for saving Phi user data directory as zip")
+        panel.prompt = NSLocalizedString("Save", comment: "Debug clear data - NSSavePanel confirm button title when saving Phi user data backup zip")
+
+        guard panel.runModal() == .OK, let destinationZIP = panel.url else {
+            return false
+        }
+
+        do {
+            try zipPhiBrowserDataDirectory(to: destinationZIP)
+            AppLogInfo("[Debug] Phi user data backup saved to \(destinationZIP.path)")
+            return true
+        } catch {
+            AppLogWarn("[Debug] Phi user data backup failed: \(error.localizedDescription)")
+            let errorAlert = NSAlert()
+            errorAlert.messageText = NSLocalizedString("Backup Failed", comment: "Debug clear data - Alert title when exporting Phi user data zip fails")
+            errorAlert.informativeText = error.localizedDescription
+            errorAlert.alertStyle = .warning
+            errorAlert.addButton(withTitle: NSLocalizedString("OK", comment: "Generic - OK button to dismiss an alert"))
+            errorAlert.runModal()
+            return false
+        }
+    }
+
+    private func defaultPhiUserDataBackupFileName() -> String {
+        let rawBase: String
+        if let account = AccountController.shared.account {
+            if let name = account.userInfo?.name?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty {
+                rawBase = name
+            } else if let email = account.userInfo?.email,
+                      let localPart = email.split(separator: "@").first.map(String.init),
+                      !localPart.isEmpty {
+                rawBase = localPart
+            } else {
+                rawBase = account.userID
+            }
+        } else {
+            rawBase = "Phi"
+        }
+        let sanitized = Self.sanitizedBackupFileNameComponent(rawBase)
+        let fallbackSlug = "Phi"
+        let resolvedSlug: String
+        if sanitized.isEmpty {
+            resolvedSlug = fallbackSlug
+        } else {
+            resolvedSlug = sanitized
+        }
+        let userSegment: String?
+        if resolvedSlug.caseInsensitiveCompare("Phi") == .orderedSame {
+            userSegment = nil
+        } else {
+            userSegment = resolvedSlug
+        }
+
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone.current
+        formatter.dateFormat = "yyyyMMdd"
+        let dateString = formatter.string(from: Date())
+        if let userSegment {
+            return "Phi-\(userSegment)-data-\(dateString).zip"
+        }
+        return "Phi-data-\(dateString).zip"
+    }
+
+    private static func sanitizedBackupFileNameComponent(_ raw: String) -> String {
+        let invalid = CharacterSet(charactersIn: "/:\\?%*|\"<>")
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        let replaced = trimmed.components(separatedBy: invalid).joined(separator: "-")
+        return replaced.trimmingCharacters(in: CharacterSet(charactersIn: "."))
+    }
+
+    private func zipPhiBrowserDataDirectory(to destinationZIP: URL) throws {
+        let fm = FileManager.default
+        let parentURL = URL(fileURLWithPath: FileSystemUtils.applicationSupportDirctory(), isDirectory: true)
+        let phiFolderName = (FileSystemUtils.phiBrowserDataDirectory() as NSString).lastPathComponent
+
+        if fm.fileExists(atPath: destinationZIP.path) {
+            try fm.removeItem(at: destinationZIP)
+        }
+
+        let stderrPipe = Pipe()
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/zip")
+        process.arguments = ["-r", "-q", destinationZIP.path, phiFolderName]
+        process.currentDirectoryURL = parentURL
+        process.standardError = stderrPipe
+        try process.run()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else {
+            let errText = String(data: stderrPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let detail = errText.isEmpty ? "zip exited with status \(process.terminationStatus)." : errText
+            throw NSError(domain: "PhiUserDataBackup", code: Int(process.terminationStatus), userInfo: [NSLocalizedDescriptionKey: detail])
+        }
+    }
+
+    @MainActor
+    private func presentPhiUserDataImportFailure(_ error: Error) {
+        AppLogWarn("[Debug] Phi user data import failed: \(error.localizedDescription)")
+        let errorAlert = NSAlert()
+        errorAlert.messageText = NSLocalizedString("Import Failed", comment: "Debug import user data - Alert title when extracting or applying backup fails")
+        errorAlert.informativeText = error.localizedDescription
+        errorAlert.alertStyle = .warning
+        errorAlert.addButton(withTitle: NSLocalizedString("OK", comment: "Generic - OK button to dismiss an alert"))
+        errorAlert.runModal()
+    }
+
+    private static func preparePhiUserDataImport(from zipURL: URL) throws -> PhiUserDataImportStaging {
+        let fm = FileManager.default
+        let staging = fm.temporaryDirectory.appendingPathComponent("PhiDataImport-\(UUID().uuidString)", isDirectory: true)
+        var shouldCleanupStaging = true
+        defer {
+            if shouldCleanupStaging {
+                try? fm.removeItem(at: staging)
+            }
+        }
+        try fm.createDirectory(at: staging, withIntermediateDirectories: true)
+
+        try runUnzip(archive: zipURL, destination: staging)
+        AppLogInfo("[Debug] Phi user data import archive extracted to \(staging.path)")
+
+        let extractedPhi = staging.appendingPathComponent("Phi", isDirectory: true)
+        guard isDirectory(at: extractedPhi) else {
+            throw NSError(
+                domain: "PhiUserDataImport",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: NSLocalizedString("The archive does not contain a top-level Phi folder.", comment: "Debug import user data - Error message when zip does not include the expected Phi directory at archive root")]
+            )
+        }
+
+        do {
+            let referencedProfileIds = try importedProfileIds(in: extractedPhi)
+            AppLogInfo("[Debug] Phi user data import found referenced profiles: \(formatProfileIds(referencedProfileIds))")
+            shouldCleanupStaging = false
+            return PhiUserDataImportStaging(
+                stagingURL: staging,
+                extractedPhiURL: extractedPhi,
+                referencedProfileIds: referencedProfileIds
+            )
+        }
+    }
+
+    private static func replacePhiUserDataDirectory(withExtractedPhiAt extractedPhi: URL) throws {
+        let fm = FileManager.default
+        let parentURL = URL(fileURLWithPath: FileSystemUtils.applicationSupportDirctory(), isDirectory: true)
+        let phiURL = URL(fileURLWithPath: FileSystemUtils.phiBrowserDataDirectory(), isDirectory: true)
+
+        guard isDirectory(at: extractedPhi) else {
+            throw NSError(
+                domain: "PhiUserDataImport",
+                code: 4,
+                userInfo: [NSLocalizedDescriptionKey: NSLocalizedString("The restored Phi user data is not a directory.", comment: "Debug import user data - Error message when extracted Phi item is not a directory")]
+            )
+        }
+
+        try fm.createDirectory(at: parentURL, withIntermediateDirectories: true)
+        let preparedPhiURL = parentURL.appendingPathComponent(".PhiImportPrepared-\(UUID().uuidString)", isDirectory: true)
+        let previousPhiURL = parentURL.appendingPathComponent(".PhiImportPrevious-\(UUID().uuidString)", isDirectory: true)
+        var movedExistingPhi = false
+
+        do {
+            try fm.copyItem(at: extractedPhi, to: preparedPhiURL)
+            if fm.fileExists(atPath: phiURL.path) {
+                try fm.moveItem(at: phiURL, to: previousPhiURL)
+                movedExistingPhi = true
+            }
+            try fm.moveItem(at: preparedPhiURL, to: phiURL)
+            if movedExistingPhi {
+                do {
+                    try fm.removeItem(at: previousPhiURL)
+                } catch {
+                    AppLogWarn("[Debug] Phi user data import left previous Phi data directory at \(previousPhiURL.path): \(error.localizedDescription)")
+                }
+            }
+        } catch {
+            try? fm.removeItem(at: preparedPhiURL)
+            if movedExistingPhi, !fm.fileExists(atPath: phiURL.path), fm.fileExists(atPath: previousPhiURL.path) {
+                do {
+                    try fm.moveItem(at: previousPhiURL, to: phiURL)
+                    AppLogInfo("[Debug] Phi user data import restored previous Phi data directory after replace failure")
+                } catch {
+                    AppLogWarn("[Debug] Phi user data import failed to restore previous Phi data directory: \(error.localizedDescription)")
+                }
+            }
+            throw error
+        }
+    }
+
+    private static func isDirectory(at url: URL) -> Bool {
+        var isDirectory: ObjCBool = false
+        return FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) && isDirectory.boolValue
+    }
+
+    private static func importedProfileIds(in phiDataURL: URL) throws -> Set<String> {
+        var profileIds = Set<String>()
+        for storeDirectoryURL in try importedLocalStoreDirectoryURLs(in: phiDataURL) {
+            profileIds.formUnion(try profileIdsReferencedBySpaces(inStoreDirectory: storeDirectoryURL))
+        }
+        return profileIds
+    }
+
+    private static func importedLocalStoreDirectoryURLs(in phiDataURL: URL) throws -> [URL] {
+        let fm = FileManager.default
+        let usersURL = phiDataURL.appendingPathComponent("users", isDirectory: true)
+        guard fm.fileExists(atPath: usersURL.path) else {
+            return []
+        }
+
+        return try fm.contentsOfDirectory(
+            at: usersURL,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles]
+        ).compactMap { userURL in
+            let values = try? userURL.resourceValues(forKeys: [.isDirectoryKey])
+            guard values?.isDirectory == true else {
+                return nil
+            }
+            let storeDirectoryURL = userURL.appendingPathComponent("localDB", isDirectory: true)
+            let storeURL = storeDirectoryURL.appendingPathComponent(LocalStore.compatibilityConfiguration.storeFilename)
+            guard fm.fileExists(atPath: storeURL.path) else {
+                return nil
+            }
+            return storeDirectoryURL
+        }
+    }
+
+    private static func profileIdsReferencedBySpaces(inStoreDirectory storeDirectoryURL: URL) throws -> Set<String> {
+        let container = try openImportedLocalStoreContainer(at: storeDirectoryURL)
+        let context = ModelContext(container)
+        let spaces = try context.fetch(FetchDescriptor<SpaceModel>())
+        return Set(spaces.map(\.profileId))
+    }
+
+    private static func openImportedLocalStoreContainer(at storeDirectoryURL: URL) throws -> ModelContainer {
+        let compatibilityController = LocalStoreCompatibilityController(
+            configuration: LocalStore.compatibilityConfiguration
+        )
+        let compatibilityResult = try compatibilityController.prepareStore(at: storeDirectoryURL)
+        let openPlan: LocalStoreOpenPlan
+        switch compatibilityResult {
+        case .ready(let plan):
+            openPlan = plan
+        case .requiresNewerApp(let issue):
+            throw NSError(
+                domain: "PhiUserDataImport",
+                code: 2,
+                userInfo: [
+                    NSLocalizedDescriptionKey: "The imported local store at \(storeDirectoryURL.path) requires a newer Phi data format (\(issue.activeStoreFormatVersion))."
+                ]
+            )
+        }
+
+        let configuration = ModelConfiguration(
+            url: storeDirectoryURL.appendingPathComponent(LocalStore.compatibilityConfiguration.storeFilename)
+        )
+        let container = try ModelContainer(
+            for: TabDataModel.self,
+            ProfileModel.self,
+            SpaceModel.self,
+            SpaceURLRule.self,
+            migrationPlan: TabDataModelMigrationPlan.self,
+            configurations: configuration
+        )
+        try compatibilityController.markStoreOpenedSuccessfully(openPlan, at: storeDirectoryURL)
+        return container
+    }
+
+    @MainActor
+    private static func createMissingChromiumProfiles(
+        for importedProfileIds: Set<String>,
+        completion: @escaping (Result<PhiUserDataProfileRepairResult, Error>) -> Void
+    ) {
+        let profileManager = ProfileManager.shared
+        profileManager.refresh()
+        let existingProfileIds = Set(profileManager.profiles.map(\.profileId))
+        var pendingProfileIds = Set(importedProfileIds.filter { $0 != LocalStore.defaultProfileId && !existingProfileIds.contains($0) })
+
+        guard !pendingProfileIds.isEmpty else {
+            AppLogInfo("[Debug] Phi user data import profile repair: no missing Chromium profiles")
+            completion(.success(PhiUserDataProfileRepairResult(profileIdRemaps: [:], createdProfileIds: [])))
+            return
+        }
+
+        AppLogInfo("[Debug] Phi user data import profile repair: missingChromiumProfiles=\(formatProfileIds(pendingProfileIds))")
+        var profileIdRemaps: [String: String] = [:]
+        var createdProfileIds: [String] = []
+
+        func failAndRollback(_ error: Error) {
+            rollbackCreatedChromiumProfiles(createdProfileIds) {
+                completion(.failure(error))
+            }
+        }
+
+        func createNextProfile() {
+            profileManager.refresh()
+            let existingProfileIds = Set(profileManager.profiles.map(\.profileId))
+            let satisfiedProfileIds = pendingProfileIds.intersection(existingProfileIds)
+            if !satisfiedProfileIds.isEmpty {
+                for profileId in satisfiedProfileIds {
+                    AppLogInfo("[Debug] Phi user data import profile repair satisfied imported profile \(profileId)")
+                    pendingProfileIds.remove(profileId)
+                }
+            }
+
+            guard let importedProfileId = pendingProfileIds.sorted(by: importedProfileRestoreSort).first else {
+                AppLogInfo("[Debug] Phi user data import profile repair completed: remaps=\(formatProfileIdRemaps(profileIdRemaps))")
+                completion(.success(PhiUserDataProfileRepairResult(profileIdRemaps: profileIdRemaps, createdProfileIds: createdProfileIds)))
+                return
+            }
+
+            let displayName = restoredProfileDisplayName(for: importedProfileId)
+            AppLogInfo("[Debug] Phi user data import profile repair creating Chromium profile for \(importedProfileId)")
+            profileManager.createProfile(displayName: displayName) { newProfileId in
+                guard let newProfileId else {
+                    failAndRollback(profileRepairError("Failed to create Chromium profile for imported profile \(importedProfileId)."))
+                    return
+                }
+                createdProfileIds.append(newProfileId)
+
+                if newProfileId == importedProfileId {
+                    pendingProfileIds.remove(importedProfileId)
+                    AppLogInfo("[Debug] Phi user data import profile repair created Chromium profile \(newProfileId)")
+                } else if pendingProfileIds.contains(newProfileId) {
+                    pendingProfileIds.remove(newProfileId)
+                    AppLogInfo("[Debug] Phi user data import profile repair created Chromium profile \(newProfileId), satisfying imported profile \(newProfileId) before remapping \(importedProfileId)")
+                } else {
+                    profileIdRemaps[importedProfileId] = newProfileId
+                    pendingProfileIds.remove(importedProfileId)
+                    AppLogInfo("[Debug] Phi user data import profile repair created Chromium profile \(newProfileId) for imported profile \(importedProfileId)")
+                }
+                createNextProfile()
+            }
+        }
+
+        createNextProfile()
+    }
+
+    @MainActor
+    private static func restoredProfileDisplayName(for importedProfileId: String) -> String {
+        let profileManager = ProfileManager.shared
+        profileManager.refresh()
+        if !profileManager.displayNameExists(importedProfileId) {
+            return importedProfileId
+        }
+
+        let baseName = "Restored \(importedProfileId)"
+        if !profileManager.displayNameExists(baseName) {
+            return baseName
+        }
+
+        var suffix = 2
+        while profileManager.displayNameExists("\(baseName) \(suffix)") {
+            suffix += 1
+        }
+        return "\(baseName) \(suffix)"
+    }
+
+    @MainActor
+    private static func rollbackCreatedChromiumProfiles(_ profileIds: [String], completion: @escaping () -> Void) {
+        let rollbackProfileIds = profileIds.reversed()
+        guard !rollbackProfileIds.isEmpty else {
+            completion()
+            return
+        }
+
+        AppLogInfo("[Debug] Phi user data import profile repair rolling back Chromium profiles: \(formatProfileIds(Set(profileIds)))")
+
+        func deleteNext(index: ReversedCollection<[String]>.Index) {
+            guard index != rollbackProfileIds.endIndex else {
+                completion()
+                return
+            }
+
+            let profileId = rollbackProfileIds[index]
+            ProfileManager.shared.deleteProfile(profileId) { success, error in
+                if success {
+                    AppLogInfo("[Debug] Phi user data import profile repair rolled back Chromium profile \(profileId)")
+                } else {
+                    AppLogWarn("[Debug] Phi user data import profile repair failed to roll back Chromium profile \(profileId): \(error ?? "unknown error")")
+                }
+                deleteNext(index: rollbackProfileIds.index(after: index))
+            }
+        }
+
+        deleteNext(index: rollbackProfileIds.startIndex)
+    }
+
+    private static func formatProfileIds(_ profileIds: Set<String>) -> String {
+        let sorted = profileIds.sorted(by: importedProfileRestoreSort)
+        return sorted.isEmpty ? "none" : sorted.joined(separator: ",")
+    }
+
+    private static func formatProfileIdRemaps(_ profileIdRemaps: [String: String]) -> String {
+        guard !profileIdRemaps.isEmpty else {
+            return "none"
+        }
+        return profileIdRemaps
+            .sorted { lhs, rhs in importedProfileRestoreSort(lhs.key, rhs.key) }
+            .map { "\($0.key)->\($0.value)" }
+            .joined(separator: ",")
+    }
+
+    private static func importedProfileRestoreSort(_ lhs: String, _ rhs: String) -> Bool {
+        let lhsProfileNumber = chromiumGeneratedProfileNumber(lhs)
+        let rhsProfileNumber = chromiumGeneratedProfileNumber(rhs)
+        switch (lhsProfileNumber, rhsProfileNumber) {
+        case let (lhs?, rhs?):
+            return lhs < rhs
+        case (_?, nil):
+            return true
+        case (nil, _?):
+            return false
+        case (nil, nil):
+            return lhs.localizedStandardCompare(rhs) == .orderedAscending
+        }
+    }
+
+    private static func chromiumGeneratedProfileNumber(_ profileId: String) -> Int? {
+        let prefix = "Profile "
+        guard profileId.hasPrefix(prefix) else {
+            return nil
+        }
+        return Int(profileId.dropFirst(prefix.count))
+    }
+
+    private static func applyImportedProfileIdRemaps(_ profileIdRemaps: [String: String], in phiDataURL: URL) throws {
+        let effectiveRemaps = profileIdRemaps.filter { $0.key != $0.value }
+        guard !effectiveRemaps.isEmpty else {
+            return
+        }
+
+        for storeDirectoryURL in try importedLocalStoreDirectoryURLs(in: phiDataURL) {
+            try applyImportedProfileIdRemaps(effectiveRemaps, inStoreDirectory: storeDirectoryURL)
+        }
+    }
+
+    private static func applyImportedProfileIdRemaps(_ profileIdRemaps: [String: String], inStoreDirectory storeDirectoryURL: URL) throws {
+        let container = try openImportedLocalStoreContainer(at: storeDirectoryURL)
+        let context = ModelContext(container)
+        var didChange = false
+
+        let spaces = try context.fetch(FetchDescriptor<SpaceModel>())
+        for space in spaces {
+            guard let newProfileId = profileIdRemaps[space.profileId] else {
+                continue
+            }
+            space.profileId = newProfileId
+            space.updatedDate = Date()
+            didChange = true
+        }
+
+        let tabs = try context.fetch(FetchDescriptor<TabDataModel>())
+        for tab in tabs {
+            guard let oldProfileId = tab.profileId,
+                  let newProfileId = profileIdRemaps[oldProfileId] else {
+                continue
+            }
+            tab.profileId = newProfileId
+            tab.updatedDate = Date()
+            didChange = true
+        }
+
+        let profiles = try context.fetch(FetchDescriptor<ProfileModel>())
+        var profilesById: [String: ProfileModel] = Dictionary(
+            uniqueKeysWithValues: profiles.map { ($0.profileId, $0) }
+        )
+        for profile in profiles {
+            guard let newProfileId = profileIdRemaps[profile.profileId] else {
+                continue
+            }
+            if let targetProfile = profilesById[newProfileId], targetProfile !== profile {
+                for tab in profile.tabs {
+                    tab.profile = targetProfile
+                    tab.profileId = newProfileId
+                }
+                if targetProfile.bookmarkRoot == nil {
+                    targetProfile.bookmarkRoot = profile.bookmarkRoot
+                }
+                context.delete(profile)
+            } else {
+                profilesById.removeValue(forKey: profile.profileId)
+                profile.profileId = newProfileId
+                profilesById[newProfileId] = profile
+            }
+            didChange = true
+        }
+
+        if didChange {
+            try context.save()
+        }
+    }
+
+    private static func profileRepairError(_ message: String) -> NSError {
+        NSError(
+            domain: "PhiUserDataImport",
+            code: 3,
+            userInfo: [NSLocalizedDescriptionKey: message]
+        )
+    }
+
+    private static func runUnzip(archive: URL, destination: URL) throws {
+        let stderrPipe = Pipe()
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/unzip")
+        process.arguments = ["-q", archive.path, "-d", destination.path]
+        process.standardError = stderrPipe
+        try process.run()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else {
+            let errText = String(data: stderrPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let detail = errText.isEmpty ? "unzip exited with status \(process.terminationStatus)." : errText
+            throw NSError(domain: "PhiUserDataImport", code: Int(process.terminationStatus), userInfo: [NSLocalizedDescriptionKey: detail])
+        }
+    }
+
+    private static func relaunchPhiApplication() {
+        let bundlePath = Bundle.main.bundleURL.path
+        let quoted = shellSingleQuotedForSh(bundlePath)
+        let relaunch = Process()
+        relaunch.executableURL = URL(fileURLWithPath: "/bin/sh")
+        relaunch.arguments = ["-c", "( sleep 0.5; /usr/bin/open -n \(quoted) ) &"]
+        do {
+            try relaunch.run()
+            relaunch.waitUntilExit()
+        } catch {
+            AppLogWarn("[Debug] Failed to schedule relaunch after quit: \(error.localizedDescription)")
+        }
+        DispatchQueue.main.async {
+            NSApp.terminate(nil)
+        }
+    }
+
+    private static func shellSingleQuotedForSh(_ path: String) -> String {
+        "'" + path.replacingOccurrences(of: "'", with: "'\\''") + "'"
+    }
+
+    private func _clearUserData() {
+        let appDir = FileSystemUtils.applicationSupportDirctory()
+        let cachDir = FileSystemUtils.cacheDirctory()
+        let plistPath = FileSystemUtils.plistPath()
+        let fm = FileManager.default
+
+        do {
+            if fm.fileExists(atPath: appDir) {
+                try fm.removeItem(atPath: appDir)
+            }
+            if fm.fileExists(atPath: cachDir) {
+                try fm.removeItem(atPath: cachDir)
+            }
+
+            if fm.fileExists(atPath: plistPath) {
+                try fm.removeItem(atPath: plistPath)
+            }
+        } catch {
+            let nsError = error as NSError
+            if nsError.domain != NSCocoaErrorDomain || nsError.code != NSFileNoSuchFileError {
+                NSLog("[Debug] Failed to remove appDir at \(appDir): \(nsError)")
+            }
+        }
+    }
+}
