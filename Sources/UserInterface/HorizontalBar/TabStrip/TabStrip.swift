@@ -3522,33 +3522,44 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
     /// zone) for the given screen point, if any. Returns `nil` when the point
     /// isn't inside this window's content area's left/right third, or when
     /// the focused tab isn't a valid split partner for the dragged tab.
-    private func resolveSplitDropTarget(for screenPoint: CGPoint, draggedTabId: Int)
+    private func resolveSplitDropTarget(for screenPoint: CGPoint, context: TabDragContext)
         -> (container: SplitTabDropContainer, zone: SplitTabDropContainer.DropZone)? {
         guard let windowController = unsafeBrowserWindowController,
               windowController.window?.frame.contains(NSPoint(x: screenPoint.x, y: screenPoint.y)) == true,
               let container = windowController.mainSplitViewController.webContentContainerViewController.splitTabDropContainer as SplitTabDropContainer?,
-              let zone = container.splitZoneForScreenPoint(screenPoint, draggedTabId: draggedTabId) else {
+              let zone = container.splitZoneForScreenPoint(
+                screenPoint,
+                draggedTabId: context.draggingTab.guid,
+                draggedTabCount: context.draggingTabIds.count
+              ) else {
             return nil
         }
         return (container, zone)
     }
 
-    private func updateSplitHint(for screenPoint: CGPoint?, draggedTabId: Int?) {
-        guard let screenPoint, let draggedTabId,
+    private func updateSplitHint(for screenPoint: CGPoint?, context: TabDragContext?) {
+        guard let screenPoint, let context,
               let windowController = unsafeBrowserWindowController,
               windowController.window?.frame.contains(NSPoint(x: screenPoint.x, y: screenPoint.y)) == true else {
             clearSplitHint()
             return
         }
         let container = windowController.mainSplitViewController.webContentContainerViewController.splitTabDropContainer
-        guard container.isSplitDragContextValid(at: screenPoint, draggedTabId: draggedTabId) else {
+        guard container.isSplitDragContextValid(
+            at: screenPoint,
+            draggedTabId: context.draggingTab.guid,
+            draggedTabCount: context.draggingTabIds.count
+        ) else {
             clearSplitHint()
             return
         }
         if splitHintTargetContainer !== container {
             splitHintTargetContainer?.hideSplitDropHints()
         }
-        container.showSplitDropHints(draggedTabId: draggedTabId)
+        container.showSplitDropHints(
+            draggedTabId: context.draggingTab.guid,
+            draggedTabCount: context.draggingTabIds.count
+        )
         splitHintTargetContainer = container
     }
 
@@ -3571,8 +3582,8 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
         if isInsideDragBoundary(screenPoint) {
             return .local
         }
-        if let draggedTabId = dragController.context?.draggingTab.guid,
-           let splitTarget = resolveSplitDropTarget(for: screenPoint, draggedTabId: draggedTabId) {
+        if let context = dragController.context,
+           let splitTarget = resolveSplitDropTarget(for: screenPoint, context: context) {
             return .splitWithFocused(splitTarget.zone)
         }
         return .tearOff
@@ -4021,8 +4032,7 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
             if isOverOwnStrip || hasExternalTarget {
                 clearSplitHint()
             } else {
-                updateSplitHint(for: screenPoint,
-                                draggedTabId: dragController.context?.draggingTab.guid)
+                updateSplitHint(for: screenPoint, context: dragController.context)
             }
         }
     }

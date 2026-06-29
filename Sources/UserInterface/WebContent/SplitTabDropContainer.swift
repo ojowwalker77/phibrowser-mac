@@ -265,26 +265,33 @@ final class SplitTabDropContainer: NSView {
 
     /// Returns the split zone the given screen point falls into, or `nil` if
     /// the point is outside the drop area or no drop is allowed right now.
+    /// Multi-tab drags are intentionally not split candidates.
     /// In create mode (focused tab not a split) only the left/right thirds
     /// land; in replace mode (focused tab is a split) the whole page splits
     /// into left/right halves over the two panes.
     ///
     /// Note: in create mode, dragging the focused tab onto itself is allowed —
     /// the drop creates a fresh new-tab-page as the partner pane.
-    func splitZoneForScreenPoint(_ screenPoint: CGPoint, draggedTabId: Int) -> DropZone? {
-        guard let mode = resolveMode(draggedTabId: draggedTabId),
+    func splitZoneForScreenPoint(_ screenPoint: CGPoint,
+                                 draggedTabId: Int,
+                                 draggedTabCount: Int = 1) -> DropZone? {
+        guard draggedTabCount == 1,
+              let mode = resolveMode(draggedTabId: draggedTabId),
               let pointInSelf = pointInSelfForScreenPoint(screenPoint) else { return nil }
         let area = pageAreaProvider?() ?? bounds
         return zone(forPoint: pointInSelf, mode: mode, area: area)
     }
 
-    /// True when a tab drag from the same window is hovering anywhere over
+    /// True when a single-tab drag from the same window is hovering anywhere over
     /// the page area and would be a valid split candidate. Used by the
     /// horizontal TabStrip's manual drag flow to keep both hint cards
     /// visible while the cursor is in the dead middle band — the drop
     /// landing decision still uses `splitZoneForScreenPoint`.
-    func isSplitDragContextValid(at screenPoint: CGPoint, draggedTabId: Int) -> Bool {
-        guard resolveMode(draggedTabId: draggedTabId) != nil,
+    func isSplitDragContextValid(at screenPoint: CGPoint,
+                                 draggedTabId: Int,
+                                 draggedTabCount: Int = 1) -> Bool {
+        guard draggedTabCount == 1,
+              resolveMode(draggedTabId: draggedTabId) != nil,
               let pointInSelf = pointInSelfForScreenPoint(screenPoint) else { return false }
         let area = pageAreaProvider?() ?? bounds
         return area.contains(pointInSelf)
@@ -296,10 +303,14 @@ final class SplitTabDropContainer: NSView {
         return convert(pointInWindow, from: nil)
     }
 
-    /// Shows both split-drop hint cards laid out for the drag's mode. No-op if
-    /// the drag isn't a valid split candidate.
-    func showSplitDropHints(draggedTabId: Int) {
-        guard let mode = resolveMode(draggedTabId: draggedTabId) else { return }
+    /// Shows both split-drop hint cards laid out for the drag's mode. Hides
+    /// any existing hint if the drag isn't a valid split candidate.
+    func showSplitDropHints(draggedTabId: Int, draggedTabCount: Int = 1) {
+        guard draggedTabCount == 1,
+              let mode = resolveMode(draggedTabId: draggedTabId) else {
+            hideHighlights()
+            return
+        }
         activeMode = mode
         applyHintLabels(for: mode)
         showHighlights()
@@ -645,6 +656,7 @@ final class SplitTabDropContainer: NSView {
         guard let state = browserState,
               let pasteboardItem = sender.draggingPasteboard.pasteboardItems?.first,
               isSameWindowDrag(pasteboardItem, sender: sender, state: state),
+              sender.draggingPasteboard.phiNormalTabIds().count <= 1,
               let source = parseDragSource(pasteboardItem),
               !isSourceASplit(source, state: state),
               let mode = resolveMode(for: source, state: state) else {
