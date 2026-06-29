@@ -89,11 +89,13 @@ class ImportFromOtherBrowserViewController: OnboardingBaseViewController {
 
     /// Formats the import-target caption: "Space Name (Profile Name)", or just
     /// the Space name when the profile can't be resolved.
+    static func formatNameWithParenthetical(primary: String, secondary: String?) -> String {
+        if let secondary, !secondary.isEmpty { return "\(primary) (\(secondary))" }
+        return primary
+    }
+
     static func formatImportTargetLabel(spaceName: String, profileName: String?) -> String {
-        if let profileName, !profileName.isEmpty {
-            return "\(spaceName) (\(profileName))"
-        }
-        return spaceName
+        formatNameWithParenthetical(primary: spaceName, secondary: profileName)
     }
 
     private func refreshTargetLabel() {
@@ -111,8 +113,14 @@ class ImportFromOtherBrowserViewController: OnboardingBaseViewController {
     }
     /// Browsers that have been configured with data types (returned from data type page).
     private(set) var configuredBrowsers: Set<BrowserType> = []
-    private var chromeProfiles: [BrowserDataImporter.ChromeProfileInfo] = []
-    private var selectedChromeProfile: BrowserDataImporter.ChromeProfileInfo?
+    private var chromeProfiles: [BrowserDataImporter.ChromiumProfileInfo] = []
+    private var selectedChromeProfile: BrowserDataImporter.ChromiumProfileInfo?
+    private var arcSpaces: [ArcSpace] = []
+    private var selectedArcSpaceIndex: Int?
+    private var selectedArcSpace: ArcSpace? {
+        guard let i = selectedArcSpaceIndex, arcSpaces.indices.contains(i) else { return nil }
+        return arcSpaces[i]
+    }
     
     private lazy var permisionImageView: NSImageView = {
         let imageView = NSImageView()
@@ -201,9 +209,18 @@ class ImportFromOtherBrowserViewController: OnboardingBaseViewController {
         )
         
         view.wantsLayer = true
-        
+
         view.onTap = { [weak self] in
             self?.selectBrowser(.arc)
+        }
+        view.onProfileSelection = { [weak self] index in
+            guard let self, self.arcSpaces.indices.contains(index) else { return }
+            // Ignore re-selecting the already-chosen Space (NSMenu fires the action
+            // regardless), so it doesn't needlessly reset the configured state and
+            // force the user back through the data-type page — matches Chrome.
+            guard self.selectedArcSpaceIndex != index else { return }
+            self.selectedArcSpaceIndex = index
+            self.unmarkBrowserConfigured(.arc)
         }
         return view
     }()
@@ -295,6 +312,7 @@ class ImportFromOtherBrowserViewController: OnboardingBaseViewController {
                 make.width.equalTo(optionWidth)
                 make.height.equalTo(optionHeight)
             }
+            refreshArcSpacesIfNeeded()
         }
 
         browserOptionsStackView.addArrangedSubview(safariOptionView)
@@ -421,7 +439,7 @@ class ImportFromOtherBrowserViewController: OnboardingBaseViewController {
             chromeOptionView.setProfileSelectorVisible(false)
             return
         }
-        chromeProfiles = importer.loadChromeProfiles()
+        chromeProfiles = importer.loadChromiumProfiles()
         if chromeProfiles.count > 1 {
             chromeOptionView.setProfileSelectorVisible(true)
             let names = chromeProfiles.map { $0.name }
@@ -442,14 +460,51 @@ class ImportFromOtherBrowserViewController: OnboardingBaseViewController {
         }
     }
 
-    private func chromeProfileMenuTitle(_ profile: BrowserDataImporter.ChromeProfileInfo) -> String {
+    private func arcProfileDisplayNames() -> [String: String] {
+        let url = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/Arc/User Data/Local State")
+        var map: [String: String] = [:]
+        for p in importer.loadChromiumProfiles(localStateURL: url) { map[p.directory] = p.name }
+        return map
+    }
+
+    private func refreshArcSpacesIfNeeded() {
+        guard hasArcData() else {
+            arcOptionView.setProfileSelectorVisible(false)
+            return
+        }
+        arcSpaces = importer.loadArcSpaces()
+        let profileNames = arcProfileDisplayNames()
+        if arcSpaces.count > 1 {
+            arcOptionView.setEnabled(true)
+            arcOptionView.setProfileSelectorVisible(true)
+            let buttonTitles = arcSpaces.map { $0.title }
+            let menuTitles = arcSpaces.map { space -> String in
+                let secondary = space.profile.directoryName.flatMap { profileNames[$0] }
+                    ?? space.profile.directoryName
+                return Self.formatNameWithParenthetical(primary: space.title, secondary: secondary)
+            }
+            arcOptionView.updateProfileOptions(buttonTitles: buttonTitles, menuTitles: menuTitles, selectedIndex: 0)
+            selectedArcSpaceIndex = 0
+        } else if arcSpaces.count == 1 {
+            arcOptionView.setEnabled(true)
+            arcOptionView.setProfileSelectorVisible(false)
+            selectedArcSpaceIndex = 0
+        } else {
+            arcOptionView.setProfileSelectorVisible(false)
+            arcOptionView.setEnabled(false)        // no Spaces → nothing to import
+            selectedArcSpaceIndex = nil
+        }
+    }
+
+    private func chromeProfileMenuTitle(_ profile: BrowserDataImporter.ChromiumProfileInfo) -> String {
         guard let email = profile.email, !email.isEmpty else {
             return profile.name
         }
         return "\(profile.name) (\(email))"
     }
 
-    private func selectedChromeProfileIndex(in profiles: [BrowserDataImporter.ChromeProfileInfo]) -> Int? {
+    private func selectedChromeProfileIndex(in profiles: [BrowserDataImporter.ChromiumProfileInfo]) -> Int? {
         guard let selected = selectedChromeProfile else {
             return nil
         }
@@ -510,6 +565,7 @@ class ImportFromOtherBrowserViewController: OnboardingBaseViewController {
                 let didStart = await importer.startImportData(
                     Array(configuredBrowsers),
                     chromeProfileDirectory: selectedChromeProfile?.directory,
+                    arcSpace: configuredBrowsers.contains(.arc) ? selectedArcSpace : nil,
                     dataTypesPerBrowser: dataTypesPerBrowser
                 )
                 guard didStart else { return }
@@ -527,6 +583,7 @@ class BrowserOptionView: NSView {
     var onTap: (() -> Void)?
     var onProfileSelection: ((Int) -> Void)?
     private var isSelected: Bool
+    private var isEnabledRow = true
     
     private let iconImageView: NSImageView
     private let titleLabel: NSTextField
@@ -615,10 +672,16 @@ class BrowserOptionView: NSView {
         addTrackingArea(trackingArea)
     }
     
+    func setEnabled(_ enabled: Bool) {
+        isEnabledRow = enabled
+        alphaValue = enabled ? 1.0 : 0.4
+    }
+
     override func mouseDown(with event: NSEvent) {
+        guard isEnabledRow else { return }
         onTap?()
     }
-    
+
     func setConfigured(_ configured: Bool) {
         isSelected = configured
         updateAppearance()

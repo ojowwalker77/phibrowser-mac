@@ -5,13 +5,11 @@
 
 import Foundation
 final class ArcDataParserTool {
-    private static let logPrefix = "[ArcDataParser]"
-
     private static func log(_ message: String) {
         AppLogDebug(message)
     }
     /// Parse StorableSidebar.json and return Space-rooted Bookmark trees
-    static func parse(data: Data) throws -> [Bookmark] {
+    static func parse(data: Data) throws -> [ArcSpace] {
         let arc = try JSONDecoder().decode(ArcRoot.self, from: data)
 
         let containerEntries = extractSidebarItemEntries(from: arc.sidebar.containers)
@@ -39,7 +37,7 @@ final class ArcDataParserTool {
         )
 
         return spaces.sorted {
-            $0.title?.localizedCaseInsensitiveCompare($1.title ?? "") == .orderedAscending
+            $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending
         }
     }
 
@@ -153,41 +151,29 @@ final class ArcDataParserTool {
         spaceModels: [String: SpaceWrapper],
         sidebarItems: [String: SidebarItem],
         bookmarkMap: [String: Bookmark]
-    ) -> [Bookmark] {
-        var results: [Bookmark] = []
+    ) -> [ArcSpace] {
+        var results: [ArcSpace] = []
 
         for space in spaceModels.values {
-            log("Space: id=\(space.id) title=\(space.title ?? "nil") containerIDs=\(space.containerIDs ?? [])")
-            let spaceRoot = Bookmark(
-                guid: space.id,
-                title: space.title ?? "Untitled Space",
-                url: nil,
-                isFolder: true
-            )
+            let trimmed = space.title?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let title = (trimmed?.isEmpty == false ? trimmed : nil)
+                ?? NSLocalizedString("Untitled Space",
+                                     comment: "Arc import - fallback name for an Arc Space with no title")
 
-            let containerIDs = resolveSpaceContainerIDs(
-                space: space,
-                sidebarItems: sidebarItems
-            )
-            log("Space containers (pinned only) for \(space.id): \(containerIDs)")
+            let spaceRoot = Bookmark(guid: space.id, title: title, url: nil, isFolder: true)
 
+            let containerIDs = resolveSpaceContainerIDs(space: space, sidebarItems: sidebarItems)
             for cid in containerIDs {
                 guard let containerBookmark = bookmarkMap[cid] else { continue }
-                log("Container \(cid) children count=\(containerBookmark.children.count)")
-
                 for child in containerBookmark.children {
-                    if shouldSkipEmptyPlaceholderFolder(child) {
-                        continue
-                    }
-                    if spaceRoot.children.contains(where: { $0.guid == child.guid }) {
-                        continue
-                    }
+                    if shouldSkipEmptyPlaceholderFolder(child) { continue }
+                    if spaceRoot.children.contains(where: { $0.guid == child.guid }) { continue }
                     child.parent = spaceRoot
                     spaceRoot.children.append(child)
                 }
             }
 
-            results.append(spaceRoot)
+            results.append(ArcSpace(id: space.id, title: title, profile: space.profile, root: spaceRoot))
         }
 
         return results
@@ -327,6 +313,66 @@ final class ArcDataParserTool {
         guard bookmark.isFolder, bookmark.children.isEmpty else { return false }
         let title = (bookmark.title ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         return title.isEmpty || title == "Folder"
+    }
+}
+
+/// A parsed Arc Space with its profile binding and bookmark tree root.
+struct ArcSpace {
+    let id: String
+    let title: String
+    let profile: ArcSourceProfile
+    let root: ArcDataParserTool.Bookmark
+}
+
+/// Which Chromium profile (under Arc/User Data) an Arc Space uses.
+/// `.unknown` = the `profile` field was present but in an unrecognized shape;
+/// its `directoryName` is nil so the importer must NOT fall back to Default's data.
+enum ArcSourceProfile: Decodable, Equatable {
+    case `default`
+    case custom(directoryBasename: String)
+    case unknown
+
+    var directoryName: String? {
+        switch self {
+        case .default: return "Default"   // client-side literal; never present in the JSON
+        case .custom(let basename): return basename
+        case .unknown: return nil
+        }
+    }
+
+    private enum CodingKeys: String, CodingKey { case `default`, custom }
+    private struct Custom: Decodable {
+        let _0: Inner
+        struct Inner: Decodable { let directoryBasename: String }
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        if (try? c.decodeIfPresent(Bool.self, forKey: .default)) == true {
+            self = .default
+        } else if let custom = try? c.decode(Custom.self, forKey: .custom) {
+            let basename = custom._0.directoryBasename
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            // A profile dir must be a single, non-empty path component. Empty,
+            // whitespace, path separators, or traversal must NOT reach the bridge:
+            // Chromium maps an empty profile to Default (wrong-profile data import)
+            // and appends the basename to the Arc User Data path without sanitizing
+            // (path escape). Map any invalid value to .unknown → directoryName nil →
+            // bookmarks-only, never Default.
+            if basename.isEmpty
+                || basename.contains("/")
+                || basename.contains("\\")
+                || basename == "."
+                || basename == ".." {
+                self = .unknown
+            } else {
+                self = .custom(directoryBasename: basename)
+            }
+        } else {
+            throw DecodingError.dataCorrupted(.init(
+                codingPath: decoder.codingPath,
+                debugDescription: "Unrecognized Arc profile shape"))
+        }
     }
 }
 
@@ -500,18 +546,20 @@ extension ArcDataParserTool {
         let id: String
         let title: String?
         let containerIDs: [String]?
+        let profile: ArcSourceProfile
 
-        private enum CodingKeys: String, CodingKey {
-            case id
-            case title
-            case containerIDs
-        }
+        private enum CodingKeys: String, CodingKey { case id, title, containerIDs, profile }
 
         init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
             id = try c.decode(String.self, forKey: .id)
             title = try c.decodeIfPresent(String.self, forKey: .title)
             containerIDs = (try? c.decode([String].self, forKey: .containerIDs)) ?? []
+            if c.contains(.profile) {
+                profile = (try? c.decode(ArcSourceProfile.self, forKey: .profile)) ?? .unknown
+            } else {
+                profile = .default
+            }
         }
     }
     

@@ -15,7 +15,7 @@ class BrowserDataImporter {
         case done
     }
 
-    struct ChromeProfileInfo: Equatable {
+    struct ChromiumProfileInfo: Equatable {
         let directory: String
         let name: String
         let email: String?
@@ -65,13 +65,31 @@ class BrowserDataImporter {
         targetWindowId = windowId
     }
 
+    /// The Arc Space bookmark root to persist, or nil. Gated on Arc actually being
+    /// among the selected browsers (defense in depth: never write Arc bookmarks for a
+    /// Chrome/Safari-only import even if an Arc space is cached), bookmarks being
+    /// requested for Arc, and a space being chosen.
+    static func arcBookmarkRoot(
+        options: [BrowserType],
+        arcSpace: ArcSpace?,
+        wantsBookmarks: Bool
+    ) -> ArcDataParserTool.Bookmark? {
+        guard options.contains(.arc), let arcSpace, wantsBookmarks else { return nil }
+        return arcSpace.root
+    }
+
     /// Starts importing data from the selected browsers. Returns `false` only
     /// when the call was ignored because an import is already in flight, so the
     /// caller can skip its completion handler instead of advancing/closing the
     /// UI out from under the running import.
     @MainActor
     @discardableResult
-    func startImportData(_ options: [BrowserType], chromeProfileDirectory: String? = nil, dataTypesPerBrowser: [BrowserType: [String]]? = nil) async -> Bool {
+    func startImportData(
+        _ options: [BrowserType],
+        chromeProfileDirectory: String? = nil,
+        arcSpace: ArcSpace? = nil,
+        dataTypesPerBrowser: [BrowserType: [String]]? = nil
+    ) async -> Bool {
         // Prefer the caller-provided window so Chromium import state follows the initiating window/profile.
         guard let windowId = targetWindowId ?? MainBrowserWindowControllersManager.shared.getFirstAvailableWindowId() else {
             AppLogError("No available window for import")
@@ -112,44 +130,38 @@ class BrowserDataImporter {
                 bridgeDataTypes = bridgeDataTypes?.filter { $0 != ImportDataType.bookmarks.rawValue }
             }
 
-            if option != .arc || !(bridgeDataTypes?.isEmpty ?? true) {
-                let success = await importData(
-                    option,
-                    windowId: windowId,
-                    chromeProfileDirectory: chromeProfileDirectory,
-                    dataTypes: bridgeDataTypes
-                )
-
-                if !success {
-                    failedImports.append(option)
-                }
-
+            let sourceProfileDirectory: String?
+            switch option {
+            case .chrome: sourceProfileDirectory = chromeProfileDirectory
+            case .arc:    sourceProfileDirectory = arcSpace?.profile.directoryName
+            default:      sourceProfileDirectory = nil
+            }
+            // .unknown Arc profile (nil dir) → bookmarks only; never import Default's data.
+            let arcDataImportable = option != .arc || sourceProfileDirectory != nil
+            if (option != .arc || !(bridgeDataTypes?.isEmpty ?? true)), arcDataImportable {
+                let success = await importData(option, windowId: windowId,
+                    sourceProfileDirectory: sourceProfileDirectory, dataTypes: bridgeDataTypes)
+                if !success { failedImports.append(option) }
                 AppLogInfo("Import from \(option) completed with success: \(success)")
+            } else if option == .arc, !arcDataImportable, !(bridgeDataTypes?.isEmpty ?? true) {
+                // Deliberate, safe skip: the chosen Space's profile is unresolved
+                // (.unknown), so we import its bookmarks only and never fall back to
+                // Default's data. Surface it so the skip isn't silent.
+                AppLogWarn("Arc data import skipped for unresolved source profile; imported bookmarks only")
             }
         }
 
-        // Arc bookmarks: parse locally if user selected bookmarks for Arc
-        let arcBookmarks: [ArcDataParserTool.Bookmark]
         let arcWantsBookmarks = dataTypesPerBrowser?[.arc]?.contains(ImportDataType.bookmarks.rawValue) ?? true
-        if options.contains(.arc), arcWantsBookmarks, let arcData = getArcSidebarData() {
-            do {
-                arcBookmarks = try ArcDataParserTool.parse(data: arcData)
-            } catch {
-                AppLogError("\(error.localizedDescription)")
-                arcBookmarks = []
-            }
-        } else {
-            arcBookmarks = []
-        }
+        let arcSpaceRoot = Self.arcBookmarkRoot(options: options, arcSpace: arcSpace, wantsBookmarks: arcWantsBookmarks)
 
         updateCompletionStatus()
 
-        if importingBookmarks || !arcBookmarks.isEmpty {
+        if importingBookmarks || arcSpaceRoot != nil {
             Task { [weak self] in
                 if let self {
                     await self.persistImportedBookmarksAfterSnapshot(
                         windowId: windowId,
-                        arcBookmarks: arcBookmarks
+                        arcSpaceRoot: arcSpaceRoot
                     )
                     await MainActor.run { self.isImporting = false }
                 }
@@ -173,12 +185,19 @@ class BrowserDataImporter {
             .appendingPathComponent("Library/Application Support/Arc/StorableSidebar.json")
         return try? Data(contentsOf: localStateURL)
     }
+
+    /// Returns all Arc Spaces from StorableSidebar.json, sorted by title.
+    /// Used by the import picker to let the user choose which Space to import.
+    func loadArcSpaces() -> [ArcSpace] {
+        guard let data = getArcSidebarData() else { return [] }
+        return (try? ArcDataParserTool.parse(data: data)) ?? []
+    }
     
     /// Imports data for one browser using a continuation-backed async flow.
     private func importData(
         _ option: BrowserType,
         windowId: Int,
-        chromeProfileDirectory: String?,
+        sourceProfileDirectory: String?,
         dataTypes: [String]?
     ) async -> Bool {
         return await withCheckedContinuation { continuation in
@@ -191,7 +210,7 @@ class BrowserDataImporter {
                 self.importContinuations[option] = continuation
 
                 DispatchQueue.main.async {
-                    let profile = (option == .chrome ? chromeProfileDirectory : nil) ?? ""
+                    let profile = sourceProfileDirectory ?? ""
                     ChromiumLauncher.sharedInstance().bridge?.importBrowserData(
                         from: option,
                         profile: profile,
@@ -269,44 +288,32 @@ class BrowserDataImporter {
 
     private func persistImportedBookmarksAfterSnapshot(
         windowId: Int,
-        arcBookmarks: [ArcDataParserTool.Bookmark]
+        arcSpaceRoot: ArcDataParserTool.Bookmark?
     ) async {
         try? await Task.sleep(nanoseconds: 3 * 1_000_000_000)
 
         let bookmarkWrappers = await MainActor.run {
-            ChromiumLauncher
-                .sharedInstance()
-                .bridge?
-                .getAllBookmarks(withWindowId: windowId.int64Value)
+            ChromiumLauncher.sharedInstance().bridge?.getAllBookmarks(withWindowId: windowId.int64Value)
         }
 
-        await AccountController.shared.account?
-            .localStorage
-            .saveChromiumBookmarksToLocalStore(
-                bookmarkWrappers ?? [],
-                profileId: targetProfileId,
-                spaceId: targetSpaceId
-            )
+        await AccountController.shared.account?.localStorage.saveChromiumBookmarksToLocalStore(
+            bookmarkWrappers ?? [], profileId: targetProfileId, spaceId: targetSpaceId)
 
-        if !arcBookmarks.isEmpty {
+        if let arcSpaceRoot {
             await AccountController.shared.account?.localStorage.saveArcBookmarksToLocalStore(
-                arcBookmarks,
-                profileId: targetProfileId,
-                spaceId: targetSpaceId
-            )
+                arcSpaceRoot, profileId: targetProfileId, spaceId: targetSpaceId)
         }
 
         await AccountController.shared.account?.localStorage.reorderImportedBrowserFolders(
-            profileId: targetProfileId,
-            spaceId: targetSpaceId
-        )
+            profileId: targetProfileId, spaceId: targetSpaceId)
     }
 
-    func loadChromeProfiles() -> [ChromeProfileInfo] {
-        let localStateURL = FileManager.default.homeDirectoryForCurrentUser
+    func loadChromiumProfiles(
+        localStateURL: URL = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Application Support/Google/Chrome/Local State")
+    ) -> [ChromiumProfileInfo] {
         guard let data = try? Data(contentsOf: localStateURL) else {
-            AppLogError("Unable to read Chrome Local State at \(localStateURL.path)")
+            AppLogError("Unable to read Local State at \(localStateURL.path)")
             return []
         }
         guard
@@ -315,11 +322,11 @@ class BrowserDataImporter {
             let infoCache = profile["info_cache"] as? [String: Any],
             let profilesOrder = profile["profiles_order"] as? [String]
         else {
-            AppLogError("Invalid Chrome Local State profile structure")
+            AppLogError("Invalid Local State profile structure")
             return []
         }
 
-        var results: [ChromeProfileInfo] = []
+        var results: [ChromiumProfileInfo] = []
         results.reserveCapacity(profilesOrder.count)
         for directory in profilesOrder {
             guard let info = infoCache[directory] as? [String: Any] else {
@@ -327,7 +334,7 @@ class BrowserDataImporter {
             }
             let name = (info["name"] as? String) ?? directory
             let email = info["user_name"] as? String
-            results.append(ChromeProfileInfo(directory: directory, name: name, email: email))
+            results.append(ChromiumProfileInfo(directory: directory, name: name, email: email))
         }
 
         return results

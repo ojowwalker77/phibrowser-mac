@@ -1650,6 +1650,9 @@
     "Untitled" : {
       "comment" : "Default name for new bookmark folder\nDefault name for new bookmark folder in root"
     },
+    "Untitled Space" : {
+      "comment" : "Arc import - fallback name for an Arc Space with no title"
+    },
     "Update" : {
       "comment" : "Sidebar header upgrade button title"
     },

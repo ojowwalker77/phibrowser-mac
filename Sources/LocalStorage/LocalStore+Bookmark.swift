@@ -223,8 +223,16 @@ extension LocalStore {
         }
     }
 
-    /// Persists bookmarks imported from Arc into the local store.
-    func saveArcBookmarksToLocalStore(_ bookmarks: [ArcDataParserTool.Bookmark], profileId: String, spaceId: String = LocalStore.defaultSpaceId) async {
+    /// Persists bookmarks from one Arc Space into the local store.
+    /// `spaceRoot` is the Space's bookmark root; its children are imported
+    /// directly under a Space-named landing folder. Nothing is written when
+    /// `spaceRoot` has no children (avoids empty folders for empty Spaces).
+    func saveArcBookmarksToLocalStore(
+        _ spaceRoot: ArcDataParserTool.Bookmark,
+        profileId: String,
+        spaceId: String = LocalStore.defaultSpaceId
+    ) async {
+        guard !spaceRoot.children.isEmpty else { return }   // no empty Space-named folder
         await performBackgroundWriteAndWait { [weak self] context in
             guard let self else { return }
             do {
@@ -237,14 +245,13 @@ extension LocalStore {
 
                 let now = Date()
                 let importRoot = TabDataModel(
-                    title: Self.importedFromArcFolderTitle,
-                    guid: UUID().uuidString,
-                    index: 0,
-                    url: Self.folderPlaceholderURL,
-                    favicon: nil,
-                    createdDate: now,
-                    updatedDate: now
-                )
+                    // Defensive fallback: the parser fills the Space title (real or
+                    // localized "Untitled Space"), so this only matters if a nil-title
+                    // root ever reaches here — share the SAME localized fallback the
+                    // picker shows, not the legacy generic "Imported From Arc" name.
+                    title: spaceRoot.title ?? NSLocalizedString("Untitled Space", comment: "Arc import - fallback name for an Arc Space with no title"),
+                    guid: UUID().uuidString, index: 0, url: Self.folderPlaceholderURL,
+                    favicon: nil, createdDate: now, updatedDate: now)
                 importRoot.dataType = .bookmarkFolder
                 importRoot.isCreatedByChromium = false
                 importRoot.spaceId = root.spaceId
@@ -253,30 +260,16 @@ extension LocalStore {
                 importRoot.profile = profile
                 context.insert(importRoot)
                 try self.insert(node: importRoot, to: root, at: nil, in: context)
-                
-                func insertArcBookmark(
-                    _ arcBookmark: ArcDataParserTool.Bookmark,
-                    parent: TabDataModel,
-                    index: Int
-                ) throws {
+
+                func insertArcBookmark(_ arcBookmark: ArcDataParserTool.Bookmark, parent: TabDataModel, index: Int) throws {
                     let title = (arcBookmark.title?.isEmpty ?? true) ? "Untitled" : arcBookmark.title
-                    let url = arcBookmark.isFolder
-                        ? Self.folderPlaceholderURL
-                        : self.normalizedURL(from: arcBookmark.url)
+                    let url = arcBookmark.isFolder ? Self.folderPlaceholderURL : self.normalizedURL(from: arcBookmark.url)
                     guard let url else {
                         AppLogError("Skipping bookmark with invalid URL: \(arcBookmark.url ?? "nil")")
                         return
                     }
-                    
-                    let node = TabDataModel(
-                        title: title ?? "Untitled",
-                        guid: UUID().uuidString,
-                        index: 0,
-                        url: url,
-                        favicon: nil,
-                        createdDate: now,
-                        updatedDate: now
-                    )
+                    let node = TabDataModel(title: title ?? "Untitled", guid: UUID().uuidString,
+                        index: 0, url: url, favicon: nil, createdDate: now, updatedDate: now)
                     node.dataType = arcBookmark.isFolder ? .bookmarkFolder : .bookmark
                     node.isCreatedByChromium = false
                     node.spaceId = parent.spaceId
@@ -285,14 +278,14 @@ extension LocalStore {
                     node.profile = profile
                     context.insert(node)
                     try self.insert(node: node, to: parent, at: index, in: context)
-                    
                     for (childIndex, child) in arcBookmark.children.enumerated() {
                         try insertArcBookmark(child, parent: node, index: childIndex)
                     }
                 }
-                
-                for (index, bookmark) in bookmarks.enumerated() {
-                    try insertArcBookmark(bookmark, parent: importRoot, index: index)
+
+                // Insert the Space's children directly under the Space-named folder (no double-nest).
+                for (index, child) in spaceRoot.children.enumerated() {
+                    try insertArcBookmark(child, parent: importRoot, index: index)
                 }
             } catch {
                 AppLogError("Failed to save Arc bookmarks: \(error)")
