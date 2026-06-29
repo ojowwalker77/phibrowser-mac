@@ -441,6 +441,31 @@ final class BrowserStateMultiSelectionTests: XCTestCase {
         XCTAssertNil(state.multiSelectionSplitPair)
     }
 
+    func testSplitPairSidebarContextMenuUsesMultiSelectionMenuWhenSelectionActive() throws {
+        let state = try makeState()
+        seed(state, guids: [1, 2, 3])
+        state.splits = [
+            SplitGroup(id: "split-2-3",
+                       primaryTabId: 2,
+                       secondaryTabId: 3,
+                       layout: .vertical,
+                       ratio: 0.5)
+        ]
+        state.focuseTab(state.tabs[0])
+        state.toggleMultiSelectionForSplitPair(leftTab: state.tabs[1], rightTab: state.tabs[2])
+
+        let item = SplitPairSidebarItem(groupId: "split-2-3",
+                                        leftTab: state.tabs[1],
+                                        rightTab: state.tabs[2],
+                                        browserState: state)
+        let menu = NSMenu()
+
+        item.makeContextMenu(on: menu)
+
+        XCTAssertEqual(menu.items.first?.title, "Duplicate Tabs")
+        XCTAssertFalse(menu.items.contains { $0.title == "Duplicate Split" })
+    }
+
     func testClosingSelectedTabPrunesSelection() throws {
         let state = try makeState()
         seed(state, guids: [1, 2, 3])

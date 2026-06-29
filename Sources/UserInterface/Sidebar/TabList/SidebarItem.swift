@@ -95,8 +95,13 @@ final class SplitPairSidebarItem: SidebarItem, ContextMenuRepresentable {
     }
 
     /// Drives the merged cell's context menu off the left pane so the
-    /// user gets split-aware items (Remove from Split, etc.).
+    /// user gets split-aware items (Remove from Split, etc.) after the
+    /// shared multi-selection menu gets first chance to take over.
     @MainActor func makeContextMenu(on menu: NSMenu) {
+        if let browserState,
+           TabMultiSelectionMenu.populateIfNeeded(menu, browserState: browserState) {
+            return
+        }
         leftTab.makeContextMenu(on: menu)
     }
 }
