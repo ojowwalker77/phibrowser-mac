@@ -233,12 +233,18 @@ class MainBrowserWindowController: NSWindowController {
     @objc private func myWindowWillEnterFullScreen(_ noti: Notification) {
         if noti.object as? NSWindow === self.window {
             browserState.toggleFullScreenMode(true)
+            // Drop `.moveToActiveSpace` before macOS finalizes this window's
+            // own fullscreen Space, so a second slot entering fullscreen can't
+            // drag it back out and leave a blank desktop in Mission Control.
+            slot?.windowFullScreenStateChanged(isFullScreen: true)
         }
     }
 
     @objc private func myWindowWillExitFullScreen(_ noti: Notification) {
         if noti.object as? NSWindow === self.window {
             browserState.toggleFullScreenMode(false)
+            // Back to a normal window — restore the sibling-follow behavior.
+            slot?.windowFullScreenStateChanged(isFullScreen: false)
         }
     }
 

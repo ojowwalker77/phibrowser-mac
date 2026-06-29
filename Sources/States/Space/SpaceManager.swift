@@ -2897,7 +2897,41 @@ final class SpaceWindowSlot: ObservableObject {
         var behavior = window.collectionBehavior
         behavior.remove(.fullScreenNone)
         behavior.insert(.fullScreenPrimary)
+        // A window grouped into a fullscreen anchor joins that single macOS
+        // fullscreen Space. Leaving `.moveToActiveSpace` on it lets a later app
+        // activation in another Space (e.g. a second slot's own fullscreen
+        // Space) drag it back out, blanking the Space — see
+        // `windowFullScreenStateChanged`.
+        behavior.remove(.moveToActiveSpace)
         window.collectionBehavior = behavior
+    }
+
+    /// Adds or removes `.moveToActiveSpace` across every window in this slot in
+    /// response to its visible window entering/leaving native fullscreen.
+    /// Forwarded from `MainBrowserWindowController`'s will-enter / will-exit
+    /// fullscreen notifications.
+    ///
+    /// `.moveToActiveSpace` (applied in `registerWindow`) makes macOS pull a
+    /// window into the frontmost Space whenever the app activates — exactly
+    /// what a hidden sibling needs so it surfaces on the user's current
+    /// desktop. But it is destructive for a window that owns its own native
+    /// fullscreen Space: once a SECOND user-perceived window enters fullscreen
+    /// (its own macOS Space), the next app activation drags this slot's
+    /// fullscreen window out of its Space, leaving an empty black desktop in
+    /// Mission Control. So a window must not carry `.moveToActiveSpace` while
+    /// its slot is in fullscreen. Applied across the whole slot because its
+    /// windows share one fullscreen Space (hidden siblings are re-grouped into
+    /// it by `syncSlotTabGroup` on the next switch); restoring on exit returns
+    /// the normal sibling-follow behavior.
+    func windowFullScreenStateChanged(isFullScreen: Bool) {
+        for controller in windowsBySpaceId.values {
+            guard let window = controller.window else { continue }
+            if isFullScreen {
+                window.collectionBehavior.remove(.moveToActiveSpace)
+            } else {
+                window.collectionBehavior.insert(.moveToActiveSpace)
+            }
+        }
     }
 
     private func makeKeyAndOrderFrontHidingSlotTabBar(_ window: NSWindow?) {
@@ -3128,7 +3162,15 @@ final class SpaceWindowSlot: ObservableObject {
             // switching Phi Spaces yanks the user back to the sibling's
             // original desktop. `.moveToActiveSpace` makes the sibling
             // surface on the user's current desktop on each show instead.
-            window.collectionBehavior.insert(.moveToActiveSpace)
+            // Skip it while this slot already owns a fullscreen Space: a
+            // window carrying `.moveToActiveSpace` is dragged out of its own
+            // fullscreen Space on the next app activation, blanking it. The
+            // window joins the slot's fullscreen Space via `syncSlotTabGroup`
+            // below, and the fullscreen-exit hook restores the behavior. See
+            // `windowFullScreenStateChanged`.
+            if !slotHasFullScreenWindow {
+                window.collectionBehavior.insert(.moveToActiveSpace)
+            }
         }
         if let frame = pendingFrameByWindowId.removeValue(forKey: controller.windowId),
            let window = controller.window {
