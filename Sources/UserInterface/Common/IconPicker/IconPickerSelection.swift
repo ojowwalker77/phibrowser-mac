@@ -34,7 +34,7 @@ enum IconPickerSelection: Hashable, Identifiable {
     }
 
     static func fromStorageValue(_ value: String,
-                                 emojiCatalog: EmojiCatalog = .shared) -> IconPickerSelection? {
+                                 emojiCatalog: EmojiCatalog? = nil) -> IconPickerSelection? {
         if value.hasPrefix(Self.phiIconPrefix) {
             let id = String(value.dropFirst(Self.phiIconPrefix.count))
             guard PhiIconCatalog.allIds.contains(id) else { return nil }
@@ -43,7 +43,8 @@ enum IconPickerSelection: Hashable, Identifiable {
 
         if value.hasPrefix(Self.emojiPrefix) {
             let id = String(value.dropFirst(Self.emojiPrefix.count))
-            guard let text = emojiCatalog.text(for: id) else { return nil }
+            let catalog = emojiCatalog ?? .shared
+            guard let text = catalog.text(for: id) else { return nil }
             return .emoji(id: id, text: text)
         }
 

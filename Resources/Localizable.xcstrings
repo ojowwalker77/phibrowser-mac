@@ -13,6 +13,9 @@
     "・Paused" : {
       "comment" : "Download item row - Status indicator when download is paused"
     },
+    "·" : {
+
+    },
     "· %@" : {
 
     },
@@ -167,6 +170,9 @@
     "© %d Phinomenon. All rights reserved." : {
       "comment" : "About window - Copyright notice at bottom"
     },
+    "A profile with this name already exists." : {
+      "comment" : "Validation shown when a new or renamed profile name duplicates an existing profile"
+    },
     "Active" : {
       "comment" : "Search Tabs - Trailing label for the active tab result"
     },
@@ -238,6 +244,9 @@
     },
     "Amber" : {
       "comment" : "Amber theme color name"
+    },
+    "An import is still adding bookmarks to this Space. Wait for it to finish, then try again." : {
+      "comment" : "Body shown when a Space action is blocked by an in-progress import\nBody shown when deleting a Space is blocked by an in-progress import"
     },
     "Appearance" : {
       "comment" : "General settings - Appearance section title"
@@ -325,6 +334,12 @@
     },
     "Browsing history" : {
       "comment" : "Import data type - Browsing history toggle label"
+    },
+    "Can’t change this Space’s profile yet" : {
+      "comment" : "Title shown when changing a Space's profile is blocked by an in-progress import"
+    },
+    "Can’t delete this Space yet" : {
+      "comment" : "Title shown when deleting a Space is blocked by an in-progress import"
     },
     "Cancel" : {
       "comment" : "AI settings - Cancel button in disable-AI confirmation alert\nAI settings - Cancel button in disable-connectors confirmation alert\nAccount settings - Cancel button in logout confirmation dialog\nAccount settings - Cancel button in rename dialog\nCancel\nCancel button\nDebug clear data - Alert button to cancel clearing user data\nDebug import user data - Alert button to cancel importing user data\nDownload item row - Tooltip for cancel button during safety scan\nDownload item row - Tooltip for cancel download button\nEditor - Cancel button title\nGeneric - Cancel button to dismiss an alert\nNew folder dialog cancel button title\nTab group rename alert - Cancel button\nTooltip for cancel button during safety scan in living downloads toast\nUpdate alert - Button to cancel update installation"
@@ -536,6 +551,9 @@
     },
     "Current" : {
       "comment" : "Marks the Space the user is currently in, in the ask-Space list"
+    },
+    "Current Space" : {
+      "comment" : "Fallback label for the import-target Space when it can't be resolved by id"
     },
     "Custom Telegram bot" : {
       "comment" : "Phi Link - Custom bot title"
@@ -766,7 +784,7 @@
       "comment" : "Folder editor - Placeholder for folder name input\nNew folder dialog input placeholder"
     },
     "Follow Global" : {
-      "comment" : "Spaces menu - Theme submenu entry that clears the per-Space override\nSpaces settings - theme entry that clears the per-Space override\nSpaces settings - theme follows global label\nTheme menu: clear per-Space override"
+      "comment" : "Create-Space panel — toggle so the new Space follows the global theme\nSpaces menu - Theme submenu entry that clears the per-Space override\nSpaces settings - theme entry that clears the per-Space override\nSpaces settings - theme follows global label\nTheme menu: clear per-Space override"
     },
     "Forward" : {
       "comment" : "Web content header - Accessibility description for forward navigation button"
@@ -1111,7 +1129,7 @@
       "comment" : "Phi Link - Official Bot title"
     },
     "OK" : {
-      "comment" : "Account settings - OK button\nAccount settings - OK button to dismiss logout failed alert\nExtension info alert - OK button to dismiss the alert\nGeneric - OK button to dismiss an alert"
+      "comment" : "Account settings - OK button\nAccount settings - OK button to dismiss logout failed alert\nDismiss button\nExtension info alert - OK button to dismiss the alert\nGeneric - OK button to dismiss an alert"
     },
     "Omnibox" : {
       "comment" : "General settings - Option to open Omnibox search when pressing ⌘+T"
@@ -1151,9 +1169,6 @@
     },
     "Organize tabs with AI" : {
       "comment" : "Organize Tabs - Button tooltip and accessibility label\nside bar new tab row - organize tabs button tooltip"
-    },
-    "Passwords" : {
-      "comment" : "Profiles settings - data link to password manager"
     },
     "Passwords Manager" : {
       "comment" : "Onboarding password manager - Page title"
@@ -1550,12 +1565,6 @@
     },
     "The local IM service is unavailable. Check whether Phi Sentinel started normally and the IM service is running." : {
       "comment" : "IM Channels - Message shown when im-server is not connected"
-    },
-    "A profile with this name already exists." : {
-      "comment" : "Validation shown when a new or renamed profile name duplicates an existing profile"
-    },
-    "The name cannot be empty." : {
-      "comment" : "Validation shown when the profile name is left blank"
     },
     "The Phi user data folder was not found. Continuing will still remove other local application data and quit." : {
       "comment" : "Debug clear data - Alert body when Phi folder is missing; clearing will still proceed for other locations"
