@@ -1321,12 +1321,13 @@ final class SpaceManager: ObservableObject {
         pushOpenLinkSpaceMenuToChromium()
     }
 
-    /// Opens `urlString` after an "ask first" rule match, once the user has
-    /// chosen a destination in the prompt presented by `PhiChromiumCoordinator`.
-    /// `spaceId == nil` means "keep it here": the URL opens as a new
-    /// foreground tab in the source window. Otherwise the chosen Space is
-    /// brought to the front in the source window's slot (spawning its window
-    /// when the Space isn't currently open) and the URL opens there.
+    /// Opens `urlString` in a Space after a URL rule routed it there: an "ask
+    /// first" match the user resolved in `PhiChromiumCoordinator`'s prompt, the
+    /// right-click "Open link as" submenu, or a silent auto-route to a Space with
+    /// no open window (`routeURL`). `spaceId == nil` means "keep it here": the
+    /// URL opens as a new foreground tab in the source window. Otherwise the
+    /// chosen Space is brought to the front in the source window's slot (spawning
+    /// its window when the Space isn't currently open) and the URL opens there.
     ///
     /// The matching navigation was already cancelled on the Chromium side, so
     /// this always opens *something* — if the chosen Space's window can't be
@@ -1347,6 +1348,23 @@ final class SpaceManager: ObservableObject {
         }
         let sourceSlot = slots.first { $0.contains(windowId: Int(sourceWindowId)) }
         let slot = sourceSlot ?? keySlot ?? slots.first
+        // Re-key the source window before a cold spawn. When the target Space
+        // has no window yet, `activate` spawns one and, in native fullscreen,
+        // tabs it into the source window's single macOS Space (`syncSlotTabGroup`
+        // → `addTabbedWindow`). AppKit only keeps the spawned window in that
+        // Space when the source window is the key window at spawn time. The
+        // swipe/click and "ask first" paths satisfy this implicitly — they run
+        // inside an AppKit user event on the focused window, and the chooser
+        // dismissal even calls `makeKey()` on the source window — but the silent
+        // auto-route reaches here straight from a Chromium IPC callback with no
+        // such event, so the spawn strands the new window in its own macOS Space
+        // (the stray window the user sees over the fullscreen). Asserting key
+        // focus first mirrors the path that already works.
+        if slot?.windowController(for: spaceId) == nil,
+           let sourceWindow = MainBrowserWindowControllersManager.shared
+               .controller(for: Int(sourceWindowId))?.window {
+            sourceWindow.makeKey()
+        }
         slot?.activate(spaceId: spaceId)
         if let controller = slot?.windowController(for: spaceId) {
             open(Int64(controller.windowId))
@@ -1363,20 +1381,33 @@ final class SpaceManager: ObservableObject {
         }
     }
 
-    /// Picks one windowId per Space that currently has an open window. A
-    /// Space can be active in multiple slots simultaneously; the keySlot
-    /// wins the tiebreak so cross-Space routing lands in the window the
-    /// user just had focused. Spaces without an open window are omitted —
-    /// rules targeting them are no-ops on the Chromium side.
+    /// Picks one windowId per Space that is currently VISIBLE on screen. A
+    /// Space can be active in multiple slots simultaneously; the keySlot wins
+    /// the tiebreak so cross-Space routing lands in the window the user just had
+    /// focused.
+    ///
+    /// Only each slot's visible window is reported — never a non-visible sibling
+    /// (a Space whose window the slot keeps off-screen, e.g. a session-restored
+    /// window the slot hides behind the active Space). This is what makes the
+    /// C++ router (`PhiURLRouter`) treat routing to a non-visible Space as
+    /// `kRouteToSpace` (hand to `routeAskedURL`) instead of `kRoute` (surface
+    /// the window directly via `Navigate(kShowWindow)`). The direct path
+    /// bypasses the slot's swap logic: in fullscreen a restored sibling window
+    /// is detached from the native tab group, so surfacing it that way strands
+    /// it in its own macOS Space (a stray window over the fullscreen). Routing
+    /// through `routeAskedURL` re-enters the slot's fullscreen-aware swap, which
+    /// re-attaches the window into the fullscreen Space before surfacing it.
+    /// `visibleController`'s didSet re-pushes this map so a Space switch keeps it
+    /// fresh.
     private func currentSpaceWindowMap() -> [String: Int] {
         var result: [String: Int] = [:]
         var ordered: [SpaceWindowSlot] = []
         if let key = keySlot { ordered.append(key) }
         ordered.append(contentsOf: slots.filter { $0 !== keySlot })
         for slot in ordered {
-            for (spaceId, controller) in slot.windowsBySpaceId where result[spaceId] == nil {
-                result[spaceId] = controller.windowId
-            }
+            guard let controller = slot.visibleController,
+                  result[controller.spaceId] == nil else { continue }
+            result[controller.spaceId] = controller.windowId
         }
         return result
     }
@@ -1654,6 +1685,12 @@ final class SpaceWindowSlot: ObservableObject {
             guard oldValue !== visibleController else { return }
             observeFrameChanges(on: visibleController)
             updateWindowsMenuExclusion()
+            // The Space→window routing map reports only the visible window per
+            // slot (see `SpaceManager.currentSpaceWindowMap`), so re-push it
+            // whenever the visible Space changes — otherwise the C++ router
+            // would keep resolving the previously-visible window for a now-hidden
+            // Space and surface it directly instead of routing through the slot.
+            manager?.pushSpaceStateToChromium()
         }
     }
 
@@ -2963,6 +3000,7 @@ final class SpaceWindowSlot: ObservableObject {
             $0.window?.styleMask.contains(.fullScreen) == true
         }
     }
+
 
     private func inheritFullScreenTabEligibility(from anchor: NSWindow, to window: NSWindow) {
         guard anchor.styleMask.contains(.fullScreen) else { return }
