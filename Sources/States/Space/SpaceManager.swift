@@ -385,6 +385,19 @@ final class SpaceManager: ObservableObject {
         restoredSlotsByIndex = restoredSlotsByIndex.filter { $0.value !== slot }
     }
 
+    /// Re-asserts every slot's one-visible-window invariant after an app
+    /// reopen (Dock-icon click). Chromium's reopen handler surfaces every
+    /// browser window it owns — including a slot's hidden sibling Space
+    /// windows — so all Spaces in a slot momentarily appear on screen. This is
+    /// the same symptom the cold-launch session-restore burst produces, so the
+    /// fix reuses each slot's coalesced restore reconcile to drop the siblings
+    /// back behind the active Space. Idempotent: a settled slot does no work.
+    func reconcileSlotVisibilityAfterReopen() {
+        for slot in slots {
+            slot.scheduleRestoreVisibilityReconcile()
+        }
+    }
+
     /// Walks every slot looking for one that recorded a pending spawn
     /// intent for `windowId`. Returns the (slot, spaceId) pair on the first
     /// match; the slot consumes the intent as a side effect.
@@ -3085,10 +3098,13 @@ final class SpaceWindowSlot: ObservableObject {
         window.orderOut(nil)
     }
 
-    /// Re-asserts this slot's one-visible-window invariant after a cold-launch
-    /// session-restore burst. Scheduled (coalesced) by
-    /// `PhiChromiumCoordinator.mainBrowserWindowCreated` for every restored
-    /// window.
+    /// Re-asserts this slot's one-visible-window invariant after Chromium
+    /// surfaces several of the slot's windows at once. Scheduled (coalesced)
+    /// by `PhiChromiumCoordinator.mainBrowserWindowCreated` for every restored
+    /// window on a cold-launch session-restore burst, and by
+    /// `SpaceManager.reconcileSlotVisibilityAfterReopen` after a Dock-icon
+    /// reopen (which surfaces the slot's hidden sibling Space windows the same
+    /// way).
     ///
     /// On session restore a slot owns several Chromium windows (one per Space
     /// ever surfaced). Chromium surfaces every one with its own

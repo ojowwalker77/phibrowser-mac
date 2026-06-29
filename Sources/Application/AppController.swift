@@ -192,7 +192,13 @@ import PostHog
             } else {
                 AppLogDebug("reopen: access token still fresh, skipping renew")
             }
-            return ChromiumLauncher.sharedInstance().bridge?.applicationShouldHandleReopen(sender, hasVisibleWindows: hasVisibleWindows) ?? false
+            let handled = ChromiumLauncher.sharedInstance().bridge?.applicationShouldHandleReopen(sender, hasVisibleWindows: hasVisibleWindows) ?? false
+            // Chromium's reopen surfaces every browser window it owns, which
+            // un-hides the slots' hidden sibling Space windows. Re-assert the
+            // one-visible-window-per-slot invariant so only the active Space
+            // stays on screen.
+            SpaceManager.shared.reconcileSlotVisibilityAfterReopen()
+            return handled
         }
     }
     
