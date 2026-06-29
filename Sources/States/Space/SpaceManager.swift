@@ -913,6 +913,12 @@ final class SpaceManager: ObservableObject {
                     AppLogWarn("[SpaceManager] deleteSpace: not closing \(spaceId)'s window — it is still visible (retreat to default did not complete)")
                     return
                 }
+                // Evict before closing (as `changeProfile` does) so the window
+                // teardown's late `unregisterWindow` fails its identity check and
+                // skips the visible-close side effects. Without this the close is
+                // classified as window-driven and cascades the whole slot shut —
+                // the user-perceived window vanishes on a Space delete.
+                slot.evictWindow(for: spaceId)
                 controller.window?.close()
             }
         }
@@ -924,6 +930,16 @@ final class SpaceManager: ObservableObject {
         // routes through `windowWillClose` → slot.unregisterWindow → cleanup.
         for slot in slots where !retreatingSlots.contains(where: { $0 === slot }) {
             guard let controller = slot.windowController(for: spaceId) else { continue }
+            // Defensive parity with the retreating closure above and
+            // `changeProfile`: if a slot's visible window lags its activeSpaceId
+            // (e.g. a failed cross-profile switch left it on the deleted Space's
+            // still-visible window), don't close it — that would drop the
+            // user-perceived window. The Space row is removed regardless.
+            guard slot.visibleController !== controller else { continue }
+            // Evict before closing for the same reason as the retreating slots
+            // above: a late window-driven unregister would otherwise cascade the
+            // slot shut.
+            slot.evictWindow(for: spaceId)
             controller.window?.close()
         }
         // Cascade-delete the Space row, its tagged tabs/bookmarks, and its
