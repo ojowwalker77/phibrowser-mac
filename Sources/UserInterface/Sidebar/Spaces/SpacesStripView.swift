@@ -380,15 +380,13 @@ struct SpacesStripView: View {
     /// window to that Space; the active pip stays at full strength while the rest
     /// dim, so the difference is only brightness — never a different icon style.
     private func spacePip(for space: SpaceModel) -> some View {
-        // Normally the highlight follows `activeSpaceId` (matching the Spaces
-        // menu). During a vertical push-in the slot pins the strip to the
-        // leaving Space (`pinnedStripSpaceId`) so the pip doesn't jump to the
-        // target while the leaving Space's content is still on screen — the
-        // strip lives in the leaving window's header, which stays visible for
-        // the whole animation. The pin is cleared when the swap settles, so the
-        // fallback keeps steady state correct.
-        let highlightedSpaceId = slot.pinnedStripSpaceId ?? slot.activeSpaceId
-        let isActive = space.spaceId == highlightedSpaceId
+        // The highlight follows `activeSpaceId` (matching the Spaces menu).
+        // `activate` flips it to the target up front — before the vertical
+        // push-in animation starts — so the active pip moves to the new Space
+        // immediately on switch, while the leaving Space's content slides out
+        // beneath it (the strip lives in the leaving window's header, which
+        // stays on screen for the animation).
+        let isActive = space.spaceId == slot.activeSpaceId
         return Button {
             slot.activate(spaceId: space.spaceId)
         } label: {

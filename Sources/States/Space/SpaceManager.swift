@@ -1588,16 +1588,6 @@ final class SpaceWindowSlot: ObservableObject {
 
     @Published private(set) var activeSpaceId: String?
 
-    /// Transient override for the vertical Spaces-strip pip highlight, set ONLY
-    /// while a Space-switch animation should freeze the strip on the LEAVING
-    /// Space. `activate` flips `activeSpaceId` to the target up front, but the
-    /// vertical push-in keeps the leaving window (its header, which hosts the
-    /// strip) on screen until the swap completes — so without this the pip would
-    /// jump to the target while the leaving Space's content is still visible.
-    /// Nil in steady state, so the pip falls back to `activeSpaceId` and always
-    /// matches the menu once a switch settles (see `SpacesStripView.spacePip`).
-    @Published private(set) var pinnedStripSpaceId: String?
-
     /// Bumped to ask this window's Spaces strip to open the icon/emoji picker for
     /// the active Space, anchored below its icon. Driven by the tab-area menu's
     /// "Change Icon…" item, which has no view of its own to anchor a popover.
@@ -2356,11 +2346,6 @@ final class SpaceWindowSlot: ObservableObject {
         // SwiftUI to commit. The tint gradient lives behind the stack, so it
         // stays visible and ramps underneath.
         prevSidebar.setSwitchBandContentHidden(true)
-        // The strip lives in the leaving window's header, which stays on screen
-        // for the whole push-in. Freeze its active pip on the leaving Space so
-        // it doesn't jump ahead to the target (which `activate` already wrote to
-        // `activeSpaceId`) while the leaving Space's content is still visible.
-        setPinnedStripSpaceId(previous.spaceId)
         let placeholder = NSImageView(frame: bandFrame)
         placeholder.image = leavingImage
         placeholder.imageScaling = .scaleAxesIndependently
@@ -2381,10 +2366,6 @@ final class SpaceWindowSlot: ObservableObject {
             placeholder?.removeFromSuperview()
             self?.activeSidebarOverlay?.cancel()
             prevSidebar?.setSwitchBandContentHidden(false)
-            // Swap landed: drop the freeze so every strip falls back to
-            // `activeSpaceId` (now the target) and the surfaced window's pip
-            // matches its content.
-            self?.setPinnedStripSpaceId(nil)
             // Restore the leaving window's own theme now that it's hidden, so
             // it shows the source Space's colors when next activated.
             self?.themeRampTimer?.invalidate()
@@ -3064,16 +3045,6 @@ final class SpaceWindowSlot: ObservableObject {
         hideSlotTabBars()
     }
 
-    /// Freezes the vertical Spaces-strip pip on `spaceId` (the leaving Space)
-    /// for the duration of a switch animation, or clears the freeze when passed
-    /// nil. Driven by the animation lifecycle — not by key-window events — so it
-    /// can't get stuck: steady state always falls back to `activeSpaceId`.
-    /// Idempotent so redundant sets don't republish.
-    private func setPinnedStripSpaceId(_ spaceId: String?) {
-        guard pinnedStripSpaceId != spaceId else { return }
-        pinnedStripSpaceId = spaceId
-    }
-
     private func observeNativeTabBarAccessories(for controller: MainBrowserWindowController) {
         guard tabBarAccessoryObservationsByWindowId[controller.windowId] == nil,
               let window = controller.window else {
@@ -3644,7 +3615,6 @@ final class SpaceWindowSlot: ObservableObject {
     /// has been deleted and no fallback Space exists.
     fileprivate func clearActiveSpace() {
         activeSpaceId = nil
-        setPinnedStripSpaceId(nil)
     }
 
     private func handleWindowDidBecomeKey(spaceId: String) {
