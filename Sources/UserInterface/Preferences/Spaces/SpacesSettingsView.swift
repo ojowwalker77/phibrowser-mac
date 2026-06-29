@@ -169,6 +169,10 @@ struct SpacesSettingsView: View {
         // image and the item vanished. The explicit preview always renders at
         // full opacity, independent of the in-list row below.
         .onDrag {
+            // Grabbing a row also selects it, so the detail panel follows the
+            // Space being moved and the row reads as selected once it settles
+            // back into the list.
+            select(space.spaceId)
             draggingSpaceId = space.spaceId
             return NSItemProvider(object: space.spaceId as NSString)
         } preview: {
@@ -244,6 +248,10 @@ struct SpacesSettingsView: View {
         // The list panel is 300 wide and the row stack is inset by 6 on each
         // side, so the row — and therefore this preview — is 288 wide.
         .frame(width: 288, alignment: .leading)
+        // The lifted Space is selected the moment it's grabbed, so the preview
+        // carries the same accent highlight a selected row shows, layered over
+        // an opaque base so the floating drag image still reads as a card.
+        .background(Color.accentColor.opacity(0.15))
         .themedBackground(.settingItemBackground)
         .clipShape(RoundedRectangle(cornerRadius: 6))
     }
