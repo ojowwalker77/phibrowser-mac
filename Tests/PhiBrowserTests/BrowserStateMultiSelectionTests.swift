@@ -466,6 +466,28 @@ final class BrowserStateMultiSelectionTests: XCTestCase {
         XCTAssertFalse(menu.items.contains { $0.title == "Duplicate Split" })
     }
 
+    func testDuplicateMultiSelectionPreservesSplitPair() throws {
+        let state = try makeState()
+        seed(state, guids: [1, 2, 3, 4])
+        state.splits = [
+            SplitGroup(id: "split-2-3",
+                       primaryTabId: 2,
+                       secondaryTabId: 3,
+                       layout: .vertical,
+                       ratio: 0.5)
+        ]
+        state.focuseTab(state.tabs[0])
+        state.toggleMultiSelectionForSplitPair(leftTab: state.tabs[1], rightTab: state.tabs[2])
+        state.toggleMultiSelection(for: state.tabs[3])
+
+        state.duplicateMultiSelectedTabs()
+
+        XCTAssertFalse(state.multiSelection.isActive)
+        XCTAssertEqual(state.pendingPrimarySplitTargetByGuid.count, 1)
+        XCTAssertEqual(state.pendingPrimarySplitTargetByGuid.values.first?.secondaryURL,
+                       "https://e3.example")
+    }
+
     func testClosingSelectedTabPrunesSelection() throws {
         let state = try makeState()
         seed(state, guids: [1, 2, 3])

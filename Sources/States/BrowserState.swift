@@ -1058,12 +1058,50 @@ class BrowserState {
 
     @MainActor
     func duplicateMultiSelectedTabs() {
-        let tabs = orderedMultiSelectedTabs
+        let units = multiSelectionDuplicateUnits
         clearMultiSelection()
-        for tab in tabs {
-            guard let tabURL = tab.url, !tabURL.isEmpty else { continue }
-            createTab(tabURL, focusAfterCreate: true)
+        for unit in units {
+            switch unit {
+            case .tab(let tab):
+                guard let tabURL = tab.url, !tabURL.isEmpty else { continue }
+                createTab(tabURL, focusAfterCreate: true)
+            case .split(let left, let right):
+                guard let leftURL = left.url, !leftURL.isEmpty,
+                      let rightURL = right.url, !rightURL.isEmpty else {
+                    continue
+                }
+                openTwoURLsAsSplit(primaryURL: leftURL, secondaryURL: rightURL)
+            }
         }
+    }
+
+    private enum MultiSelectionDuplicateUnit {
+        case tab(Tab)
+        case split(left: Tab, right: Tab)
+    }
+
+    private var multiSelectionDuplicateUnits: [MultiSelectionDuplicateUnit] {
+        var units: [MultiSelectionDuplicateUnit] = []
+        var consumedSplitIds = Set<String>()
+
+        for tab in orderedMultiSelectedTabsIncludingSplitPartners {
+            guard let group = splitGroup(forTabId: tab.guid), !group.isPinned else {
+                units.append(.tab(tab))
+                continue
+            }
+            guard !consumedSplitIds.contains(group.id) else { continue }
+            guard let membership = splitMembership(forCellTab: tab),
+                  membership.liveGroup?.id == group.id,
+                  !membership.isPinned else {
+                units.append(.tab(tab))
+                continue
+            }
+
+            consumedSplitIds.insert(group.id)
+            units.append(.split(left: membership.leftPane, right: membership.rightPane))
+        }
+
+        return units
     }
 
     func bookmarkMultiSelectedTabs(into folder: Bookmark?) {
