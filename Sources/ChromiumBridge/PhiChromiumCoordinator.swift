@@ -225,6 +225,20 @@ extension PhiChromiumCoordinator: PhiChromiumBridgeDelegate {
         }
     }
 
+    /// A silent Space URL rule auto-routed `urlString` to `spaceId`, but that
+    /// Space had no open window, so Chromium cancelled the navigation and asked
+    /// us to surface the Space. Reuse the ask-Space routing path, which
+    /// activates (cold-spawning if needed) the target Space's window in the
+    /// source window's slot and opens the URL there, bypassing Space URL
+    /// routing for the re-open so the same rule doesn't re-match in a loop.
+    func routeURL(inSpace spaceId: String, url urlString: String, sourceWindowId: Int64) {
+        Task { @MainActor in
+            SpaceManager.shared.routeAskedURL(urlString,
+                                              toSpaceId: spaceId,
+                                              sourceWindowId: sourceWindowId)
+        }
+    }
+
     /// Tears down the ask-Space overlay for `windowId`, if any, and returns
     /// key focus to the parent window. Always called on the main thread (the
     /// presenting Task and the SwiftUI button actions both run there).

@@ -248,6 +248,17 @@ typedef NS_ENUM(NSUInteger, PhiOmniboxSuggestionDisposition) {
                     url:(NSString *)urlString
          sourceWindowId:(int64_t)sourceWindowId;
 
+/// A silent (non-"ask") Space URL rule matched, but the target Space's window
+/// is not currently open, so Chromium cancelled the navigation instead of
+/// routing it. The Mac client should spawn/activate the Space identified by
+/// `spaceId` and open `urlString` as a new foreground tab there, bypassing
+/// Space URL routing for that one re-open. `sourceWindowId` is the window the
+/// navigation originated in (used to resolve the slot the Space is surfaced
+/// in). Same destination as the "ask first" flow, minus the prompt.
+- (void)routeURLInSpace:(NSString *)spaceId
+                    url:(NSString *)urlString
+         sourceWindowId:(int64_t)sourceWindowId;
+
 // ==========================================================================
 // Split view notifications (Chromium → Mac)
 // splitId is a SplitTabId serialized via base::Token::ToString()
