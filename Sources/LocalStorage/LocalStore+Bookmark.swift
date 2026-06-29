@@ -165,13 +165,43 @@ extension LocalStore {
                                       parentId: String?,
                                       index: Int?,
                                       spaceId: String = LocalStore.defaultSpaceId,
-                                      bookmarks: [(title: String?, url: String, guid: String, favicon: Data?)]) {
-        let normalizedBookmarks: [(title: String?, url: URL, guid: String, favicon: Data?)] = bookmarks.compactMap { bookmark in
-            guard let normalizedURL = normalizedURL(from: bookmark.url) else {
+                                      bookmarks: [(title: String?,
+                                                   url: String,
+                                                   guid: String,
+                                                   secondaryUrl: String?,
+                                                   secondaryTitle: String?,
+                                                   favicon: Data?)]) {
+        let normalizedBookmarks: [(title: String?,
+                                   url: URL,
+                                   guid: String,
+                                   secondaryUrl: URL?,
+                                   secondaryTitle: String?,
+                                   favicon: Data?)] = bookmarks.compactMap { bookmark -> (title: String?,
+                                                                                            url: URL,
+                                                                                            guid: String,
+                                                                                            secondaryUrl: URL?,
+                                                                                            secondaryTitle: String?,
+                                                                                            favicon: Data?)? in
+            guard let primaryURL = normalizedURL(from: bookmark.url) else {
                 AppLogError("Invalid bookmark url: \(bookmark.url)")
                 return nil
             }
-            return (title: bookmark.title, url: normalizedURL, guid: bookmark.guid, favicon: bookmark.favicon)
+            let normalizedSecondaryURL: URL?
+            if let secondaryUrl = bookmark.secondaryUrl {
+                guard let normalized = normalizedURL(from: secondaryUrl) else {
+                    AppLogError("Invalid bookmark secondary url: \(secondaryUrl)")
+                    return nil
+                }
+                normalizedSecondaryURL = normalized
+            } else {
+                normalizedSecondaryURL = nil
+            }
+            return (title: bookmark.title,
+                    url: primaryURL,
+                    guid: bookmark.guid,
+                    secondaryUrl: normalizedSecondaryURL,
+                    secondaryTitle: bookmark.secondaryTitle,
+                    favicon: bookmark.favicon)
         }
         guard normalizedBookmarks.count == bookmarks.count else { return }
 
@@ -199,6 +229,8 @@ extension LocalStore {
                                                     index: childIndex,
                                                     guid: bookmark.guid,
                                                     spaceId: folder.spaceId,
+                                                    secondaryUrl: bookmark.secondaryUrl,
+                                                    secondaryTitle: bookmark.secondaryTitle,
                                                     favicon: bookmark.favicon,
                                                     now: now,
                                                     in: context)

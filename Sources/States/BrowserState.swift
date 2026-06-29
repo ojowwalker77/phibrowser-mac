@@ -1058,7 +1058,7 @@ class BrowserState {
 
     @MainActor
     func duplicateMultiSelectedTabs() {
-        let units = multiSelectionDuplicateUnits
+        let units = multiSelectionTabUnits
         clearMultiSelection()
         for unit in units {
             switch unit {
@@ -1075,16 +1075,22 @@ class BrowserState {
         }
     }
 
-    private enum MultiSelectionDuplicateUnit {
+    private enum MultiSelectionTabUnit {
         case tab(Tab)
         case split(left: Tab, right: Tab)
     }
 
-    private var multiSelectionDuplicateUnits: [MultiSelectionDuplicateUnit] {
-        var units: [MultiSelectionDuplicateUnit] = []
+    private var multiSelectionTabUnits: [MultiSelectionTabUnit] {
+        tabUnitsPreservingSplits(from: orderedMultiSelectedTabs)
+    }
+
+    private func tabUnitsPreservingSplits(from selectedTabs: [Tab]) -> [MultiSelectionTabUnit] {
+        let selectedIds = Set(selectedTabs.map(\.guid))
+        let expandedIds = multiSelectionTabIdsIncludingSplitPartners(selectedIds: selectedIds)
+        var units: [MultiSelectionTabUnit] = []
         var consumedSplitIds = Set<String>()
 
-        for tab in orderedMultiSelectedTabsIncludingSplitPartners {
+        for tab in normalTabs where expandedIds.contains(tab.guid) {
             guard let group = splitGroup(forTabId: tab.guid), !group.isPinned else {
                 units.append(.tab(tab))
                 continue
@@ -1104,15 +1110,29 @@ class BrowserState {
         return units
     }
 
+    private struct BookmarkCreationDraft {
+        let title: String?
+        let url: String
+        let guid: String
+        let secondaryUrl: String?
+        let secondaryTitle: String?
+        let favicon: Data?
+    }
+
     func bookmarkMultiSelectedTabs(into folder: Bookmark?) {
-        let tabs = orderedMultiSelectedTabs
+        let units = multiSelectionTabUnits
         clearMultiSelection()
-        for tab in tabs {
-            guard let tabURL = tab.url, !tabURL.isEmpty else { continue }
-            bookmarkManager.addBookmark(title: tab.title,
-                                        url: URLProcessor.processUserInput(tabURL),
-                                        to: folder,
-                                        faviconData: tab.liveFaviconData ?? tab.cachedFaviconData)
+        for unit in units {
+            switch unit {
+            case .tab(let tab):
+                guard let tabURL = tab.url, !tabURL.isEmpty else { continue }
+                bookmarkManager.addBookmark(title: tab.title,
+                                            url: URLProcessor.processUserInput(tabURL),
+                                            to: folder,
+                                            faviconData: tab.liveFaviconData ?? tab.cachedFaviconData)
+            case .split(let left, _):
+                addSplitBookmarkFromTab(left, toFolder: folder, bindLiveSplit: false)
+            }
         }
     }
 
@@ -1121,28 +1141,65 @@ class BrowserState {
     /// new-folder dialog) clears it; reading the live selection here would
     /// only see the implicit active tab.
     func bookmarkTabs(_ tabs: [Tab], intoNewFolderNamed name: String) {
-        let validTabs = tabs.filter { ($0.url?.isEmpty == false) }
+        let units = tabUnitsPreservingSplits(from: tabs)
+        let drafts = bookmarkCreationDrafts(from: units)
         clearMultiSelection()
-        guard let first = validTabs.first, let firstURL = first.url else { return }
-        bookmarkManager.addFolderFromTabStrip(
-            title: name,
-            to: nil,
-            bookmarkTitle: first.title,
-            bookmarkURL: URLProcessor.processUserInput(firstURL),
-            bookmarkFaviconData: first.liveFaviconData ?? first.cachedFaviconData
-        ) { [weak self] success, newFolderGuid in
-            // The folder may not be in the in-memory index yet, so address it
-            // by guid rather than resolving a `Bookmark` instance.
-            guard success, let self else { return }
-            for tab in validTabs.dropFirst() {
-                guard let tabURL = tab.url, !tabURL.isEmpty else { continue }
-                self.bookmarkManager.addBookmark(
-                    title: tab.title,
-                    url: URLProcessor.processUserInput(tabURL),
-                    toParentGuid: newFolderGuid,
-                    faviconData: tab.liveFaviconData ?? tab.cachedFaviconData)
+        guard !drafts.isEmpty else { return }
+        localStore.createDirectoryWithBookmarks(
+            folderTitle: name,
+            folderGuid: UUID().uuidString,
+            profileId: profileId,
+            parentId: nil,
+            index: nil,
+            spaceId: spaceId,
+            bookmarks: drafts.map {
+                (title: $0.title,
+                 url: $0.url,
+                 guid: $0.guid,
+                 secondaryUrl: $0.secondaryUrl,
+                 secondaryTitle: $0.secondaryTitle,
+                 favicon: $0.favicon)
+            }
+        )
+    }
+
+    private func bookmarkCreationDrafts(from units: [MultiSelectionTabUnit]) -> [BookmarkCreationDraft] {
+        units.compactMap { unit in
+            switch unit {
+            case .tab(let tab):
+                guard let tabURL = tab.url, !tabURL.isEmpty else { return nil }
+                return BookmarkCreationDraft(title: tab.title,
+                                             url: URLProcessor.processUserInput(tabURL),
+                                             guid: UUID().uuidString,
+                                             secondaryUrl: nil,
+                                             secondaryTitle: nil,
+                                             favicon: tab.liveFaviconData ?? tab.cachedFaviconData)
+            case .split(let tab, _):
+                return splitBookmarkCreationDraft(from: tab)
             }
         }
+    }
+
+    private func splitBookmarkCreationDraft(from tab: Tab) -> BookmarkCreationDraft? {
+        guard let group = splitGroup(forTabId: tab.guid), !group.isPinned,
+              let primaryTab = tabs.first(where: { $0.guid == group.primaryTabId }),
+              let secondaryTab = tabs.first(where: { $0.guid == group.secondaryTabId }),
+              let primaryURL = primaryTab.url, !primaryURL.isEmpty,
+              let secondaryURL = secondaryTab.url, !secondaryURL.isEmpty else {
+            return nil
+        }
+
+        let bookmarkTitle = primaryTab.title.isEmpty ? primaryURL : primaryTab.title
+        let secondaryDisplayTitle: String? = {
+            if primaryTab.title == secondaryTab.title { return nil }
+            return secondaryTab.title.isEmpty ? nil : secondaryTab.title
+        }()
+        return BookmarkCreationDraft(title: bookmarkTitle,
+                                     url: URLProcessor.processUserInput(primaryURL),
+                                     guid: UUID().uuidString,
+                                     secondaryUrl: URLProcessor.processUserInput(secondaryURL),
+                                     secondaryTitle: secondaryDisplayTitle,
+                                     favicon: primaryTab.liveFaviconData ?? primaryTab.cachedFaviconData)
     }
 
     @MainActor
@@ -4059,6 +4116,8 @@ class BrowserState {
                 (title: $0.title,
                  url: $0.url,
                  guid: $0.guid,
+                 secondaryUrl: nil,
+                 secondaryTitle: nil,
                  favicon: $0.tab.liveFaviconData ?? $0.tab.cachedFaviconData)
             }
         )

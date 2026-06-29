@@ -142,6 +142,110 @@ final class BrowserStateMultiSelectionTests: XCTestCase {
         }
     }
 
+    func testBookmarkMultiSelectionExpandsFocusedSplitPartner() throws {
+        let state = try makeState()
+        seed(state, guids: [1, 2, 3])
+        state.splits = [
+            SplitGroup(id: "split-1-2",
+                       primaryTabId: 1,
+                       secondaryTabId: 2,
+                       layout: .vertical,
+                       ratio: 0.5)
+        ]
+        state.focuseTab(state.tabs[0])
+        state.toggleMultiSelection(for: state.tabs[2])
+
+        state.bookmarkMultiSelectedTabs(into: nil)
+
+        XCTAssertTrue(waitUntil {
+            state.localStore.fetchBookmarks(parentId: nil as String?,
+                                            profileId: state.profileId).count == 2
+        })
+        let bookmarks = state.localStore.fetchBookmarks(parentId: nil as String?,
+                                                        profileId: state.profileId)
+        let splitBookmark = try XCTUnwrap(bookmarks.first {
+            $0.url.absoluteString == "https://e1.example/"
+        })
+        let soloBookmark = try XCTUnwrap(bookmarks.first {
+            $0.url.absoluteString == "https://e3.example/"
+        })
+        XCTAssertEqual(splitBookmark.secondaryUrl?.absoluteString, "https://e2.example/")
+        XCTAssertNil(soloBookmark.secondaryUrl)
+        XCTAssertFalse(state.multiSelection.isActive)
+        XCTAssertEqual(state.splits.map(\.id), ["split-1-2"])
+    }
+
+    func testBookmarkMultiSelectionPreservesSelectedSplitAsSingleBookmark() throws {
+        let state = try makeState()
+        seed(state, guids: [1, 2, 3])
+        state.splits = [
+            SplitGroup(id: "split-1-2",
+                       primaryTabId: 1,
+                       secondaryTabId: 2,
+                       layout: .vertical,
+                       ratio: 0.5)
+        ]
+        state.focuseTab(state.tabs[2])
+        state.toggleMultiSelectionForSplitPair(leftTab: state.tabs[0],
+                                               rightTab: state.tabs[1])
+
+        state.bookmarkMultiSelectedTabs(into: nil)
+
+        XCTAssertTrue(waitUntil {
+            state.localStore.fetchBookmarks(parentId: nil as String?,
+                                            profileId: state.profileId).count == 2
+        })
+        let bookmarks = state.localStore.fetchBookmarks(parentId: nil as String?,
+                                                        profileId: state.profileId)
+        XCTAssertEqual(Set(bookmarks.map { $0.url.absoluteString }),
+                       ["https://e1.example/", "https://e3.example/"])
+        let splitBookmark = try XCTUnwrap(bookmarks.first {
+            $0.url.absoluteString == "https://e1.example/"
+        })
+        XCTAssertEqual(splitBookmark.secondaryUrl?.absoluteString, "https://e2.example/")
+        XCTAssertFalse(state.multiSelection.isActive)
+        XCTAssertEqual(state.splits.map(\.id), ["split-1-2"])
+    }
+
+    func testBookmarkMultiSelectionIntoNewFolderPreservesSplitBookmark() throws {
+        let state = try makeState()
+        seed(state, guids: [1, 2, 3])
+        state.splits = [
+            SplitGroup(id: "split-1-2",
+                       primaryTabId: 1,
+                       secondaryTabId: 2,
+                       layout: .vertical,
+                       ratio: 0.5)
+        ]
+        state.focuseTab(state.tabs[0])
+        state.toggleMultiSelection(for: state.tabs[2])
+        let capturedTabs = state.orderedMultiSelectedTabs
+
+        state.bookmarkTabs(capturedTabs, intoNewFolderNamed: "Saved Tabs")
+
+        XCTAssertTrue(waitUntil {
+            state.localStore.fetchBookmarks(parentId: nil as String?,
+                                            profileId: state.profileId).count == 1
+        })
+        let folder = try XCTUnwrap(state.localStore.fetchBookmarks(parentId: nil as String?,
+                                                                   profileId: state.profileId).first)
+        XCTAssertTrue(waitUntil {
+            state.localStore.fetchBookmarks(parentId: folder.guid,
+                                            profileId: state.profileId).count == 2
+        })
+        let children = state.localStore.fetchBookmarks(parentId: folder.guid,
+                                                       profileId: state.profileId)
+        let splitBookmark = try XCTUnwrap(children.first {
+            $0.url.absoluteString == "https://e1.example/"
+        })
+        let soloBookmark = try XCTUnwrap(children.first {
+            $0.url.absoluteString == "https://e3.example/"
+        })
+        XCTAssertEqual(splitBookmark.secondaryUrl?.absoluteString, "https://e2.example/")
+        XCTAssertNil(soloBookmark.secondaryUrl)
+        XCTAssertFalse(state.multiSelection.isActive)
+    }
+
     func testDragCountBadgeCollapsesSplitPairToOneVisibleUnit() throws {
         let state = try makeState()
         seed(state, guids: [1, 2, 3, 4])

@@ -198,7 +198,7 @@ final class TabMultiSelectionMenuController: NSObject {
               let window = MainBrowserWindowControllersManager.shared.activeWindowController?.window else { return }
         // Snapshot the selection now; the modal dialog clears it before the
         // completion handler runs.
-        let tabs = browserState.orderedMultiSelectedTabs
+        let tabs = browserState.orderedMultiSelectedTabsIncludingSplitPartners
         EditPinnedTabPresenter.presentModal(mode: .newFolder, from: window) { result in
             guard let name = result.title, !name.isEmpty else { return }
             browserState.bookmarkTabs(tabs, intoNewFolderNamed: name)
