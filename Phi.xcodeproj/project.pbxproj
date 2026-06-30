@@ -346,6 +346,7 @@
 		CC9AF3442EC192BC00C27C98 /* AppControlle+LaunchInfo.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC9AF3432EC192BC00C27C98 /* AppControlle+LaunchInfo.swift */; };
 		CCAA00012F00010000000001 /* PinnedSplitItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCAA00012F00010000000002 /* PinnedSplitItem.swift */; };
 		CCAA00062F00010000000001 /* TabDataModelSchemaV7.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCAA00062F00010000000002 /* TabDataModelSchemaV7.swift */; };
+		CCAA00082F00010000000001 /* TabDataModelSchemaV8.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCAA00082F00010000000002 /* TabDataModelSchemaV8.swift */; };
 		CCB53DC32E6EBF68004BF233 /* OmniBoxViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCB53DC22E6EBF68004BF233 /* OmniBoxViewController.swift */; };
 		CCB53DCB2E6EC437004BF233 /* OmniBoxSuggestionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCB53DC72E6EC437004BF233 /* OmniBoxSuggestionView.swift */; };
 		CCB53DCC2E6EC437004BF233 /* OmniBoxViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCB53DCA2E6EC437004BF233 /* OmniBoxViewModel.swift */; };
@@ -832,6 +833,7 @@
 		CC9AF3432EC192BC00C27C98 /* AppControlle+LaunchInfo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppControlle+LaunchInfo.swift"; sourceTree = "<group>"; };
 		CCAA00012F00010000000002 /* PinnedSplitItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinnedSplitItem.swift; sourceTree = "<group>"; };
 		CCAA00062F00010000000002 /* TabDataModelSchemaV7.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TabDataModelSchemaV7.swift; sourceTree = "<group>"; };
+		CCAA00082F00010000000002 /* TabDataModelSchemaV8.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TabDataModelSchemaV8.swift; sourceTree = "<group>"; };
 		CCB53DC22E6EBF68004BF233 /* OmniBoxViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OmniBoxViewController.swift; sourceTree = "<group>"; };
 		CCB53DC62E6EC437004BF233 /* OmniBoxModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OmniBoxModels.swift; sourceTree = "<group>"; };
 		CCB53DC72E6EC437004BF233 /* OmniBoxSuggestionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OmniBoxSuggestionView.swift; sourceTree = "<group>"; };
@@ -1258,6 +1260,7 @@
 				37E9E91A2FC84DEA00815832 /* TabDataModelSchemaV5.swift */,
 				37E9E91E2FC84DEA00815832 /* TabDataModelSchemaV6.swift */,
 				CCAA00062F00010000000002 /* TabDataModelSchemaV7.swift */,
+				CCAA00082F00010000000002 /* TabDataModelSchemaV8.swift */,
 			);
 			path = TabDataModel;
 			sourceTree = "<group>";
@@ -2424,6 +2427,7 @@
 				376193532F4EB8630094A78E /* SystemUtils.swift in Sources */,
 				37DEB42F2F67C0F000129429 /* TabDataModelSchemaV3.swift in Sources */,
 				CCAA00062F00010000000001 /* TabDataModelSchemaV7.swift in Sources */,
+				CCAA00082F00010000000001 /* TabDataModelSchemaV8.swift in Sources */,
 				CC4F00010000000000000001 /* LocalStore+SpaceURLRule.swift in Sources */,
 				CC4F00020000000000000001 /* URLRouter.swift in Sources */,
 				CC4F00030000000000000001 /* SpaceURLRulesEditor.swift in Sources */,

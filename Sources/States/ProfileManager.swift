@@ -62,7 +62,9 @@ final class ProfileManager: ObservableObject {
             return
         }
         let raw = bridge.listProfiles()
-        profiles = raw.compactMap(Self.decode(_:))
+        let decodedProfiles = raw.compactMap(Self.decode(_:))
+        profiles = decodedProfiles
+        persistDisplayNamesToLocalStore(decodedProfiles)
     }
 
     /// Convenience lookup — nil if the basename isn't known. Most callers
@@ -207,6 +209,16 @@ final class ProfileManager: ObservableObject {
                 self?.refresh()
                 completion(success, error)
             }
+        }
+    }
+
+    private func persistDisplayNamesToLocalStore(_ profiles: [PhiBrowserProfile]) {
+        var displayNamesByProfileId: [String: String] = [:]
+        for profile in profiles {
+            displayNamesByProfileId[profile.profileId] = profile.displayName
+        }
+        Task { @MainActor in
+            AccountController.shared.account?.localStorage.upsertProfileDisplayNames(displayNamesByProfileId)
         }
     }
 

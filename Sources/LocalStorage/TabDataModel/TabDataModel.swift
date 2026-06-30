@@ -6,10 +6,10 @@
 import SwiftData
 import Foundation
 
-typealias TabDataModel = TabDataModelSchemaV7.TabDataModel
-typealias ProfileModel = TabDataModelSchemaV7.ProfileModel
-typealias SpaceModel = TabDataModelSchemaV7.SpaceModel
-typealias SpaceURLRule = TabDataModelSchemaV7.SpaceURLRule
+typealias TabDataModel = TabDataModelSchemaV8.TabDataModel
+typealias ProfileModel = TabDataModelSchemaV8.ProfileModel
+typealias SpaceModel = TabDataModelSchemaV8.SpaceModel
+typealias SpaceURLRule = TabDataModelSchemaV8.SpaceURLRule
 
 extension TabDataModel: CustomStringConvertible {
     var description: String {
@@ -27,11 +27,12 @@ enum TabDataModelMigrationPlan: SchemaMigrationPlan {
             TabDataModelSchemaV5.self,
             TabDataModelSchemaV6.self,
             TabDataModelSchemaV7.self,
+            TabDataModelSchemaV8.self,
         ]
     }
 
     static var stages: [MigrationStage] {
-        [migrateV1toV2, migrateV2toV3, migrateV3toV4, migrateV4toV5, migrateV5toV6, migrateV6toV7]
+        [migrateV1toV2, migrateV2toV3, migrateV3toV4, migrateV4toV5, migrateV5toV6, migrateV6toV7, migrateV7toV8]
     }
 
     nonisolated(unsafe) static var v1TypeMapping: [String: Int] = [:]
@@ -126,6 +127,14 @@ enum TabDataModelMigrationPlan: SchemaMigrationPlan {
             }
             try context.save()
         }
+    )
+
+    /// Additive: introduces optional `displayName` on `ProfileModel` so Phi
+    /// user-data backups can preserve Chromium profile labels. No data
+    /// movement required — existing profiles start with nil.
+    static let migrateV7toV8 = MigrationStage.lightweight(
+        fromVersion: TabDataModelSchemaV7.self,
+        toVersion: TabDataModelSchemaV8.self
     )
 
     static let migrateV2toV3 = MigrationStage.custom(

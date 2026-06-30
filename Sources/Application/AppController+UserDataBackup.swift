@@ -19,6 +19,7 @@ extension AppController {
         let stagingURL: URL
         let extractedPhiURL: URL
         let referencedProfileIds: Set<String>
+        let profileDisplayNames: [String: String]
 
         func cleanup() {
             try? FileManager.default.removeItem(at: stagingURL)
@@ -73,8 +74,10 @@ extension AppController {
             // iCloud Passwords auto-install, are out of scope). Defer clears it
             // on every exit.
             PhiChromiumCoordinator.shared.isBackupImportInProgress = true
-            Self.createMissingChromiumProfiles(for: staging.referencedProfileIds) { [weak self] result in
-                defer { PhiChromiumCoordinator.shared.isBackupImportInProgress = false }
+            Self.createMissingChromiumProfiles(
+                for: staging.referencedProfileIds,
+                displayNames: staging.profileDisplayNames
+            ) { [weak self] result in
                 guard let self else {
                     staging.cleanup()
                     return
@@ -176,6 +179,7 @@ extension AppController {
         }
 
         do {
+            syncCurrentChromiumProfileDisplayNamesToLocalStore()
             try zipPhiBrowserDataDirectory(to: destinationZIP)
             AppLogInfo("[Debug] Phi user data backup saved to \(destinationZIP.path)")
             return true
@@ -231,6 +235,16 @@ extension AppController {
             return "Phi-\(userSegment)-data-\(dateString).zip"
         }
         return "Phi-data-\(dateString).zip"
+    }
+
+    @MainActor
+    private func syncCurrentChromiumProfileDisplayNamesToLocalStore() {
+        ProfileManager.shared.refresh()
+        var displayNames: [String: String] = [:]
+        for profile in ProfileManager.shared.profiles {
+            displayNames[profile.profileId] = profile.displayName
+        }
+        AccountController.shared.account?.localStorage.upsertProfileDisplayNames(displayNames)
     }
 
     private static func sanitizedBackupFileNameComponent(_ raw: String) -> String {
@@ -301,12 +315,14 @@ extension AppController {
 
         do {
             let referencedProfileIds = try importedProfileIds(in: extractedPhi)
+            let profileDisplayNames = try importedProfileDisplayNames(in: extractedPhi)
             AppLogInfo("[Debug] Phi user data import found referenced profiles: \(formatProfileIds(referencedProfileIds))")
             shouldCleanupStaging = false
             return PhiUserDataImportStaging(
                 stagingURL: staging,
                 extractedPhiURL: extractedPhi,
-                referencedProfileIds: referencedProfileIds
+                referencedProfileIds: referencedProfileIds,
+                profileDisplayNames: profileDisplayNames
             )
         }
     }
@@ -370,6 +386,21 @@ extension AppController {
         return profileIds
     }
 
+    private static func importedProfileDisplayNames(in phiDataURL: URL) throws -> [String: String] {
+        var displayNames: [String: String] = [:]
+        for storeDirectoryURL in try importedLocalStoreDirectoryURLs(in: phiDataURL) {
+            // A Chromium profileId should represent the same global profile
+            // across imported user stores. If snapshots disagree, keep the
+            // first value; the mismatch belongs to profile snapshot drift,
+            // not restore-time arbitration.
+            displayNames.merge(
+                try profileDisplayNames(inStoreDirectory: storeDirectoryURL),
+                uniquingKeysWith: { existing, _ in existing }
+            )
+        }
+        return displayNames
+    }
+
     private static func importedLocalStoreDirectoryURLs(in phiDataURL: URL) throws -> [URL] {
         let fm = FileManager.default
         let usersURL = phiDataURL.appendingPathComponent("users", isDirectory: true)
@@ -400,6 +431,21 @@ extension AppController {
         let context = ModelContext(container)
         let spaces = try context.fetch(FetchDescriptor<SpaceModel>())
         return Set(spaces.map(\.profileId))
+    }
+
+    private static func profileDisplayNames(inStoreDirectory storeDirectoryURL: URL) throws -> [String: String] {
+        let container = try openImportedLocalStoreContainer(at: storeDirectoryURL)
+        let context = ModelContext(container)
+        let profiles = try context.fetch(FetchDescriptor<ProfileModel>())
+        var displayNames: [String: String] = [:]
+        for profile in profiles {
+            guard let displayName = profile.displayName?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !displayName.isEmpty else {
+                continue
+            }
+            displayNames[profile.profileId] = displayName
+        }
+        return displayNames
     }
 
     private static func openImportedLocalStoreContainer(at storeDirectoryURL: URL) throws -> ModelContainer {
@@ -439,6 +485,7 @@ extension AppController {
     @MainActor
     private static func createMissingChromiumProfiles(
         for importedProfileIds: Set<String>,
+        displayNames importedDisplayNames: [String: String],
         completion: @escaping (Result<PhiUserDataProfileRepairResult, Error>) -> Void
     ) {
         let profileManager = ProfileManager.shared
@@ -479,7 +526,10 @@ extension AppController {
                 return
             }
 
-            let displayName = restoredProfileDisplayName(for: importedProfileId)
+            let displayName = restoredProfileDisplayName(
+                for: importedProfileId,
+                importedDisplayName: importedDisplayNames[importedProfileId]
+            )
             AppLogInfo("[Debug] Phi user data import profile repair creating Chromium profile for \(importedProfileId)")
             profileManager.createProfile(displayName: displayName) { newProfileId in
                 guard let newProfileId else {
@@ -507,23 +557,32 @@ extension AppController {
     }
 
     @MainActor
-    private static func restoredProfileDisplayName(for importedProfileId: String) -> String {
+    private static func restoredProfileDisplayName(for importedProfileId: String, importedDisplayName: String?) -> String {
         let profileManager = ProfileManager.shared
         profileManager.refresh()
-        if !profileManager.displayNameExists(importedProfileId) {
-            return importedProfileId
+        let preferredName = importedDisplayName?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let baseName: String
+        if let preferredName, !preferredName.isEmpty {
+            baseName = preferredName
+        } else {
+            baseName = importedProfileId
         }
 
-        let baseName = "Restored \(importedProfileId)"
         if !profileManager.displayNameExists(baseName) {
             return baseName
         }
 
+        let restoredName = "Restored \(baseName)"
+        if !profileManager.displayNameExists(restoredName) {
+            return restoredName
+        }
+
         var suffix = 2
-        while profileManager.displayNameExists("\(baseName) \(suffix)") {
+        while profileManager.displayNameExists("\(restoredName) \(suffix)") {
             suffix += 1
         }
-        return "\(baseName) \(suffix)"
+        return "\(restoredName) \(suffix)"
     }
 
     @MainActor
@@ -646,6 +705,9 @@ extension AppController {
                 }
                 if targetProfile.bookmarkRoot == nil {
                     targetProfile.bookmarkRoot = profile.bookmarkRoot
+                }
+                if targetProfile.displayName?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true {
+                    targetProfile.displayName = profile.displayName
                 }
                 context.delete(profile)
             } else {

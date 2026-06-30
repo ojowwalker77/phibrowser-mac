@@ -63,6 +63,24 @@ final class LocalStoreProfileTests: XCTestCase {
         XCTAssertEqual(store.getAllPinnedTabs(for: "Work").map { $0.guid }, ["work-pinned"])
     }
 
+    func testUpsertProfileDisplayNamesCreatesAndUpdatesProfileRows() throws {
+        let store = try makeStore()
+        let context = try XCTUnwrap(store.getMainContext())
+
+        let defaultProfile = ProfileModel(profileId: "Default", displayName: "Old Default")
+        context.insert(defaultProfile)
+        try context.save()
+
+        store.upsertProfileDisplayNames([
+            "Default": "Personal",
+            "Profile 1": " Work "
+        ])
+
+        let profiles = try context.fetch(FetchDescriptor<ProfileModel>())
+        XCTAssertEqual(profiles.first(where: { $0.profileId == "Default" })?.displayName, "Personal")
+        XCTAssertEqual(profiles.first(where: { $0.profileId == "Profile 1" })?.displayName, "Work")
+    }
+
     func testFetchBookmarksAndDeleteProtectionRespectProfileRoot() throws {
         let store = try makeStore()
         let context = try XCTUnwrap(store.getMainContext())

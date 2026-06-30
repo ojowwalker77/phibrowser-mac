@@ -23,8 +23,8 @@ actor LocalStoreActor {
 class LocalStore {
     static let defaultProfileId = "Default"
     static let compatibilityConfiguration = LocalStoreCompatibilityConfiguration(
-        currentStoreFormatVersion: 7,
-        readableStoreFormatVersions: 1...7,
+        currentStoreFormatVersion: 8,
+        readableStoreFormatVersions: 1...8,
         storeFilename: "LocalStore.sqlite"
     )
 
@@ -540,6 +540,31 @@ extension LocalStore {
     func profile(with profileId: String, createIfNeeded: Bool = true) throws -> ProfileModel? {
         guard let context = mainContext else { return nil }
         return try profile(with: profileId, in: context, createIfNeeded: createIfNeeded)
+    }
+
+    @MainActor
+    func upsertProfileDisplayNames(_ displayNamesByProfileId: [String: String]) {
+        guard let context = mainContext, !displayNamesByProfileId.isEmpty else { return }
+
+        do {
+            var didChange = false
+            for (profileId, rawDisplayName) in displayNamesByProfileId {
+                let displayName = rawDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !profileId.isEmpty, !displayName.isEmpty,
+                      let profile = try profile(with: profileId, in: context, createIfNeeded: true) else {
+                    continue
+                }
+                if profile.displayName != displayName {
+                    profile.displayName = displayName
+                    didChange = true
+                }
+            }
+            if didChange {
+                try context.save()
+            }
+        } catch {
+            AppLogError("[LocalStore] Failed to upsert profile display names: \(error)")
+        }
     }
 
     func removePinnedTab(_ tab: Tab) {
