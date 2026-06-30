@@ -3683,6 +3683,16 @@ final class SpaceWindowSlot: ObservableObject {
         // to the new Space"). Genuine user / URL-rule key changes run with
         // `isPerformingActivate == false`.
         if isPerformingActivate { return }
+        // Ignore key changes that fire while the slot is tearing itself down.
+        // A window-driven close cascades every Space's window shut one by one
+        // (`cascadeCloseRemainingWindows`); the slot's windows share a native
+        // macOS tab group, so closing the visible Space's window promotes a
+        // hidden SIBLING to key mid-teardown — a Space the user never switched
+        // to. Adopting it would persist that sibling as the last-active Space
+        // and rewrite the restore snapshot, so the next reopen surfaces the
+        // wrong Space instead of the one that was on screen when the window was
+        // closed. The whole slot is going away; there is nothing to adopt.
+        if isCascadingSlotClose { return }
         hideSlotTabBars()
         let previousSpaceId = activeSpaceId
         let previous = visibleController
