@@ -23,10 +23,16 @@ import SwiftUI
     /// created on the Mac side, keyed by Chromium tab guid. Drained by
     /// `BrowserState.handleNewTabFromChromium` when the tab appears.
     private var pendingCrashBuffer: [Int: CrashPageData] = [:]
+
+    /// True while a backup import is creating Chromium profiles; read via the
+    /// bridge by preinstalled apps to defer extension preinstall. Main-thread only.
+    var isBackupImportInProgress = false
 }
 
 extension PhiChromiumCoordinator: PhiChromiumBridgeDelegate {
     func shouldEnablePhiExtensions() -> Bool { PhiPreferences.AISettings.phiAIEnabled.loadValue() }
+
+    func isBackupImporting() -> Bool { isBackupImportInProgress }
     
     func handleExtensionMessage(_ type: String, payload: String, requestId: String, senderId: String) -> String? {
         return ExtensionMessageRouter.shared.handle(type: type, payload: payload, requestId: requestId)

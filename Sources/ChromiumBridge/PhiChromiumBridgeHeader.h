@@ -225,6 +225,9 @@ typedef NS_ENUM(NSUInteger, PhiOmniboxSuggestionDisposition) {
 /// Returns whether Phi extensions should be kept enabled (Mac is source of truth).
 /// Called synchronously by the policy provider — must not block.
 - (BOOL)shouldEnablePhiExtensions;
+/// Whether a backup import is in progress; preinstalled apps reads it to defer
+/// extension preinstall. Called synchronously — must not block.
+- (BOOL)isBackupImporting;
 - (BOOL)handleDeeplinkWithUrlString:(NSString *)urlString windowId:(int64_t)windowId;
 - (void)toggleChatSidebar:(NSNumber * _Nullable)show;
 - (void)showFeedbackDialog;
