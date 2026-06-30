@@ -387,6 +387,18 @@ typedef NS_ENUM(NSUInteger, PhiOmniboxSuggestionDisposition) {
 
 - (id<WebContentWrapper>)newWebContentsForUrl:(NSString *)urlString;
 
+// Resolves `urlString` against the Space URL routing table for `windowId` and,
+// if a rule matches, hands the URL off through the same routing path the
+// navigation throttle uses (prompt for a Space, spawn a Space's window, or open
+// in an already-open Space window) and returns YES. Returns NO when no rule
+// matches (or the URL already belongs in this window's Space), so the caller
+// should open it locally as usual.
+//
+// The omnibox calls this for the empty-Space paths (native NTP / no tab), whose
+// navigation runs on a detached WebContents the throttle can't attribute to a
+// Browser — so routing must be decided here, before the local open.
+- (BOOL)routeURLIfSpaceRuleMatches:(NSString *)urlString windowId:(int64_t)windowId;
+
 - (void)createNewTabWithUrl:(NSString*)urlString
                    windowId:(int64_t)windowId
                  customGuid:(NSString* _Nullable)customGuid

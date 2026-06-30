@@ -237,14 +237,37 @@ class OmniBoxViewModel: ObservableObject {
         } else if opennedFromCurrentTab {
             navigateCurrentTab(to: url)
         } else {
-            browserState.createTab(url)
+            // No tab in this Space: this would open the URL in the current
+            // window via a fresh WebContents, which the Space-routing throttle
+            // would route — except an "ask" rule's prompt gets suppressed on
+            // redirects here. Resolve the rule up front so both ask and
+            // auto-route behave like the live-tab path.
+            if !routeIfSpaceRuleMatches(url) {
+                browserState.createTab(url)
+            }
         }
         finishNavigationAction()
+    }
+
+    /// Asks Chromium whether a Space URL rule routes `url` away from this
+    /// window's Space; if so, Chromium performs the hand-off (prompt / spawn /
+    /// open-in-window) and this returns `true`, meaning the caller must not open
+    /// the URL locally. Needed for the empty-Space paths (native NTP / no tab),
+    /// whose navigation runs on a detached WebContents the throttle can't see.
+    private func routeIfSpaceRuleMatches(_ url: String) -> Bool {
+        chromiumBridge?.routeURLIfSpaceRuleMatches(url, windowId: browserState.windowId.int64Value) ?? false
     }
 
     private func navigateCurrentTab(to url: String) {
         if let wrapper = currentTab?.webContentWrapper {
             wrapper.navigate(toURL: url)
+            return
+        }
+
+        // No live web contents in this tab (native NTP / empty Space). The
+        // Space-routing throttle can't attribute the detached NTP WebContents to
+        // a Browser, so resolve the rule up front and hand off if it matches.
+        if routeIfSpaceRuleMatches(url) {
             return
         }
 
