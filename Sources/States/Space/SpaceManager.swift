@@ -1494,6 +1494,19 @@ final class SpaceManager: ObservableObject {
         if let account = AccountController.shared.account {
             bind(to: account)
         }
+        // Re-run the reconcile skipped while logged out. Async so it lands after
+        // the window manager registers the dangling windows on this same
+        // `.loginCompleted` post, so `activate` swaps instead of spawning.
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            // Read fresh from the bound account; `self.spaces` may still hold the
+            // pre-login default-account emission (bind refreshes it async).
+            let spaces = self.boundAccount?.localStorage.getAllSpaces() ?? self.spaces
+            // Empty while `ensureDefaultSpace` is still in flight; let the
+            // publisher emission reconcile once the store is populated.
+            guard !spaces.isEmpty else { return }
+            self.handleSpacesUpdate(spaces)
+        }
     }
 
     @objc private func handleAccountChanged(_ notification: Notification) {
@@ -1580,14 +1593,21 @@ final class SpaceManager: ObservableObject {
             return updated.first?.spaceId
         }()
 
-        for slot in slots {
-            if let current = slot.activeSpaceId, validIds.contains(current) {
-                continue
-            }
-            if let fallback {
-                slot.activate(spaceId: fallback)
-            } else {
-                slot.clearActiveSpace()
+        // Gate on login: before login, windows are dangling and not yet in any
+        // slot's `windowsBySpaceId`, so `activate`'s spawn guard can't see them
+        // and would spawn a duplicate empty window for a Space that already owns
+        // one (stray windows after a User-Data reset + re-login).
+        // `handleLoginCompleted` re-runs this once windows are registered.
+        if AuthManager.shared.checkLoginStatusOnChromiumLaunch() {
+            for slot in slots {
+                if let current = slot.activeSpaceId, validIds.contains(current) {
+                    continue
+                }
+                if let fallback {
+                    slot.activate(spaceId: fallback)
+                } else {
+                    slot.clearActiveSpace()
+                }
             }
         }
 
