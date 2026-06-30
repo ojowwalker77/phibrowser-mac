@@ -51,6 +51,10 @@ private final class SafeAreaIgnoringThemedHostingView: ThemedHostingView, Titleb
     /// immediately reopen it. Cleared once the cursor genuinely leaves the chip.
     private var suppressHoverOpen = false
 
+    /// How long the dropped Space switcher stays open before auto-dismissing,
+    /// mirroring the sidebar hover card's cap so a forgotten menu can't linger.
+    private static let menuAutoCloseAfter: TimeInterval = 10
+
     override var safeAreaInsets: NSEdgeInsets {
         return NSEdgeInsets(top: 0, left: 0, bottom: 0, right: 0)
     }
@@ -108,7 +112,39 @@ private final class SafeAreaIgnoringThemedHostingView: ThemedHostingView, Titleb
         guard let primaryMenu else { return }
         suppressHoverOpen = true
         let bottomLeading = NSPoint(x: bounds.minX, y: isFlipped ? bounds.maxY : bounds.minY)
+
+        // Auto-dismiss a switcher that's left open. `popUp` blocks in a modal
+        // tracking loop running in `.eventTracking`, so the timer is registered
+        // for that mode (and `.common`) to fire while the menu is up;
+        // `cancelTracking()` then tears it down and lets `popUp` return. The
+        // timer is invalidated the instant `popUp` returns — whether the user or
+        // the timeout closed the menu — so it never outlives this call.
+        let autoClose = Timer(timeInterval: Self.menuAutoCloseAfter, repeats: false) { [weak primaryMenu] _ in
+            primaryMenu?.cancelTracking()
+        }
+        RunLoop.main.add(autoClose, forMode: .eventTracking)
+        RunLoop.main.add(autoClose, forMode: .common)
+
         primaryMenu.popUp(positioning: nil, at: bottomLeading, in: self)
+        autoClose.invalidate()
+
+        // `popUp` returned because the menu closed. The tracking area's
+        // `mouseExited` is swallowed during that loop, so a cursor that left the
+        // chip while the menu was open would never clear the latch — stranding
+        // `suppressHoverOpen` and killing hover-to-open from then on. Settle it
+        // now from the cursor's real position instead of trusting a follow-up
+        // `mouseExited` that may never arrive.
+        if !cursorIsInsideChip() {
+            suppressHoverOpen = false
+        }
+    }
+
+    /// Whether the pointer currently sits over the chip, read from the window's
+    /// live mouse location (available outside the event stream) so it's valid
+    /// right after a modal menu loop, when tracking-area events aren't.
+    private func cursorIsInsideChip() -> Bool {
+        guard let window else { return false }
+        return bounds.contains(convert(window.mouseLocationOutsideOfEventStream, from: nil))
     }
 }
 

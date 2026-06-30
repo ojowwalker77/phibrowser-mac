@@ -192,8 +192,11 @@ struct SpacesStripView: View {
     /// — the switcher on hover/left-click, the context menu on right-click — so
     /// the chip intentionally has no SwiftUI `.contextMenu` or popover of its own.
     private var compactChip: some View {
+        // No `.help` tooltip: the chip drops the Space switcher on hover, so a
+        // "Spaces" help bubble would just appear on top of the menu it opened.
+        // The label is kept for VoiceOver only — it doesn't render a badge.
         activeLabel
-        .help(NSLocalizedString("Spaces", comment: "Tooltip for the Spaces picker affordance"))
+            .accessibilityLabel(NSLocalizedString("Spaces", comment: "Accessibility label for the Spaces picker affordance"))
     }
 
     /// The active Space's icon, shown in the horizontal tab strip.
@@ -320,7 +323,16 @@ struct SpacesStripView: View {
             orderedIds: $stripOrderedIds,
             commit: { manager.reorder(spaceIds: $0) }
         ))
-        .onAppear { stripOrderedIds = manager.spaces.map(\.spaceId) }
+        .onAppear {
+            stripOrderedIds = manager.spaces.map(\.spaceId)
+            // The pointer watchdog reports when the cursor genuinely left the
+            // hovered pip even if SwiftUI's `.onHover` dropped its exit. Clear
+            // the hover state so the card stays down instead of re-presenting.
+            let hovered = $hoveredSpaceId
+            tooltipController.onPointerLeftOwner = { id in
+                if hovered.wrappedValue == id { hovered.wrappedValue = nil }
+            }
+        }
         .onChange(of: manager.spaces.map(\.spaceId)) { ids in
             // A deleted Space's pip leaves the ForEach with no mouse-exit, so
             // its `.onHover(false)` never fires and `hoveredSpaceId` /
@@ -1226,13 +1238,48 @@ final class SpaceHoverTooltipController: ObservableObject {
     /// card another pip just presented (update order between pips isn't defined).
     private var ownerId: String?
 
-    deinit { panel?.orderOut(nil) }
+    /// The owner pip's screen frame, expanded a hair so sub-pixel cursor jitter
+    /// at the pip's edge doesn't read as "left". The pointer watchdog tears the
+    /// card down once the real cursor leaves this rect.
+    private var ownerAnchorRect: CGRect = .zero
+
+    /// Polls the real cursor position (`NSEvent.mouseLocation`) while a card is
+    /// up. SwiftUI's `.onHover` silently drops its exit callback when the pointer
+    /// leaves the pip fast, crosses onto another window or app, or the strip
+    /// relayouts under the cursor — pinning `hoveredSpaceId` and stranding the
+    /// card on screen with no way to dismiss it. This watchdog is the
+    /// authoritative "pointer left the pip" signal that `.onHover` is not.
+    private var pointerWatchdog: Timer?
+
+    /// Absolute safety cap: a card that somehow outlives both `.onHover` and the
+    /// pointer watchdog still tears itself down after `autoCloseAfter`. Armed
+    /// once per fresh presentation (not reset by same-owner re-renders), so a
+    /// stranded card can never linger on screen indefinitely.
+    private var autoCloseTimer: Timer?
+    private static let autoCloseAfter: TimeInterval = 10
+
+    /// Invoked with the stranded owner id when the watchdog tears a card down,
+    /// so the strip can clear its `hoveredSpaceId` — otherwise the next SwiftUI
+    /// pass (any `manager` republish re-renders every pip) would immediately
+    /// re-present the card the cursor already left.
+    var onPointerLeftOwner: ((String) -> Void)?
+
+    deinit {
+        pointerWatchdog?.invalidate()
+        autoCloseTimer?.invalidate()
+        panel?.orderOut(nil)
+    }
 
     /// Shows `card` for `spaceId`, centered above `anchorScreenRect`. Idempotent:
     /// re-presenting the same pip just repositions and refreshes the content.
     func present(spaceId: String, card: AnyView, anchorScreenRect: CGRect, screen: NSScreen?) {
         let panel = ensurePanel()
+        // A genuine owner change re-arms the absolute timeout; a same-owner
+        // re-present (any `manager` republish re-runs `updateNSView`) leaves the
+        // running deadline alone so it can't be pushed out forever.
+        let isNewPresentation = ownerId != spaceId
         ownerId = spaceId
+        ownerAnchorRect = anchorScreenRect.insetBy(dx: -2, dy: -2)
         guard let hostingView else { return }
         hostingView.rootView = card
         hostingView.layoutSubtreeIfNeeded()
@@ -1253,12 +1300,16 @@ final class SpaceHoverTooltipController: ObservableObject {
         }
         panel.setFrame(CGRect(origin: origin, size: size), display: true)
         panel.orderFront(nil)
+        startPointerWatchdog()
+        if isNewPresentation || autoCloseTimer == nil { startAutoCloseTimer() }
     }
 
     /// Hides the card iff `spaceId` is the one currently shown.
     func dismiss(spaceId: String) {
         guard ownerId == spaceId else { return }
         ownerId = nil
+        stopPointerWatchdog()
+        stopAutoCloseTimer()
         panel?.orderOut(nil)
     }
 
@@ -1274,7 +1325,58 @@ final class SpaceHoverTooltipController: ObservableObject {
     func dismissIfOwnerMissing(liveSpaceIds: [String]) {
         guard let ownerId, !liveSpaceIds.contains(ownerId) else { return }
         self.ownerId = nil
+        stopPointerWatchdog()
+        stopAutoCloseTimer()
         panel?.orderOut(nil)
+    }
+
+    private func startPointerWatchdog() {
+        guard pointerWatchdog == nil else { return }
+        // `.common` mode so it keeps firing through scroll/resize tracking loops.
+        let timer = Timer(timeInterval: 0.1, repeats: true) { [weak self] _ in
+            self?.dismissIfPointerLeftOwner()
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        pointerWatchdog = timer
+    }
+
+    private func stopPointerWatchdog() {
+        pointerWatchdog?.invalidate()
+        pointerWatchdog = nil
+    }
+
+    private func startAutoCloseTimer() {
+        autoCloseTimer?.invalidate()
+        let timer = Timer(timeInterval: Self.autoCloseAfter, repeats: false) { [weak self] _ in
+            self?.tearDown()
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        autoCloseTimer = timer
+    }
+
+    private func stopAutoCloseTimer() {
+        autoCloseTimer?.invalidate()
+        autoCloseTimer = nil
+    }
+
+    /// Tears the card down the moment the real cursor leaves the owner pip,
+    /// independent of whether `.onHover` ever delivered its exit.
+    private func dismissIfPointerLeftOwner() {
+        guard ownerId != nil else { stopPointerWatchdog(); return }
+        guard !ownerAnchorRect.contains(NSEvent.mouseLocation) else { return }
+        tearDown()
+    }
+
+    /// Hides the card, stops both timers, and tells the strip to drop its hover
+    /// state so a later SwiftUI pass can't re-present the card the cursor already
+    /// left. Shared by the pointer watchdog and the absolute auto-close timeout.
+    private func tearDown() {
+        guard let owner = ownerId else { return }
+        ownerId = nil
+        stopPointerWatchdog()
+        stopAutoCloseTimer()
+        panel?.orderOut(nil)
+        onPointerLeftOwner?(owner)
     }
 
     private func ensurePanel() -> NSPanel {
