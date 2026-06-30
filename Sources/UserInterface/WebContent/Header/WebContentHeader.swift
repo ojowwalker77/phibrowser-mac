@@ -71,6 +71,8 @@ class WebContentHeader: NSView {
     var onCurrentTabUrlChanged: ((String?) -> Void)?
 
     private(set) var addressBarAnchorView: NSView?
+    private weak var sidebarButtonAnchorView: NSView?
+    private weak var chatButtonAnchorView: NSView?
     private var hostingView: ZeroSafeAreaHostingView<AnyView>?
     private let state = WebContentHeaderState()
     private let downloadViewModel = DownloadButtonViewModel()
@@ -175,6 +177,12 @@ class WebContentHeader: NSView {
             },
             onAnchorResolved: { [weak self] view in
                 self?.addressBarAnchorView = view
+            },
+            onSidebarAnchorResolved: { [weak self] view in
+                self?.sidebarButtonAnchorView = view
+            },
+            onChatAnchorResolved: { [weak self] view in
+                self?.chatButtonAnchorView = view
             }
         )
         .phiThemeObserver(themeObserver))
@@ -397,5 +405,19 @@ class WebContentHeader: NSView {
 
     func bindDownloadsManager(_ manager: DownloadsManager) {
         downloadViewModel.bindTo(manager)
+    }
+
+    func containsAgentOverlayPassthroughControl(at point: NSPoint, from sourceView: NSView) -> Bool {
+        guard !isHidden, window != nil else { return false }
+        return [sidebarButtonAnchorView, chatButtonAnchorView].contains { anchor in
+            guard let anchor,
+                  anchor.window === window,
+                  !anchor.isHidden,
+                  !anchor.bounds.isEmpty else {
+                return false
+            }
+            let pointInAnchor = anchor.convert(point, from: sourceView)
+            return anchor.bounds.contains(pointInAnchor)
+        }
     }
 }

@@ -160,6 +160,10 @@ class WebContentViewController: NSViewController {
         let overlay = EdgeFogOverlayView()
         overlay.alphaValue = 0
         overlay.layer?.cornerRadius = 0
+        overlay.hitTestPassthroughHandler = { [weak self, weak overlay] point in
+            guard let self, let overlay else { return false }
+            return self.shouldPassThroughAgentAnimationOverlayHit(at: point, in: overlay)
+        }
         return overlay
     }()
 
@@ -2367,6 +2371,13 @@ class WebContentViewController: NSViewController {
         if associatedTab === browserState?.focusingTab {
             view.window?.makeFirstResponder(agentAnimationOverlay)
         }
+    }
+
+    private func shouldPassThroughAgentAnimationOverlayHit(at point: NSPoint, in overlay: NSView) -> Bool {
+        guard PhiPreferences.GeneralSettings.loadLayoutMode() != .performance else {
+            return false
+        }
+        return headerView.containsAgentOverlayPassthroughControl(at: point, from: overlay)
     }
 
     private func hideAgentAnimationOverlay() {

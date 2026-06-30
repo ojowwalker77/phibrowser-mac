@@ -22,6 +22,8 @@ final class EdgeFogOverlayView: NSView {
         }
     }
 
+    var hitTestPassthroughHandler: ((NSPoint) -> Bool)?
+
     private let animationContainer = CALayer()
     private let fogContainer = CALayer()
     private let falloffMaskLayer = CALayer()
@@ -57,7 +59,11 @@ final class EdgeFogOverlayView: NSView {
     override var acceptsFirstResponder: Bool { true }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
-        bounds.contains(point) ? self : nil
+        guard bounds.contains(point) else { return nil }
+        if hitTestPassthroughHandler?(point) == true {
+            return nil
+        }
+        return self
     }
 
     override func keyDown(with event: NSEvent) {}

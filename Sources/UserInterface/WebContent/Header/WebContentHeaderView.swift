@@ -22,6 +22,8 @@ struct WebContentHeaderView: View {
     let onMemoryTap: () -> Void
     let onOpenLocationBar: (NSView?) -> Void
     var onAnchorResolved: ((NSView?) -> Void)?
+    var onSidebarAnchorResolved: ((NSView?) -> Void)?
+    var onChatAnchorResolved: ((NSView?) -> Void)?
 
     @State private var extensionsModel: WebContentHeaderExtensionsModel
     @State private var isExtensionPopoverShown = false
@@ -41,7 +43,9 @@ struct WebContentHeaderView: View {
         onFeedbackTap: @escaping () -> Void,
         onMemoryTap: @escaping () -> Void = {},
         onOpenLocationBar: @escaping (NSView?) -> Void,
-        onAnchorResolved: ((NSView?) -> Void)? = nil
+        onAnchorResolved: ((NSView?) -> Void)? = nil,
+        onSidebarAnchorResolved: ((NSView?) -> Void)? = nil,
+        onChatAnchorResolved: ((NSView?) -> Void)? = nil
     ) {
         self.state = state
         self.downloadViewModel = downloadViewModel
@@ -57,6 +61,8 @@ struct WebContentHeaderView: View {
         self.onMemoryTap = onMemoryTap
         self.onOpenLocationBar = onOpenLocationBar
         self.onAnchorResolved = onAnchorResolved
+        self.onSidebarAnchorResolved = onSidebarAnchorResolved
+        self.onChatAnchorResolved = onChatAnchorResolved
         _extensionsModel = State(wrappedValue: WebContentHeaderExtensionsModel(browserState: browserState))
     }
 
@@ -101,7 +107,8 @@ struct WebContentHeaderView: View {
                     isExtensionPopoverShown: $isExtensionPopoverShown,
                     onFeedbackTap: onFeedbackTap,
                     onChatTap: onChatTap,
-                    onMemoryTap: onMemoryTap
+                    onMemoryTap: onMemoryTap,
+                    onChatAnchorResolved: onChatAnchorResolved
                 )
                 .frame(height: HeaderTrailingLayout.rowHeight)
             }
@@ -142,6 +149,7 @@ struct WebContentHeaderView: View {
                 NavigationButton(
                     systemName: "sidebar.left",
                     accessibilityLabel: NSLocalizedString("Toggle Sidebar", comment: "Web content header - Accessibility description for sidebar toggle button"),
+                    onAnchorResolved: onSidebarAnchorResolved,
                     action: onSidebarTap
                 )
             }
@@ -182,6 +190,7 @@ struct NavigationButton: View {
     var accessibilityLabel: String? = nil
     /// Vertical offset for the hover background relative to the icon (negative moves up).
     var hoverBackgroundOffsetY: CGFloat = 0
+    var onAnchorResolved: ((NSView?) -> Void)? = nil
     let action: () -> Void
 
     @State private var isHovering = false
@@ -205,6 +214,40 @@ struct NavigationButton: View {
             isHovering = hovering
         }
         .accessibilityLabel(accessibilityLabel ?? "")
+        .background(controlAnchorBackground)
+    }
+
+    @ViewBuilder
+    private var controlAnchorBackground: some View {
+        if let onAnchorResolved {
+            HeaderControlAnchorView { view in
+                onAnchorResolved(view)
+            }
+        }
+    }
+}
+
+struct HeaderControlAnchorView: NSViewRepresentable {
+    var onResolve: (NSView) -> Void
+
+    func makeNSView(context: Context) -> NSView {
+        let view = PassthroughAnchorView(frame: .zero)
+        DispatchQueue.main.async {
+            onResolve(view)
+        }
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        DispatchQueue.main.async {
+            onResolve(nsView)
+        }
+    }
+
+    private final class PassthroughAnchorView: NSView {
+        override func hitTest(_ point: NSPoint) -> NSView? {
+            nil
+        }
     }
 }
 

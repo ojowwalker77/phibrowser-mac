@@ -99,6 +99,7 @@ struct HeaderTrailingArea: View {
     let onFeedbackTap: () -> Void
     let onChatTap: () -> Void
     let onMemoryTap: () -> Void
+    var onChatAnchorResolved: ((NSView?) -> Void)? = nil
 
     private enum Metrics {
         static let buttonSize = HeaderExtensionLayout.buttonSize
@@ -269,11 +270,21 @@ struct HeaderTrailingArea: View {
                     contentWidth: 60,
                     contentHeight: HeaderTrailingLayout.rowHeight
                 )
+                .background(chatAnchorBackground)
                 .padding(.leading, 6)
             }
         }
         .frame(height: HeaderTrailingLayout.rowHeight)
         .padding(.trailing, 6)
+    }
+
+    @ViewBuilder
+    private var chatAnchorBackground: some View {
+        if let onChatAnchorResolved {
+            HeaderControlAnchorView { view in
+                onChatAnchorResolved(view)
+            }
+        }
     }
 
     private func handleMoreItemTap(_ item: MoreMenuItem) {
