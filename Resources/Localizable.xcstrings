@@ -1513,7 +1513,7 @@
       "comment" : "Placeholder for the Space-name field"
     },
     "Spaces" : {
-      "comment" : "Main menu - Top-level Spaces menu title in the application menu bar\nSettings - Tab title for profiles and spaces management\nTooltip for the Spaces picker affordance"
+      "comment" : "Accessibility label for the Spaces picker affordance\nMain menu - Top-level Spaces menu title in the application menu bar\nSettings - Tab title for profiles and spaces management"
     },
     "Split with" : {
       "comment" : "Search Tabs - Prefix for the split partner shown in a result row"

@@ -17,6 +17,8 @@ class SidebarHeaderView: NSView, TitlebarAwareHitTestable {
     private let legacySidebarButtonTopOffset: CGFloat = 15.5
     private let addressViewHeight: CGFloat = 32
     private var sidebarButtonLeftOffset: CGFloat = 78
+    private let defaultSidebarButtonTrailingInset: CGFloat = 5
+    private let balancedSidebarButtonTrailingInset: CGFloat = 9
     private var layoutSettleCancellable: AnyCancellable?
     /// Currently available app update version.
     private var availableUpdateVersion: String?
@@ -301,7 +303,10 @@ class SidebarHeaderView: NSView, TitlebarAwareHitTestable {
             } else {
                 // Legacy layout: sidebarButton aligned right
                 AppLogDebug("[SidebarHeader] updateLayoutVisibility apply legacy constraints")
-                make.right.equalToSuperview().inset(5)
+                let trailingInset = layoutMode == .balanced
+                    ? balancedSidebarButtonTrailingInset
+                    : defaultSidebarButtonTrailingInset
+                make.right.equalToSuperview().inset(trailingInset)
             }
         }
 

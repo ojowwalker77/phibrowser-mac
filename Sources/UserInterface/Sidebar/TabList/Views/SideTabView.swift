@@ -64,7 +64,7 @@ struct SideTabView: View {
 //        .debugBorder(.green)
         .help(model.displayTitle)
         .padding(.leading, 6)
-        .padding(.trailing, 8)
+        .padding(.trailing, 4)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(
             RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
@@ -83,6 +83,7 @@ struct SideTabView: View {
         .onHover { hovering in
             model.setHovered(hovering)
         }
+//        .debugBorder(.red)
     }
 }
 

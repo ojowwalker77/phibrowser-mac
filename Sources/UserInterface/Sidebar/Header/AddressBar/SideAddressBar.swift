@@ -424,7 +424,7 @@ class SideAddressBar: NSView {
         rightStackView.setContentCompressionResistancePriority(.init(1000), for: .horizontal)
         rightStackView.snp.makeConstraints { make in
             make.centerY.equalToSuperview()
-            make.trailing.equalToSuperview().inset(4)
+            make.trailing.equalToSuperview().inset(2)
             make.height.equalToSuperview()
         }
 

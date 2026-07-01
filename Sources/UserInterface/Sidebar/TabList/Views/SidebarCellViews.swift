@@ -1363,7 +1363,7 @@ class NewTabButtonCellView: SidebarCellView {
         }
 
         cleanupButton.snp.makeConstraints { make in
-            make.trailing.equalToSuperview().inset(8)
+            make.trailing.equalToSuperview().inset(4)
             make.centerY.equalToSuperview()
             make.size.equalTo(22)
         }

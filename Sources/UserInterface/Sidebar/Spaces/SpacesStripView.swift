@@ -99,6 +99,7 @@ struct SpacesStripView: View {
 
     @State private var isPickerOpen: Bool = false
     @State private var isIconPickerOpen: Bool = false
+    @State private var isAddButtonHovered: Bool = false
 
     /// Drag-reorder state for the sidebar icon strip. `stripOrderedIds` is the
     /// live arrangement shown while a pip is dragged across its siblings, and
@@ -534,10 +535,16 @@ struct SpacesStripView: View {
             Image(systemName: "plus")
                 .font(.system(size: Self.iconSize, weight: .semibold))
                 .foregroundStyle(Color.secondary)
-                .frame(width: 24, height: rowHeight)
-                .contentShape(Rectangle())
+                .frame(width: Self.stripItemWidth, height: rowHeight)
+                .background(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(isAddButtonHovered ? Color.sidebarTabHovered : Color.clear)
+                )
+                .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
         }
         .buttonStyle(.plain)
+//        .offset(x: -2)
+        .onHover { isAddButtonHovered = $0 }
         .help(NSLocalizedString("New Space", comment: "Tooltip for the add-Space button in the sidebar Spaces strip"))
     }
 
