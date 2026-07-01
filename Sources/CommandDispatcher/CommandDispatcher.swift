@@ -181,11 +181,11 @@ struct CommandDispatcher {
         }
         guard let currentId = slot.activeSpaceId,
               let currentIdx = spaces.firstIndex(where: { $0.spaceId == currentId }) else {
-            slot.activate(spaceId: spaces[0].spaceId)
+            slot.activate(spaceId: spaces[0].spaceId, userInitiated: true)
             return true
         }
         let nextIdx = (currentIdx + step + spaces.count) % spaces.count
-        slot.activate(spaceId: spaces[nextIdx].spaceId)
+        slot.activate(spaceId: spaces[nextIdx].spaceId, userInitiated: true)
         return true
     }
 
@@ -197,7 +197,7 @@ struct CommandDispatcher {
               let slot = windowController.slot else {
             return false
         }
-        slot.activate(spaceId: spaces[index].spaceId)
+        slot.activate(spaceId: spaces[index].spaceId, userInitiated: true)
         return true
     }
 

@@ -374,7 +374,7 @@ final class TabStripBarController: NSViewController {
             browserState.windowController?.bounceContentForSpaceSwitchEdge(forward: step > 0)
             return
         }
-        slot.activate(spaceId: spaces[targetIdx].spaceId)
+        slot.activate(spaceId: spaces[targetIdx].spaceId, userInitiated: true)
     }
 
     /// Shows or hides the active-Space picker to match the master Spaces

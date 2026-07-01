@@ -126,12 +126,20 @@ private enum NativeWindowTabBarSuppressor {
 }
 
 private extension NSWindow {
+    // `_setTabBarAccessoryViewController:` is AppKit's dedicated installer for
+    // the native window-tab bar, so on a slot-managed window it must never
+    // succeed. We deliberately do NOT gate on the accessory already containing
+    // an `NSTabBar`: AppKit installs an empty accessory first and adds the
+    // `NSTabBar` subview a runloop later, so a `containsNativeTabBar` check
+    // would wave that empty accessory through and let the bar (and its titlebar
+    // separator shadow) composite for a frame during a Space switch. Refusing
+    // every non-nil accessory closes that race; `hideNativeTabBarDescendants`
+    // stays as a defensive pass for when the bar subview is already present.
     @objc func phi_spaceTabBar_setTabBarAccessoryViewController(
         _ controller: NSTitlebarAccessoryViewController?
     ) {
         guard NativeWindowTabBarSuppressor.isManagedSlotWindow(self),
-              let controller,
-              NativeWindowTabBarSuppressor.containsNativeTabBar(in: controller.view) else {
+              let controller else {
             phi_spaceTabBar_setTabBarAccessoryViewController(controller)
             return
         }
@@ -1959,6 +1967,19 @@ final class SpaceWindowSlot: ObservableObject {
     /// completion fires).
     private weak var activeSidebarOverlay: SidebarSwapOverlay?
 
+    /// True while a Space-switch animation is mid-flight — the horizontal
+    /// window slide (`isAnimatingWindowSlide`) or the vertical sidebar push-in
+    /// (`verticalSwapCancel` stays armed until its deferred swap finalizes;
+    /// `performExternalVerticalSlide` arms it too). `activate` reads this to
+    /// drop further *user-initiated* switches so a second trigger — pip/icon
+    /// click, keyboard shortcut, swipe, or menu selection — can't interrupt or
+    /// stack on the animation already running. Both flags are set synchronously
+    /// within the initiating `activate` call, so the next event-loop trigger
+    /// always observes them.
+    private var isSwitchAnimationInFlight: Bool {
+        isAnimatingWindowSlide || verticalSwapCancel != nil
+    }
+
     /// Animation timing for the cross-Space slide. Routed through
     /// `PhiPreferences` so the sidebar tint cross-fade in vertical layout
     /// stays in sync with this slide — both pick up the debug override
@@ -1988,7 +2009,18 @@ final class SpaceWindowSlot: ObservableObject {
     /// usable snapshot — the override holds the composite captured at
     /// `markTabDrivenClose` time. Per-style animation functions consult
     /// it as a fallback after their own snapshot attempt fails.
-    func activate(spaceId: String, leavingSnapshotOverride: NSImage? = nil, animated: Bool = true, onSwapSettled: (() -> Void)? = nil) {
+    func activate(spaceId: String, leavingSnapshotOverride: NSImage? = nil, animated: Bool = true, userInitiated: Bool = false, onSwapSettled: (() -> Void)? = nil) {
+        // A Space-switch animation is treated as atomic: once it starts, further
+        // user-initiated switches (pip/icon click, keyboard shortcut, swipe,
+        // menu selection) are dropped until it settles, so a second trigger
+        // can't interrupt or stack on the animation already in progress.
+        // Programmatic switches (deletion retreat, profile-change respawn, tab
+        // move, instant `animated: false` presents) pass `userInitiated: false`
+        // and always run — they must, to keep the slot consistent. Re-activating
+        // the current Space is a no-op and never gated.
+        if userInitiated, spaceId != activeSpaceId, isSwitchAnimationInFlight {
+            return
+        }
         isPerformingActivate = true
         defer { isPerformingActivate = false }
         guard let manager,

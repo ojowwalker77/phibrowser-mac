@@ -1211,11 +1211,11 @@ extension AppController {
         guard !spaces.isEmpty, let slot = currentSpacesSlot() else { return }
         guard let currentId = slot.activeSpaceId,
               let currentIdx = spaces.firstIndex(where: { $0.spaceId == currentId }) else {
-            slot.activate(spaceId: spaces[0].spaceId)
+            slot.activate(spaceId: spaces[0].spaceId, userInitiated: true)
             return
         }
         let nextIdx = (currentIdx + step + spaces.count) % spaces.count
-        slot.activate(spaceId: spaces[nextIdx].spaceId)
+        slot.activate(spaceId: spaces[nextIdx].spaceId, userInitiated: true)
     }
 
     @objc func newSpaceFromMenu(_ sender: Any?) {
@@ -1316,7 +1316,7 @@ extension AppController {
         guard let menuItem = sender as? NSMenuItem,
               let spaceId = menuItem.representedObject as? String,
               let slot = currentSpacesSlot() else { return }
-        slot.activate(spaceId: spaceId)
+        slot.activate(spaceId: spaceId, userInitiated: true)
     }
 
     @objc func openURLRulesEditor(_ sender: Any?) {

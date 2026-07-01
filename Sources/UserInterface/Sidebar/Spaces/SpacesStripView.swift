@@ -419,7 +419,7 @@ struct SpacesStripView: View {
         // stays on screen for the animation).
         let isActive = space.spaceId == slot.activeSpaceId
         return Button {
-            slot.activate(spaceId: space.spaceId)
+            slot.activate(spaceId: space.spaceId, userInitiated: true)
         } label: {
             SpaceIconView(
                 storedValue: space.iconName,
@@ -581,7 +581,7 @@ struct SpacesStripView: View {
             profileManager: profileManager,
             windowAppearance: windowAppearance,
             onActivate: { spaceId in
-                slot.activate(spaceId: spaceId)
+                slot.activate(spaceId: spaceId, userInitiated: true)
                 isPickerOpen = false
             },
             onRename: { space in

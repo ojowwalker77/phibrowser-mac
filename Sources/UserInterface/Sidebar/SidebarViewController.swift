@@ -286,7 +286,7 @@ class SidebarViewController: NSViewController {
             bounceSpaceSwitchBand(forward: step > 0)
             return
         }
-        slot.activate(spaceId: spaces[targetIdx].spaceId)
+        slot.activate(spaceId: spaces[targetIdx].spaceId, userInitiated: true)
     }
 
     /// Update chat button visibility based on configuration and current tab's aiChatEnabled
