@@ -145,7 +145,7 @@ class SidebarHeaderView: NSView, TitlebarAwareHitTestable {
         let stack = NSStackView(views: [backButton, forwardButton, refreshButton, stopButton])
         stack.orientation = .horizontal
         stack.alignment = .centerY
-        stack.spacing = 2
+        stack.spacing = 1
         return stack
     }()
     
@@ -204,7 +204,7 @@ class SidebarHeaderView: NSView, TitlebarAwareHitTestable {
         stackView.snp.makeConstraints { make in
             make.centerY.equalTo(sidebarButton)
             make.height.equalTo(24)
-            make.right.equalToSuperview().inset(6)
+            make.right.equalToSuperview().inset(9)
         }
         
         addSubview(addressView)
