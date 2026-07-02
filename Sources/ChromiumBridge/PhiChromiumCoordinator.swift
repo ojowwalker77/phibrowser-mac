@@ -33,6 +33,10 @@ extension PhiChromiumCoordinator: PhiChromiumBridgeDelegate {
     func shouldEnablePhiExtensions() -> Bool { PhiPreferences.AISettings.phiAIEnabled.loadValue() }
 
     func isBackupImporting() -> Bool { isBackupImportInProgress }
+
+    func shouldAutoInstallICloudPasswords() -> Bool {
+        PhiPreferences.PasswordManagerSettings.autoInstallICloudPasswords.loadValue()
+    }
     
     func handleExtensionMessage(_ type: String, payload: String, requestId: String, senderId: String) -> String? {
         return ExtensionMessageRouter.shared.handle(type: type, payload: payload, requestId: requestId)

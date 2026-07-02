@@ -122,34 +122,15 @@ final class ProfileManager: ObservableObject {
         bridge.createProfile(withDisplayName: trimmed) { [weak self] newId in
             DispatchQueue.main.async {
                 self?.refresh()
-                if let newId {
-                    self?.autoInstallICloudPasswordsIfNeeded(forProfile: newId)
-                }
                 completion(newId)
             }
         }
     }
 
-    /// Mirrors the OOBE password-manager choice onto a newly created profile:
-    /// when the user opted into iCloud Passwords during onboarding, silently
-    /// install the iCloud Passwords extension into `profileId`. No-op otherwise.
-    /// The Chromium `InstallByIds` path is idempotent, so if the profile later
-    /// gets a window that also triggers an install, the duplicate is skipped.
-    private func autoInstallICloudPasswordsIfNeeded(forProfile profileId: String) {
-        guard PhiPreferences.PasswordManagerSettings.autoInstallICloudPasswords.loadValue() else {
-            return
-        }
-        guard let bridge = ChromiumLauncher.sharedInstance().bridge else { return }
-        bridge.ensureProfileLoaded(profileId) { success in
-            DispatchQueue.main.async {
-                guard success else {
-                    AppLogWarn("[ProfileManager] iCloud auto-install: ensureProfileLoaded failed for \(profileId)")
-                    return
-                }
-                bridge.installExtensions(withIds: [PhiExtensionID.icloudPasswords], profileId: profileId)
-            }
-        }
-    }
+    // Note: mirroring the OOBE iCloud Passwords choice onto newly created
+    // profiles is handled Chromium-side (PhiICloudPasswordsExternalLoader),
+    // which reads `autoInstallICloudPasswords` through the bridge delegate.
+    // The Default profile keeps the Mac-driven OOBE install flow.
 
     /// One-time backfill for users who completed OOBE before the
     /// `autoInstallICloudPasswords` preference existed. If the choice was never

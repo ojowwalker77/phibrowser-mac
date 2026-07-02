@@ -228,6 +228,11 @@ typedef NS_ENUM(NSUInteger, PhiOmniboxSuggestionDisposition) {
 /// Whether a backup import is in progress; preinstalled apps reads it to defer
 /// extension preinstall. Called synchronously — must not block.
 - (BOOL)isBackupImporting;
+/// Whether newly created profiles should auto-install the iCloud Passwords
+/// extension (the OOBE password-manager choice; the Mac preference is the
+/// source of truth). Read by the Chromium-side preinstall flow. Called
+/// synchronously — must not block.
+- (BOOL)shouldAutoInstallICloudPasswords;
 - (BOOL)handleDeeplinkWithUrlString:(NSString *)urlString windowId:(int64_t)windowId;
 - (void)toggleChatSidebar:(NSNumber * _Nullable)show;
 - (void)showFeedbackDialog;

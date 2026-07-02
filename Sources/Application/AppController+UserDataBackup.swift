@@ -67,12 +67,12 @@ extension AppController {
         do {
             let staging = try Self.preparePhiUserDataImport(from: zipURL)
             AppLogInfo("[Debug] Phi user data import prepared: archive=\(zipURL.path) referencedProfiles=\(Self.formatProfileIds(staging.referencedProfileIds))")
-            // Defer Chromium's default-apps (preinstalled) extension install for
-            // the profiles we create here: that flow relaunches before its async
-            // install can finish, so let the next launch run it. Only the
-            // preinstalled-apps path reads this flag (other installs, e.g. the
-            // iCloud Passwords auto-install, are out of scope). Defer clears it
-            // on every exit.
+            // Defer Chromium-side extension preinstall for the profiles we
+            // create here: this flow relaunches before an async install can
+            // finish, so let the next launch run it. Read through the bridge by
+            // both the default-apps (preinstalled) path and the iCloud
+            // Passwords auto-install (PhiICloudPasswordsExternalLoader). Defer
+            // clears it on every exit.
             PhiChromiumCoordinator.shared.isBackupImportInProgress = true
             Self.createMissingChromiumProfiles(
                 for: staging.referencedProfileIds,
