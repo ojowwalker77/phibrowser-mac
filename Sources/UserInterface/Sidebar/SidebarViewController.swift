@@ -271,9 +271,15 @@ class SidebarViewController: NSViewController {
     /// (no wrap-around) so the push-in animation direction always matches the
     /// swipe. At a clamp edge the switch can't proceed, so a rubber-band end
     /// effect plays instead of the swipe being swallowed. Vertical layouts only.
+    ///
+    /// Incognito windows are excluded: they expose no Spaces (the strip is
+    /// suppressed and the window never joins a slot), and without the guard
+    /// the `keySlot` fallback below would switch the Space of a DIFFERENT
+    /// (normal) window from a swipe in the incognito sidebar.
     private func activateAdjacentSpace(by step: Int) {
         guard !PhiPreferences.GeneralSettings.loadLayoutMode().isTraditional,
-              PhiPreferences.GeneralSettings.spacesFeatureEnabled.loadValue() else { return }
+              PhiPreferences.GeneralSettings.spacesFeatureEnabled.loadValue(),
+              !state.isIncognito else { return }
         let spaces = SpaceManager.shared.spaces
         guard let slot = state.windowController?.slot ?? SpaceManager.shared.keySlot,
               let currentId = slot.activeSpaceId,
