@@ -494,8 +494,16 @@ typedef NS_ENUM(NSUInteger, PhiOmniboxSuggestionDisposition) {
 /// the user has chosen a Space: re-opening the URL there must not be caught
 /// by the same rule and prompted again (which would loop). The bypass is a
 /// one-shot exemption matched on (url, windowId).
+///
+/// `activateWindow` controls whether the open also makes the target window
+/// key and front. Pass NO when the Mac side's Space-switch animation owns
+/// window fronting — the routed switch keeps the LEAVING window front until
+/// the animation settles, and activating the target here would surface it
+/// mid-animation (the switch would land with no visible animation). The tab
+/// is still appended as the window's foreground tab either way.
 - (void)openTabBypassingSpaceRoutingWithUrl:(NSString *)url
-                                    windowId:(int64_t)windowId;
+                                    windowId:(int64_t)windowId
+                              activateWindow:(BOOL)activateWindow;
 
 /// Navigate `windowId`'s ACTIVE tab to `url` IN PLACE, bypassing Space URL
 /// routing for that one navigation. Used by the "ask every time" flow when the

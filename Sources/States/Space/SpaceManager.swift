@@ -1339,8 +1339,17 @@ final class SpaceManager: ObservableObject {
         // Bypass space routing for the re-open: the URL matched an ask-rule,
         // so a plain new tab would be caught by the same rule and prompt
         // again in a loop. The bridge exempts this one (url, window) pair.
-        let open: (Int64) -> Void = { windowId in
-            bridge.openTabBypassingSpaceRouting(withUrl: urlString, windowId: windowId)
+        //
+        // `activateWindow` is false when the slot's switch animation owns
+        // fronting the target: the vertical push-in keeps the LEAVING window
+        // front for its whole duration, so Chromium's window Activate() on the
+        // open would surface the target mid-animation and the routed switch
+        // would land with no visible animation. It stays true when no slot
+        // switch is choreographing the window (same-Space opens and the
+        // spawn-failure fallback), where surfacing is the point.
+        let open: (_ windowId: Int64, _ activateWindow: Bool) -> Void = { windowId, activateWindow in
+            bridge.openTabBypassingSpaceRouting(
+                withUrl: urlString, windowId: windowId, activateWindow: activateWindow)
         }
 
         let sourceController = MainBrowserWindowControllersManager.shared
@@ -1363,7 +1372,7 @@ final class SpaceManager: ObservableObject {
                 bridge.navigateActiveTabBypassingSpaceRouting(
                     withUrl: urlString, windowId: sourceWindowId)
             } else {
-                open(sourceWindowId)
+                open(sourceWindowId, true)
             }
             return
         }
@@ -1397,7 +1406,10 @@ final class SpaceManager: ObservableObject {
         }
         slot?.activate(spaceId: spaceId)
         if let controller = slot?.windowController(for: spaceId) {
-            open(Int64(controller.windowId))
+            // The activate above is animating the slot to the target — the
+            // slot fronts the target window when the animation settles, so
+            // the open must not activate it early.
+            open(Int64(controller.windowId), false)
             return
         }
         // Cold path: the Space's window spawns asynchronously. A
@@ -1419,10 +1431,16 @@ final class SpaceManager: ObservableObject {
                 guard !didOpen else { return }
                 if let controller = slot?.windowController(for: spaceId) {
                     didOpen = true
-                    open(Int64(controller.windowId))
+                    // The slot surfaced (or is surfacing) the spawned window
+                    // itself; activating here would cut any present animation
+                    // short.
+                    open(Int64(controller.windowId), false)
                 } else if isLastAttempt {
                     didOpen = true
-                    open(sourceWindowId)
+                    // Spawn failed — nothing choreographs the source window
+                    // anymore, so activate it to honor "never silently
+                    // dropped".
+                    open(sourceWindowId, true)
                 }
             }
         }
