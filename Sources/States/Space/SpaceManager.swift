@@ -1339,8 +1339,17 @@ final class SpaceManager: ObservableObject {
         // Bypass space routing for the re-open: the URL matched an ask-rule,
         // so a plain new tab would be caught by the same rule and prompt
         // again in a loop. The bridge exempts this one (url, window) pair.
-        let open: (Int64) -> Void = { windowId in
-            bridge.openTabBypassingSpaceRouting(withUrl: urlString, windowId: windowId)
+        //
+        // `activateWindow` is false when the slot's switch animation owns
+        // fronting the target: the vertical push-in keeps the LEAVING window
+        // front for its whole duration, so Chromium's window Activate() on the
+        // open would surface the target mid-animation and the routed switch
+        // would land with no visible animation. It stays true when no slot
+        // switch is choreographing the window (same-Space opens and the
+        // spawn-failure fallback), where surfacing is the point.
+        let open: (_ windowId: Int64, _ activateWindow: Bool) -> Void = { windowId, activateWindow in
+            bridge.openTabBypassingSpaceRouting(
+                withUrl: urlString, windowId: windowId, activateWindow: activateWindow)
         }
 
         let sourceController = MainBrowserWindowControllersManager.shared
@@ -1363,7 +1372,7 @@ final class SpaceManager: ObservableObject {
                 bridge.navigateActiveTabBypassingSpaceRouting(
                     withUrl: urlString, windowId: sourceWindowId)
             } else {
-                open(sourceWindowId)
+                open(sourceWindowId, true)
             }
             return
         }
@@ -1397,7 +1406,10 @@ final class SpaceManager: ObservableObject {
         }
         slot?.activate(spaceId: spaceId)
         if let controller = slot?.windowController(for: spaceId) {
-            open(Int64(controller.windowId))
+            // The activate above is animating the slot to the target — the
+            // slot fronts the target window when the animation settles, so
+            // the open must not activate it early.
+            open(Int64(controller.windowId), false)
             return
         }
         // Cold path: the Space's window spawns asynchronously. A
@@ -1419,10 +1431,16 @@ final class SpaceManager: ObservableObject {
                 guard !didOpen else { return }
                 if let controller = slot?.windowController(for: spaceId) {
                     didOpen = true
-                    open(Int64(controller.windowId))
+                    // The slot surfaced (or is surfacing) the spawned window
+                    // itself; activating here would cut any present animation
+                    // short.
+                    open(Int64(controller.windowId), false)
                 } else if isLastAttempt {
                     didOpen = true
-                    open(sourceWindowId)
+                    // Spawn failed — nothing choreographs the source window
+                    // anymore, so activate it to honor "never silently
+                    // dropped".
+                    open(sourceWindowId, true)
                 }
             }
         }
@@ -1736,6 +1754,141 @@ final class SpaceWindowSlot: ObservableObject {
     /// linger over the form (see `SpacesStripView.isHoverCardPresented`).
     @Published var isCreatingSpace: Bool = false
 
+    /// The Space the user just deliberately switched to by clicking or picking
+    /// it. The interaction dismisses its hover card, and the card must stay
+    /// down while the pointer rests on that pip — including in the TARGET
+    /// Space window's strip, a different view instance whose fresh hover would
+    /// otherwise re-present the card right after the swap (a
+    /// disappear-then-reappear blink). Lives on the slot because it must
+    /// survive that window hand-off. Armed via `suppressHoverCard(spaceId:)`
+    /// (so the timestamp is recorded) by every deliberate-switch affordance: a
+    /// sidebar pip click, the horizontal chip's click (just before its
+    /// switcher menu pops), and any switcher-menu pick — the chip's menu, the
+    /// menu-bar Spaces menu, and the sidebar's "…" overflow menu, which all
+    /// share `activateSpaceFromMenu`. Cleared when the pointer leaves the pip
+    /// in the visible window's strip, moves onto another pip, or re-enters the
+    /// clicked pip past the hand-off window (see `SpacesStripView` and
+    /// `isHoverCardSuppressionStale`).
+    @Published var hoverCardSuppressedSpaceId: String?
+
+    /// When the suppression was armed, driving `isHoverCardSuppressionStale`.
+    private var hoverCardSuppressedAt: Date?
+
+    /// How long after the click an enter on the clicked pip can still be the
+    /// window hand-off's own re-enter rather than the user coming back. The
+    /// target strip's hover tracking comes up with the swap animation
+    /// (0.3–0.4s); the margin past that is kept tight because a real
+    /// move-out during the animation is ignored by the exit guard (its exit
+    /// comes from the leaving window's strip), so this window is also how
+    /// long a quick return to the pip can be wrongly swallowed.
+    private static let hoverCardSuppressionHandOffWindow: TimeInterval = 0.6
+
+    /// True once the suppression is old enough that a fresh enter on the
+    /// clicked pip must be a genuine re-hover, not the swap hand-off. The
+    /// strip lifts the suppression on such an enter — without this, a pointer
+    /// that left the pip with no delivered hover-exit (moved away
+    /// mid-animation before the target strip ever tracked it, or `.onHover`
+    /// dropped the exit) would strand the suppression and silently swallow
+    /// that pip's next hover card.
+    var isHoverCardSuppressionStale: Bool {
+        guard hoverCardSuppressedSpaceId != nil, let hoverCardSuppressedAt else { return false }
+        return Date().timeIntervalSince(hoverCardSuppressedAt) > Self.hoverCardSuppressionHandOffWindow
+    }
+
+    /// Arms the click suppression for `spaceId` and records when, so a later
+    /// enter on that pip can tell the swap's hand-off from a genuine re-hover.
+    func suppressHoverCard(spaceId: String) {
+        hoverCardSuppressedSpaceId = spaceId
+        hoverCardSuppressedAt = Date()
+    }
+
+    /// True while the pointer is over the Spaces strip's row, revealing the
+    /// strip's trailing add button. Lives on the slot because a Space switch
+    /// swaps in a different window's strip — a fresh view instance whose local
+    /// hover state would start false and blink the "+" off and back on while
+    /// the pointer never left the row. `.onHover` alone cannot maintain this
+    /// flag: the leaving window's strip receives a spurious hover-exit when it
+    /// orders out at the end of the swap (the pointer never moved), while a
+    /// genuine mid-swap move-off is delivered only to that same strip — or
+    /// dropped outright. So exits are verified against the real pointer
+    /// (`stripRowContainsPointer()`), and the watchdog below clears the flag
+    /// once the pointer has actually left the row.
+    @Published var isStripRowHovered: Bool = false {
+        didSet {
+            guard oldValue != isStripRowHovered else { return }
+            if isStripRowHovered {
+                startStripRowPointerWatchdog()
+            } else {
+                stopStripRowPointerWatchdog()
+            }
+        }
+    }
+
+    /// Whether the real pointer (`NSEvent.mouseLocation`) is inside the
+    /// visible window's strip row right now — the authoritative signal
+    /// `.onHover` is not (see `SpaceHoverTooltipController.pointerWatchdog`
+    /// for the same technique). The row view is resolved from
+    /// `visibleController` on EVERY call (same UI-chain the vertical swap's
+    /// band snapshot uses) rather than registered once by whichever strip
+    /// last joined a window: hover events come from the visible strip's own
+    /// tracking area, so the geometry they are verified against must come
+    /// from that same window — a hidden sibling's rect goes stale the moment
+    /// the visible sidebar is resized or the window is moved (slot windows
+    /// are only re-aligned at swap time) and would veto genuine hovers.
+    /// Nil when no row is resolvable (incognito, previews, early bring-up):
+    /// no authority, callers fall back to trusting the delivered event. The
+    /// hair of outward inset keeps sub-pixel jitter at the row's edge from
+    /// reading as "left".
+    func stripRowContainsPointer() -> Bool? {
+        guard let view = visibleController?.mainSplitViewController.sidebarViewController.spacesStripRowView,
+              let window = view.window else { return nil }
+        let rectInWindow = view.convert(view.bounds, to: nil)
+        let screenRect = window.convertToScreen(rectInWindow).insetBy(dx: -2, dy: -2)
+        return screenRect.contains(NSEvent.mouseLocation)
+    }
+
+    /// Clears `isStripRowHovered` once the pointer actually leaves the row,
+    /// independent of `.onHover` exit delivery: mid-swap the only strip
+    /// tracking the row belongs to the leaving window (whose exits cannot be
+    /// told apart from the spurious order-out one by event alone), and a fast
+    /// leave can drop the exit entirely. Runs only while the flag is true;
+    /// same 0.1s/`.common` cadence as the tooltip pointer watchdog. The flip
+    /// animates via the strip's `.animation(_:value:)` on the add button.
+    private var stripRowPointerWatchdog: Timer?
+
+    /// Consecutive watchdog ticks that found the pointer outside the row.
+    /// The row's screen rect lies for a beat while a spawned sibling window
+    /// surfaces (observed: the rect sits ~17.5pt lower until
+    /// `makeKeyAndOrderFrontHidingSlotTabBar`'s tab-bar hide settles the
+    /// layout), so a single outside reading must never clear the flag — only
+    /// a sustained one may.
+    private var stripRowOutsideTickCount = 0
+    private static let stripRowOutsideTicksToClear = 3
+
+    private func startStripRowPointerWatchdog() {
+        guard stripRowPointerWatchdog == nil else { return }
+        stripRowOutsideTickCount = 0
+        // `.common` mode so it keeps firing through scroll/resize tracking loops.
+        let timer = Timer(timeInterval: 0.1, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            guard self.stripRowContainsPointer() == false else {
+                self.stripRowOutsideTickCount = 0
+                return
+            }
+            self.stripRowOutsideTickCount += 1
+            guard self.stripRowOutsideTickCount >= Self.stripRowOutsideTicksToClear else { return }
+            self.isStripRowHovered = false
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        stripRowPointerWatchdog = timer
+    }
+
+    private func stopStripRowPointerWatchdog() {
+        stripRowPointerWatchdog?.invalidate()
+        stripRowPointerWatchdog = nil
+        stripRowOutsideTickCount = 0
+    }
+
     /// AppKit tab-group identity for every Chromium NSWindow hosted by this
     /// slot. This keeps all Space windows for one user-perceived window in
     /// the same native tab group, so AppKit owns frame/fullscreen desktop
@@ -1800,6 +1953,15 @@ final class SpaceWindowSlot: ObservableObject {
     /// correctly — even if the user has clicked a different Space pip in the
     /// gap between request and callback.
     private var pendingSpawnSpaceIdByWindowId: [Int: String] = [:]
+
+    /// spaceIds this slot has a spawn in flight for. Unlike
+    /// `pendingSpawnSpaceIdByWindowId` (keyed by a windowId that only exists
+    /// AFTER `createBrowser` returns), this is set BEFORE the async
+    /// `ensureProfileLoaded` + `createBrowser`, so it can gate a repeat
+    /// activation of the same Space during that gap — the window when a second
+    /// pip click would otherwise queue a duplicate spawn (see `activate`'s
+    /// spawn path). Drained in `registerWindow` (success) and every spawn bail.
+    private var pendingSpawnSpaceIds: Set<String> = []
 
     /// windowId → NSRect to apply to that window before it surfaces.
     /// Set when `activate` spawns a new window so the new Space's NSWindow
@@ -2075,8 +2237,14 @@ final class SpaceWindowSlot: ObservableObject {
                     // Hold this position against Chromium's late re-apply of the
                     // window's stale creation bounds after it surfaces. A one-shot
                     // re-assert is too early; the pin reverts that re-apply
-                    // whenever it lands. See `pinnedFrame`.
-                    pinnedFrame = inheritedFrame
+                    // whenever it lands. See `pinnedFrame`. Not armed in
+                    // fullscreen: the inherited frame is the screen-sized rect
+                    // there, no didMove fires in fullscreen to consume the pin,
+                    // and a stale pin would then "revert" AppKit's windowed-frame
+                    // restore on fullscreen exit, leaving the window screen-sized.
+                    if !slotHasFullScreenWindow {
+                        pinnedFrame = inheritedFrame
+                    }
                 }
                 // Align the target's sidebar shape to the previously visible
                 // Space *before* it surfaces so the user reads a single
@@ -2142,6 +2310,21 @@ final class SpaceWindowSlot: ObservableObject {
         }
 
         // Spawn path — no live window in this slot for this Space yet.
+        //
+        // Guard against a second activation of the SAME Space while its first
+        // spawn is still in flight. The first cross-profile activation of a
+        // session awaits an async `ensureProfileLoaded` (~100–300ms); during
+        // that gap `activeSpaceId` is already flipped to the target (so the
+        // animation gate above passes) and `windowsBySpaceId[spaceId]` is still
+        // nil (so the existing-window branch above misses), leaving a repeat
+        // pip click free to queue a SECOND spawn. Both completions would call
+        // `createBrowser`, and `registerWindow` would overwrite the first
+        // window's map entry — orphaning a live window the slot can no longer
+        // hide or close. Bail here; the in-flight spawn will surface the Space.
+        if pendingSpawnSpaceIds.contains(spaceId) {
+            AppLogInfo("[SpaceWindowSlot] activate(\(spaceId)): spawn already in flight, ignoring repeat")
+            return
+        }
         guard let bridge = ChromiumLauncher.sharedInstance().bridge else {
             AppLogWarn("[SpaceWindowSlot] activate cannot spawn: bridge unavailable")
             return
@@ -2194,10 +2377,12 @@ final class SpaceWindowSlot: ObservableObject {
             // traps right here — bail gracefully instead.
             guard let dict else {
                 AppLogWarn("[SpaceWindowSlot] createBrowserWithWindowType returned nil")
+                self.pendingSpawnSpaceIds.remove(spaceId)
                 return
             }
             guard let windowIdNumber = dict["windowId"] as? NSNumber else {
                 AppLogWarn("[SpaceWindowSlot] createBrowserWithWindowType returned no windowId")
+                self.pendingSpawnSpaceIds.remove(spaceId)
                 return
             }
             let id = windowIdNumber.intValue
@@ -2320,6 +2505,10 @@ final class SpaceWindowSlot: ObservableObject {
                 }
             }
         }
+        // Mark the spawn in flight across the (possibly async) profile load and
+        // window creation, so a repeat activation of this Space is gated above.
+        // Drained by `registerWindow` on success and by every bail below.
+        pendingSpawnSpaceIds.insert(spaceId)
         // Lazy-load the Space's profile before spawning. Completion fires
         // synchronously when the profile is already in memory (the common
         // case), so this is free for warm switches. First cross-profile
@@ -2327,7 +2516,7 @@ final class SpaceWindowSlot: ObservableObject {
         // deferred orderOut inside `spawn` keeps the previous window on
         // screen until the new window paints, hiding that latency.
         if let pid = targetProfileId, !pid.isEmpty {
-            bridge.ensureProfileLoaded(pid) { success in
+            bridge.ensureProfileLoaded(pid) { [weak self] success in
                 guard success else {
                     // Spawning anyway would hand the Space a window on
                     // whatever profile Chromium substitutes — another
@@ -2335,6 +2524,7 @@ final class SpaceWindowSlot: ObservableObject {
                     // refuses unresolved profiles too (returns nil); bail
                     // here so the previous window simply stays on screen.
                     AppLogWarn("[SpaceWindowSlot] ensureProfileLoaded failed for \(pid); not spawning")
+                    self?.pendingSpawnSpaceIds.remove(spaceId)
                     return
                 }
                 spawn()
@@ -2537,6 +2727,17 @@ final class SpaceWindowSlot: ObservableObject {
             guard !didFinish else { return }
             didFinish = true
             if let self {
+                // The leaving window can have entered native fullscreen DURING
+                // the slide (it stays front for the whole animation, so it owns
+                // the green-button click) — after `activate`'s pre-swap group
+                // rebuild already ran. The target may then still be detached,
+                // and fronting it would surface a stray window over the
+                // fullscreen Space. Rebuild the group first, exactly like the
+                // pre-swap fullscreen path, so the front below is a tab
+                // selection inside the same fullscreen Space.
+                if self.slotHasFullScreenWindow {
+                    self.syncSlotTabGroup(selecting: previousWindow)
+                }
                 self.makeKeyAndOrderFrontHidingSlotTabBar(targetWindow)
             } else {
                 targetWindow.makeKeyAndOrderFront(nil)
@@ -3184,9 +3385,17 @@ final class SpaceWindowSlot: ObservableObject {
     /// its slot is in fullscreen. Applied across the whole slot because its
     /// windows share one fullscreen Space (hidden siblings are re-grouped into
     /// it by `syncSlotTabGroup` on the next switch); restoring on exit returns
-    /// the normal sibling-follow behavior.
+    /// the normal sibling-follow behavior. Corrections for transitions that
+    /// settle differently than the will-hooks promised come in through
+    /// `reconcileFullScreenWithWindowState`.
     func windowFullScreenStateChanged(isFullScreen: Bool) {
         self.isFullScreen = isFullScreen
+        // A Space switch's frame pin must not survive a fullscreen transition:
+        // armed inside fullscreen it holds the screen-sized rect, no didMove
+        // ever fires in fullscreen to consume it, and AppKit's programmatic
+        // frame restore on exit looks exactly like the "stale re-apply" the
+        // pin exists to revert — snapping the window back to full-screen size.
+        pinnedFrame = nil
         for controller in windowsBySpaceId.values {
             guard let window = controller.window else { continue }
             if isFullScreen {
@@ -3200,6 +3409,44 @@ final class SpaceWindowSlot: ObservableObject {
         // hooks can fire before AppKit flips the styleMask, so the snapshot
         // reads `isFullScreen` (tracked here) rather than a live styleMask.
         manager?.persistSlotsSnapshot()
+        if isFullScreen {
+            // Will-enter is a promise, not a fact: AppKit can fail or cancel
+            // the enter transition without ever firing will-exit (Chromium's
+            // own fullscreen controller handles the same case). Re-derive from
+            // the styleMask once the transition has settled — a no-op when the
+            // enter completed or the user has already exited again.
+            DispatchQueue.main.asyncAfter(deadline: .now() + Self.fullScreenEnterVerifyDelay) { [weak self] in
+                self?.reconcileFullScreenWithWindowState()
+            }
+        }
+    }
+
+    /// How long after a will-enter fullscreen notification the slot verifies
+    /// the transition actually landed. AppKit's enter animation settles well
+    /// under a second; the margin covers slow machines and displays. A failed
+    /// or cancelled enter fires NO will-exit, so without this check the flag —
+    /// and everything keyed off it — would stay fullscreen forever.
+    private static let fullScreenEnterVerifyDelay: TimeInterval = 3.0
+
+    /// Re-derives `isFullScreen` from the slot windows' live styleMask and, on
+    /// a mismatch, routes the correction through `windowFullScreenStateChanged`
+    /// — the flag's single writer — so `.moveToActiveSpace` and the restore
+    /// snapshot are corrected with it. Only called at transition SETTLE points
+    /// (did-enter/did-exit, after a window close, the failed-enter verify):
+    /// mid-transition the mask and the will-hooks legitimately disagree, so
+    /// this must not run from arbitrary code.
+    ///
+    /// Heals the two paths that change fullscreen state without a will-exit:
+    ///  - closing a fullscreen window (a tab-driven hand-off previously left
+    ///    the flag stuck true — siblings kept `.moveToActiveSpace` stripped
+    ///    and the snapshot force-restored fullscreen next launch);
+    ///  - a failed/cancelled enter transition.
+    /// Derived from the surviving windows rather than assumed false because
+    /// AppKit can promote a tabbed sibling INTO a dying window's fullscreen
+    /// Space — the flag staying true is then correct.
+    func reconcileFullScreenWithWindowState() {
+        guard isFullScreen != slotHasFullScreenWindow else { return }
+        windowFullScreenStateChanged(isFullScreen: slotHasFullScreenWindow)
     }
 
     /// Marks this slot for fullscreen re-entry after a cold-launch restore. Set
@@ -3284,9 +3531,14 @@ final class SpaceWindowSlot: ObservableObject {
         // In a shared macOS fullscreen Space, ordering a sibling tab out flashes
         // a blank workspace, so keep relying on native tab selection there — but
         // an ungrouped hand-off window (not part of the group) still needs the
-        // explicit hide it always got.
+        // explicit hide it always got. Never orderOut a window that is ITSELF
+        // fullscreen, though: the leaving window can have entered fullscreen
+        // after the swap started (the vertical push-in defers this call to its
+        // completion), and ordering it out blanks the fullscreen Space it owns.
         guard !slotHasFullScreenWindow else {
-            if let previousWindow, !windowsShareTabGroup(previousWindow, targetWindow) {
+            if let previousWindow,
+               !windowsShareTabGroup(previousWindow, targetWindow),
+               !previousWindow.styleMask.contains(.fullScreen) {
                 previousWindow.orderOut(nil)
             }
             // Tabbed siblings can't be ordered out in a shared fullscreen Space
@@ -3495,9 +3747,24 @@ final class SpaceWindowSlot: ObservableObject {
         // settled slot does no work. A hard `orderOut` — not tab selection — is
         // what reliably hides them, at the cost of detaching them from the
         // native tab group (rebuilt by `syncSlotTabGroup` on the next switch).
+        //
+        // EXCEPT for a tabbed sibling in a shared fullscreen Space: this
+        // routine also runs on every Dock-icon reopen
+        // (`reconcileSlotVisibilityAfterReopen`), and ordering a tab out of a
+        // group that shares a fullscreen Space makes macOS flash a blank
+        // fullscreen workspace — the same finding that makes
+        // `enforceSlotSingleWindowInvariant` bail and
+        // `orderOutIfNotTabbedWithTarget` fall back to tab selection. Tabbed
+        // siblings stay stacked behind the re-selected active tab and the
+        // strip bleed guard hides their ghost rows; a DETACHED sibling (never
+        // part of the fullscreen Space) still gets the hard hide.
+        let inSharedFullScreen = slotHasFullScreenWindow
         var hidCount = 0
         for (siblingSpaceId, controller) in windowsBySpaceId where siblingSpaceId != activeId {
             guard let window = controller.window, window.isVisible else { continue }
+            if inSharedFullScreen, windowsShareTabGroup(window, activeWindow) {
+                continue
+            }
             window.orderOut(nil)
             hidCount += 1
         }
@@ -3507,6 +3774,9 @@ final class SpaceWindowSlot: ObservableObject {
         // steal key focus.
         if hidCount > 0 || activeWindow.tabGroup?.selectedWindow !== activeWindow {
             makeKeyAndOrderFrontHidingSlotTabBar(activeWindow)
+        }
+        if inSharedFullScreen {
+            applySpacesStripBleedGuard(frontWindow: activeWindow)
         }
         updateWindowsMenuExclusion()
         // The active window is now surfaced; re-enter fullscreen on it if this
@@ -3596,7 +3866,27 @@ final class SpaceWindowSlot: ObservableObject {
     ///  - Applies any persisted per-Space theme override so the new window
     ///    adopts it on first paint.
     func registerWindow(_ controller: MainBrowserWindowController, for spaceId: String) {
+        // Defense in depth against a double-spawn for one (slot, Space): if a
+        // live, DIFFERENT controller is already registered here, don't silently
+        // overwrite it — that orphans a window the slot's sweeps and cascade
+        // (which iterate `windowsBySpaceId`) can no longer reach. The
+        // `pendingSpawnSpaceIds` gate in `activate` is the primary guard; this
+        // catches any other path that manages to double-register. Tear down the
+        // orphan's observers now (mirroring `evictWindow`) so its stale
+        // didBecomeKey can't adopt this replacement, then retire its window via
+        // the same deferred-close path a profile-change respawn uses (drained
+        // near the end of this method).
+        if let existing = windowsBySpaceId[spaceId], existing !== controller {
+            AppLogWarn("[SpaceWindowSlot] registerWindow(\(spaceId)): replacing already-registered window \(existing.windowId) with \(controller.windowId)")
+            if let token = keyObservationsByWindowId.removeValue(forKey: existing.windowId) {
+                NotificationCenter.default.removeObserver(token)
+            }
+            tabBarAccessoryObservationsByWindowId.removeValue(forKey: existing.windowId)?.invalidate()
+            pendingCloseOnReplacementBySpaceId[spaceId] = existing
+        }
         windowsBySpaceId[spaceId] = controller
+        // The spawn for this Space has landed — clear the in-flight gate.
+        pendingSpawnSpaceIds.remove(spaceId)
         // Drain any spawn-intent entry for this windowId. On the async
         // callback path `claimPendingSpawn` consumed it already; on the
         // synchronous path `absorbCurrentSpawn` wrote it moments ago and
@@ -3767,6 +4057,19 @@ final class SpaceWindowSlot: ObservableObject {
             NotificationCenter.default.removeObserver(token)
         }
         tabBarAccessoryObservationsByWindowId.removeValue(forKey: controller.windowId)?.invalidate()
+        // Closing a window fires no will-exit fullscreen notification, so a
+        // fullscreen window that closes (e.g. a tab-driven close handing off
+        // to a sibling below) would leave `isFullScreen` stuck true — siblings
+        // keep `.moveToActiveSpace` stripped and the snapshot keeps
+        // force-restoring fullscreen next launch. Deferred one turn: AppKit
+        // may instead promote a tabbed sibling INTO the dying window's
+        // fullscreen Space (the flag staying true is then correct), and that
+        // promotion lands after willClose.
+        if isFullScreen {
+            DispatchQueue.main.async { [weak self] in
+                self?.reconcileFullScreenWithWindowState()
+            }
+        }
         // A window the controlled slot teardown is closing. It is already out
         // of the map (above); don't re-run a hand-off/cascade — the driver
         // (`cascadeCloseRemainingWindows`) already issued closes for the rest.
@@ -3828,6 +4131,7 @@ final class SpaceWindowSlot: ObservableObject {
                 AppLogInfo("[SpaceWindowSlot] window-driven close of \(spaceId); cascading \(windowsBySpaceId.count) sibling(s) via Chromium")
                 isCascadingSlotClose = true
                 cascadeCloseRemainingWindows()
+                scheduleCascadeVetoRecovery()
             }
         }
         if windowsBySpaceId.isEmpty {
@@ -3870,6 +4174,57 @@ final class SpaceWindowSlot: ObservableObject {
                 Int32(CommandWrapper.IDC_CLOSE_WINDOW.rawValue),
                 windowId: Int64(controller.windowId))
         }
+    }
+
+    /// Grace period after arming a window-driven cascade before it is treated
+    /// as vetoed. Each `IDC_CLOSE_WINDOW` roundtrip (Chromium close → browser
+    /// teardown → `windowWillClose` → `unregisterWindow`) is well under 100ms,
+    /// so a genuine cascade — even of several siblings — empties the slot far
+    /// inside this window; anything still standing at the deadline was blocked
+    /// by a `beforeunload` prompt the user cancelled. Matches the
+    /// `tabDrivenCloseTTL` reasoning for the tab-level version of this veto.
+    private static let cascadeVetoRecoveryDelay: TimeInterval = 2.0
+
+    /// Recovers a slot whose window-driven teardown was vetoed. The cascade
+    /// issues `IDC_CLOSE_WINDOW` for every remaining Space window; each honors
+    /// `beforeunload`, so a background Space with an unsaved-changes prompt the
+    /// user cancels never re-enters `unregisterWindow`. That drop is the ONLY
+    /// thing that clears `isCascadingSlotClose`, so a veto leaves the flag stuck
+    /// for the slot's life: `handleWindowDidBecomeKey` early-returns (the
+    /// surviving window is never adopted as visible), `keySlot` goes stale, and
+    /// with `visibleController` nil the slot vanishes from
+    /// `currentSpaceWindowMap` — its Spaces become unroutable and drop out of
+    /// the "Open Link In Space" menu. If the cascade hasn't emptied the slot by
+    /// the deadline, treat it as vetoed and re-adopt a surviving window.
+    private func scheduleCascadeVetoRecovery() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.cascadeVetoRecoveryDelay) { [weak self] in
+            guard let self, self.isCascadingSlotClose,
+                  !self.windowsBySpaceId.isEmpty else { return }
+            self.recoverFromVetoedCascade()
+        }
+    }
+
+    private func recoverFromVetoedCascade() {
+        isCascadingSlotClose = false
+        // Prefer the window the user is looking at (the one whose beforeunload
+        // prompt they answered is key), then any on-screen Space window, then
+        // any surviving Space at all.
+        guard let survivor = windowsBySpaceId.first(where: { $0.value.window?.isKeyWindow == true })
+                ?? windowsBySpaceId.first(where: { $0.value.window?.isVisible == true })
+                ?? windowsBySpaceId.first else { return }
+        AppLogInfo("[SpaceWindowSlot] cascade close vetoed; recovering on surviving Space \(survivor.key)")
+        activeSpaceId = survivor.key
+        // `visibleController`'s didSet re-pushes the Space→window routing map,
+        // undoing the drop-out the stuck flag caused.
+        visibleController = survivor.value
+        makeKeyAndOrderFrontHidingSlotTabBar(survivor.value.window)
+        manager?.persistActiveSpaceId(survivor.key)
+        manager?.persistSlotsSnapshot()
+        manager?.notifySlotBecameKey(self)
+        // A multi-veto (several dirty Spaces kept) can leave more than one
+        // window on screen; collapse the rest behind the adopted one over the
+        // standard sweep ladder.
+        scheduleNonTargetSlotWindowSweep()
     }
 
     /// Removes the controller registered for `spaceId` from this slot
@@ -4086,7 +4441,11 @@ final class SpaceWindowSlot: ObservableObject {
                 if let inheritedFrame = resolveInheritedFrame(from: previous),
                    let targetWindow = controller.window {
                     targetWindow.setFrame(inheritedFrame, display: false)
-                    pinnedFrame = inheritedFrame
+                    // Not armed in fullscreen — same reasoning as the matching
+                    // guard in `activate`'s swap path.
+                    if !slotHasFullScreenWindow {
+                        pinnedFrame = inheritedFrame
+                    }
                 }
                 let direction = swapDirection(
                     previousSpaceId: previousSpaceId,
@@ -4108,6 +4467,15 @@ final class SpaceWindowSlot: ObservableObject {
                         sourceColorHex: sourceColorHex,
                         targetColorHex: targetColorHex
                     )
+                    // The band slide draws on the already-front target and
+                    // swaps no windows, so unlike every other switch path
+                    // nothing here would sweep the leaving window or re-apply
+                    // the strip bleed guard — the target's Spaces strip, kept
+                    // at alpha 0 while it was a background sibling, would stay
+                    // invisible (seen when Search Tabs or the NTP tab switcher
+                    // surfaces a sibling Space's window). Mirror the spawn
+                    // path: slide, then order out + reveal.
+                    orderOutIfNotTabbedWithTarget(previous.window, targetWindow: controller.window)
                 } else {
                     performSwap(
                         from: previous,
@@ -4220,6 +4588,7 @@ final class SpaceWindowSlot: ObservableObject {
             observation.invalidate()
         }
         tabBarAccessoryObservationsByWindowId.removeAll()
+        stopStripRowPointerWatchdog()
     }
 
     deinit {

@@ -137,6 +137,18 @@ class MainBrowserWindowController: NSWindowController {
                                                selector: #selector(myWindowWillExitFullScreen),
                                                name: NSWindow.willExitFullScreenNotification,
                                                object: window)
+        // The will-hooks above flip the slot's fullscreen flag optimistically;
+        // a transition can settle differently than promised (a failed or
+        // cancelled enter fires neither did-enter nor will-exit). At did-time
+        // the styleMask is authoritative — let the slot re-derive from it.
+        NotificationCenter.default.addObserver(self,
+                                               selector: #selector(myWindowDidEnterFullScreen),
+                                               name: NSWindow.didEnterFullScreenNotification,
+                                               object: window)
+        NotificationCenter.default.addObserver(self,
+                                               selector: #selector(myWindowDidExitFullScreen),
+                                               name: NSWindow.didExitFullScreenNotification,
+                                               object: window)
         NotificationCenter.default.addObserver(self,
                                                selector: #selector(myWindowWillClose(_:)),
                                                name: NSWindow.willCloseNotification,
@@ -245,6 +257,18 @@ class MainBrowserWindowController: NSWindowController {
             browserState.toggleFullScreenMode(false)
             // Back to a normal window — restore the sibling-follow behavior.
             slot?.windowFullScreenStateChanged(isFullScreen: false)
+        }
+    }
+
+    @objc private func myWindowDidEnterFullScreen(_ noti: Notification) {
+        if noti.object as? NSWindow === self.window {
+            slot?.reconcileFullScreenWithWindowState()
+        }
+    }
+
+    @objc private func myWindowDidExitFullScreen(_ noti: Notification) {
+        if noti.object as? NSWindow === self.window {
+            slot?.reconcileFullScreenWithWindowState()
         }
     }
 

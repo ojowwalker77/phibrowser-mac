@@ -776,12 +776,20 @@ class WebContentContainerViewController: NSViewController {
         // Chromium tab to match too.
         let alreadyShowingExactTab = identifier == currentTabIdentifier
             && currentWebContentController?.associatedTab?.guid == tab.guid
+
+        // Cancel a stale unpainted-tab switch BEFORE the early return below.
+        // Focus can bounce back to the already-mounted tab while a pending
+        // switch for another tab is still armed — e.g. the space-routing
+        // throttle closes a target=_blank popup right after it was activated.
+        // Returning without cancelling would let the first-paint timeout
+        // promote the dead popup's view over the live tab, blanking the
+        // content area until the user manually switches tabs.
+        cancelPendingNewTabSwitchIfNeeded(nextTabId: tab.guid, nextIdentifier: identifier)
+
         guard !alreadyShowingExactTab else { return }
 
         // Clear status URL when switching tabs
         state.targetURL = ""
-
-        cancelPendingNewTabSwitchIfNeeded(nextTabId: tab.guid, nextIdentifier: identifier)
 
         // Get or create WebContentViewController for this tab
         let controller = getOrCreateWebContentController(for: tab, identifier: identifier)
@@ -1232,7 +1240,19 @@ class WebContentContainerViewController: NSViewController {
         guard let controller = webContentControllers[identifier] else { return }
 
         detachSharedBookmarkBar(from: controller)
-        
+
+        // If this tab closed while still waiting for its first paint, drop the
+        // pending switch too — otherwise the first-paint timeout would promote
+        // the dead controller's view over the live tab.
+        if let pending = pendingNewTabSwitch, pending.controller === controller {
+            pendingNewTabTimeoutWorkItem?.cancel()
+            pendingNewTabTimeoutWorkItem = nil
+            pendingNewTabSwitch = nil
+            if pending.controller.view.superview === contentContainer {
+                pending.controller.view.removeFromSuperview()
+            }
+        }
+
         // If this is the current controller, remove from view
         if controller === currentWebContentController {
             controller.view.removeFromSuperview()

@@ -255,13 +255,17 @@ class SidebarHeaderView: NSView, TitlebarAwareHitTestable {
         updateSpaceSwitchVisibility()
     }
 
-    /// Shows or hides the Spaces-switch row to match the master Spaces feature
-    /// flag, reclaiming the row's height (and re-pinning the address bar to the
-    /// nav row) when the feature is off. Called on mount and whenever the toggle
-    /// flips so the header never reserves space for a control the user can't use.
+    /// Shows or hides the Spaces-switch row, reclaiming the row's height (and
+    /// re-pinning the address bar to the nav row) when it is hidden. The row
+    /// shows only when the master Spaces feature flag is on AND more than one
+    /// Space exists — with a single Space there is nothing to switch to, so the
+    /// pip row is pure noise. Called on mount, whenever the toggle flips, and
+    /// whenever the Space count crosses the single-Space threshold, so the
+    /// header never reserves space for a control the user can't use.
     func updateSpaceSwitchVisibility() {
         guard let view = spaceSwitchView else { return }
         let enabled = PhiPreferences.GeneralSettings.spacesFeatureEnabled.loadValue()
+            && SpaceManager.shared.spaces.count > 1
         guard spaceSwitchVisible != enabled else { return }
         spaceSwitchVisible = enabled
 

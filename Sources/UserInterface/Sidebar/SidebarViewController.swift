@@ -138,7 +138,13 @@ class SidebarViewController: NSViewController {
         hostingController.view.translatesAutoresizingMaskIntoConstraints = false
         return hostingController
     }()
-    
+
+    /// The Spaces strip row's AppKit view, resolved live by the slot's
+    /// pointer-vs-row test (`SpaceWindowSlot.stripRowContainsPointer()`) so
+    /// the geometry always comes from the window actually consulted. Set at
+    /// mount; stays nil for incognito windows, which never mount the strip.
+    private(set) weak var spacesStripRowView: NSView?
+
     /// Hosting controller for the sidebar message card view.
     private lazy var messageCardHostingController: ThemedHostingController<NotificationMessageCardView> = {
         let hostingController = ThemedHostingController(
@@ -331,15 +337,17 @@ class SidebarViewController: NSViewController {
     /// heights include room for that row — see `SidebarHeaderView.mountSpaceSwitch`.
     private func updateHeaderHeight() {
         let addressInSidebar = !PhiPreferences.GeneralSettings.loadLayoutMode().showsNavigationAtTop
-        // The Spaces switch row is only mounted when the feature is on AND the
-        // window is not incognito (see `setupView`). Reserve its height under the
-        // exact same condition, or an incognito window would keep an empty 32pt
-        // gap below the address bar for a row that is never mounted.
+        // The Spaces switch row is only shown when the feature is on, the window
+        // is not incognito (see `setupView`), and more than one Space exists
+        // (see `SidebarHeaderView.updateSpaceSwitchVisibility`). Reserve its
+        // height under the exact same condition, or the header would keep an
+        // empty 32pt gap below the address bar for a row that isn't shown.
         let spacesEnabled = PhiPreferences.GeneralSettings.spacesFeatureEnabled.loadValue()
             && !state.isIncognito
+            && SpaceManager.shared.spaces.count > 1
         // Base = nav row (+ address bar in sidebar layouts). The Spaces switch
         // row adds 32 (24 row + 8 gap) only when the row is shown, so the header
-        // reclaims the row's height when Spaces is off or the window is incognito.
+        // reclaims the row's height when the row is hidden.
         let base: CGFloat = addressInSidebar ? 80 : 42
         let headerHeight = base + (spacesEnabled ? 32 : 0)
         headerHeightConstraint?.update(offset: headerHeight)
@@ -354,6 +362,20 @@ class SidebarViewController: NSViewController {
             .sink { [weak self] _ in
                 self?.updateChatButtonVisibility()
                 self?.updateMemoryButtonVisibility()
+                self?.headerView.updateSpaceSwitchVisibility()
+                self?.updateHeaderHeight()
+            }
+            .store(in: &cancellables)
+
+        // The Spaces switch row hides while only one Space exists, so its
+        // visibility (and the header height that reserves its 32pt) must also
+        // re-resolve when Spaces are created or deleted — those arrive via the
+        // manager's published list, not UserDefaults.
+        SpaceManager.shared.$spaces
+            .map(\.count)
+            .removeDuplicates()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
                 self?.headerView.updateSpaceSwitchVisibility()
                 self?.updateHeaderHeight()
             }
@@ -421,6 +443,7 @@ class SidebarViewController: NSViewController {
         if !state.isIncognito {
             addChild(spacesStripHostingController)
             headerView.mountSpaceSwitch(spacesStripHostingController.view)
+            spacesStripRowView = spacesStripHostingController.view
         }
 
         mainStackView.addArrangedSubview(tabList.view)

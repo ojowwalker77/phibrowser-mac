@@ -40,16 +40,18 @@ private final class SafeAreaIgnoringHostingView<Content: View>: NSHostingView<Co
 /// sits in the tab strip row and needs theme env injection (e.g. the
 /// active-Space picker).
 private final class SafeAreaIgnoringThemedHostingView: ThemedHostingView, TitlebarAwareHitTestable {
-    /// Menu dropped on hover and left-click — the Space switcher. Right-click
-    /// keeps the standard `menu` (the tab-strip context menu), so the two
-    /// gestures surface different menus from the same chip.
+    /// Menu dropped on left-click — the Space switcher. Right-click keeps the
+    /// standard `menu` (the tab-strip context menu), so the two gestures
+    /// surface different menus from the same chip. Hovering no longer opens
+    /// it: the chip shows the Space hover card instead (see
+    /// `SpacesStripView.compactChip`), matching the sidebar pips.
     var primaryMenu: NSMenu?
 
-    private var hoverTrackingArea: NSTrackingArea?
-    /// Set while a just-dropped menu could still be under the cursor, so the
-    /// `mouseEntered` AppKit re-delivers when a popped menu closes doesn't
-    /// immediately reopen it. Cleared once the cursor genuinely leaves the chip.
-    private var suppressHoverOpen = false
+    /// Runs just before the switcher pops, so the controller can drop the
+    /// chip's hover card synchronously and arm the click suppression — the
+    /// menu's modal tracking loop stops the main queue, so nothing deferred
+    /// would run until the menu closes.
+    var onPrimaryMenuWillOpen: (() -> Void)?
 
     /// How long the dropped Space switcher stays open before auto-dismissing,
     /// mirroring the sidebar hover card's cap so a forgotten menu can't linger.
@@ -68,36 +70,11 @@ private final class SafeAreaIgnoringThemedHostingView: ThemedHostingView, Titleb
         return shouldConsumeTitlebarEvent(NSApp.currentEvent)
     }
 
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-        if let hoverTrackingArea {
-            removeTrackingArea(hoverTrackingArea)
-        }
-        let area = NSTrackingArea(
-            rect: bounds,
-            options: [.mouseEnteredAndExited, .activeInActiveApp],
-            owner: self,
-            userInfo: nil
-        )
-        addTrackingArea(area)
-        hoverTrackingArea = area
-    }
-
-    /// Hovering the chip drops the Space switcher, mirroring the popover the chip
-    /// used to open on hover — now rendered as a menu.
-    override func mouseEntered(with event: NSEvent) {
-        guard !suppressHoverOpen else { return }
-        dropPrimaryMenu()
-    }
-
-    override func mouseExited(with event: NSEvent) {
-        suppressHoverOpen = false
-    }
-
-    /// Left-clicking the chip drops the same Space switcher. The chip's SwiftUI
+    /// Left-clicking the chip drops the Space switcher. The chip's SwiftUI
     /// content has no click gesture, so this `mouseDown` is reached for the click.
     override func mouseDown(with event: NSEvent) {
         if primaryMenu != nil {
+            onPrimaryMenuWillOpen?()
             dropPrimaryMenu()
         } else {
             super.mouseDown(with: event)
@@ -105,12 +82,9 @@ private final class SafeAreaIgnoringThemedHostingView: ThemedHostingView, Titleb
     }
 
     /// Pops `primaryMenu` from the chip's bottom-leading corner, matching the old
-    /// popover's placement below the icon. `suppressHoverOpen` is latched before
-    /// the (modal) pop so the re-entrant `mouseEntered` after the menu closes
-    /// can't reopen it until the cursor leaves and returns.
+    /// popover's placement below the icon.
     private func dropPrimaryMenu() {
         guard let primaryMenu else { return }
-        suppressHoverOpen = true
         let bottomLeading = NSPoint(x: bounds.minX, y: isFlipped ? bounds.maxY : bounds.minY)
 
         // Auto-dismiss a switcher that's left open. `popUp` blocks in a modal
@@ -127,24 +101,6 @@ private final class SafeAreaIgnoringThemedHostingView: ThemedHostingView, Titleb
 
         primaryMenu.popUp(positioning: nil, at: bottomLeading, in: self)
         autoClose.invalidate()
-
-        // `popUp` returned because the menu closed. The tracking area's
-        // `mouseExited` is swallowed during that loop, so a cursor that left the
-        // chip while the menu was open would never clear the latch — stranding
-        // `suppressHoverOpen` and killing hover-to-open from then on. Settle it
-        // now from the cursor's real position instead of trusting a follow-up
-        // `mouseExited` that may never arrive.
-        if !cursorIsInsideChip() {
-            suppressHoverOpen = false
-        }
-    }
-
-    /// Whether the pointer currently sits over the chip, read from the window's
-    /// live mouse location (available outside the event stream) so it's valid
-    /// right after a modal menu loop, when tracking-area events aren't.
-    private func cursorIsInsideChip() -> Bool {
-        guard let window else { return false }
-        return bounds.contains(convert(window.mouseLocationOutsideOfEventStream, from: nil))
     }
 }
 
@@ -197,6 +153,12 @@ final class TabStripBarController: NSViewController {
     /// tabs and the new-tab button.
     private var spacesPickerHostingView: SafeAreaIgnoringThemedHostingView?
 
+    /// Floating hover-card panel for the active-Space chip, owned here (not by
+    /// the SwiftUI strip) so the chip's hosting view can dismiss the card
+    /// synchronously before popping the switcher menu — see
+    /// `onPrimaryMenuWillOpen`.
+    private let chipHoverTooltipController = SpaceHoverTooltipController()
+
     /// Last-applied picker visibility, so the toggle observer only remakes
     /// constraints when the master Spaces flag actually flips.
     private var lastSpacesPickerEnabled: Bool?
@@ -210,10 +172,11 @@ final class TabStripBarController: NSViewController {
         return menu
     }()
 
-    /// Space-switcher menu dropped by the active-Space chip on hover / left-click
-    /// (the menu rendition of the old switcher popover). Populated lazily in
-    /// `menuNeedsUpdate` so it always reflects the current Space list and active
-    /// Space; distinct from `stripContextMenu`, which the chip shows on right-click.
+    /// Space-switcher menu dropped by the active-Space chip on left-click (the
+    /// menu rendition of the old switcher popover; hovering the chip shows the
+    /// Space hover card instead). Populated lazily in `menuNeedsUpdate` so it
+    /// always reflects the current Space list and active Space; distinct from
+    /// `stripContextMenu`, which the chip shows on right-click.
     private lazy var spaceSwitcherMenu: NSMenu = {
         let menu = NSMenu()
         menu.delegate = self
@@ -320,7 +283,8 @@ final class TabStripBarController: NSViewController {
             manager: SpaceManager.shared,
             slot: slot,
             showsEllipsisAffordance: false,
-            resolveOwnerController: { [weak browserState] in browserState?.windowController }
+            resolveOwnerController: { [weak browserState] in browserState?.windowController },
+            chipTooltipController: chipHoverTooltipController
         )
         let spacesHostingView = SafeAreaIgnoringThemedHostingView(
             rootView: spacesPicker,
@@ -336,11 +300,24 @@ final class TabStripBarController: NSViewController {
         tabStrip.menu = stripContextMenu
         hostingView.menu = stripContextMenu
         // Right-clicking the active-Space chip shows the same strip context menu
-        // as the rest of the tab bar (the active-Space controls). Hovering or
-        // left-clicking it instead drops the Space-switcher menu, popped by
-        // SafeAreaIgnoringThemedHostingView (mouseEntered / mouseDown).
+        // as the rest of the tab bar (the active-Space controls). Left-clicking
+        // it instead drops the Space-switcher menu, popped by
+        // SafeAreaIgnoringThemedHostingView (mouseDown); hovering shows the
+        // active Space's hover card (SpacesStripView.compactChip), matching
+        // the sidebar pips.
         spacesHostingView.menu = stripContextMenu
         spacesHostingView.primaryMenu = spaceSwitcherMenu
+        // Opening the switcher is a click, not a hover: drop the chip's card
+        // NOW (the menu's modal loop would defer anything queued) and arm the
+        // same click suppression the sidebar pips use, so the card doesn't
+        // reappear under the resting cursor after the menu closes or the
+        // selected Space's window swaps in.
+        spacesHostingView.onPrimaryMenuWillOpen = { [chipHoverTooltipController] in
+            if let activeId = slot.activeSpaceId {
+                slot.suppressHoverCard(spaceId: activeId)
+            }
+            chipHoverTooltipController.dismissImmediately()
+        }
 
         // The tab strip's leading edge depends on the active-Space picker (it
         // starts just after it), so its constraints are made alongside the
@@ -393,7 +370,11 @@ final class TabStripBarController: NSViewController {
     private func applySpacesPickerVisibility() {
         guard let spacesView = spacesPickerHostingView,
               let rightButtons = rightButtonsHostingView else { return }
-        let enabled = spacesPickerEligible
+        // With a single Space there is nothing to switch to, so the chip is
+        // pure noise next to the traffic lights — hide it until a second Space
+        // exists. The swipe gesture keeps its eligibility-only guard so the
+        // rubber-band end feedback still plays.
+        let enabled = spacesPickerEligible && SpaceManager.shared.spaces.count > 1
         guard lastSpacesPickerEnabled != enabled else { return }
         lastSpacesPickerEnabled = enabled
 
@@ -426,12 +407,22 @@ final class TabStripBarController: NSViewController {
         }
     }
 
-    /// Re-applies the picker visibility whenever the master Spaces flag flips.
-    /// The toggle writes `UserDefaults.standard`, so the change arrives via
-    /// `didChangeNotification`; the visibility applier no-ops unless the
-    /// resolved state actually changed.
+    /// Re-applies the picker visibility whenever the master Spaces flag flips
+    /// or the Space count crosses the single-Space threshold. The toggle writes
+    /// `UserDefaults.standard`, so the change arrives via `didChangeNotification`;
+    /// Space creation/deletion arrives via the manager's published list. The
+    /// visibility applier no-ops unless the resolved state actually changed.
     private func observeSpacesFeatureFlag() {
         NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.applySpacesPickerVisibility()
+            }
+            .store(in: &cancellables)
+
+        SpaceManager.shared.$spaces
+            .map(\.count)
+            .removeDuplicates()
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
                 self?.applySpacesPickerVisibility()

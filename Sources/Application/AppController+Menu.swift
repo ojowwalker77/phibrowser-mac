@@ -903,10 +903,11 @@ extension AppController {
     /// Fills `menu` with one item per Space — its icon, ⌃-number switch shortcut,
     /// and a checkmark on the active one — that switches the focused window to
     /// that Space, plus a trailing "New Space" item. Drives the horizontal tab
-    /// strip's active-Space chip, whose hover / left-click present this as a
-    /// switcher menu (the menu rendition of the old switcher popover). Items
-    /// target the controller and reuse the Spaces menu's activate / create
-    /// actions, so switching here behaves exactly like the menu-bar Spaces menu.
+    /// strip's active-Space chip, whose left-click presents this as a switcher
+    /// menu (the menu rendition of the old switcher popover; hovering the chip
+    /// shows the Space hover card instead). Items target the controller and
+    /// reuse the Spaces menu's activate / create actions, so switching here
+    /// behaves exactly like the menu-bar Spaces menu.
     func populateSpaceSwitcherMenu(
         _ menu: NSMenu,
         excludedSpaceIds: Set<String> = [],
@@ -1316,6 +1317,12 @@ extension AppController {
         guard let menuItem = sender as? NSMenuItem,
               let spaceId = menuItem.representedObject as? String,
               let slot = currentSpacesSlot() else { return }
+        // A menu pick is a deliberate switch, not a hover: arm the same click
+        // suppression the sidebar pips use, so the target's hover card doesn't
+        // pop under a cursor that happens to rest on its pip — or on the
+        // horizontal chip — after the swap (see
+        // `SpaceWindowSlot.hoverCardSuppressedSpaceId`).
+        slot.suppressHoverCard(spaceId: spaceId)
         slot.activate(spaceId: spaceId, userInitiated: true)
     }
 

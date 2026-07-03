@@ -276,7 +276,10 @@ class OmniBoxViewModel: ObservableObject {
             return
         }
 
-        guard let wrapper = chromiumBridge?.newWebContents(forUrl: url) as? (WebContentWrapper & NSObject) else {
+        guard let wrapper = chromiumBridge?.newWebContents(
+            forUrl: url,
+            windowId: browserState.windowId.int64Value
+        ) as? (WebContentWrapper & NSObject) else {
             browserState.createTab(url)
             return
         }

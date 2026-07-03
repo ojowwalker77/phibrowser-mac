@@ -393,7 +393,16 @@ typedef NS_ENUM(NSUInteger, PhiOmniboxSuggestionDisposition) {
 @protocol PhiChromiumBridgeProtocol <NSObject>
 @property (nonatomic, weak) id<PhiChromiumBridgeDelegate> delegate;
 
-- (id<WebContentWrapper>)newWebContentsForUrl:(NSString *)urlString;
+/// Creates a detached WebContents loading `urlString` on the profile of the
+/// Browser identified by `windowId`, and returns a wrapper around it. Used by
+/// the native-NTP omnibox path, whose tab has no live WebContents for the
+/// navigation to reuse. The bridge owns the contents; it is never inserted
+/// into a TabStripModel. Call `close` on the wrapper when its tab goes away —
+/// that releases the owned contents (window close releases any leftovers).
+/// Returns nil when no Browser matches `windowId` (the window closed in
+/// flight) or the URL is invalid; the caller falls back to a regular tab.
+- (id<WebContentWrapper> _Nullable)newWebContentsForUrl:(NSString *)urlString
+                                                windowId:(int64_t)windowId;
 
 // Resolves `urlString` against the Space URL routing table for `windowId` and,
 // if a rule matches, hands the URL off through the same routing path the
@@ -485,8 +494,16 @@ typedef NS_ENUM(NSUInteger, PhiOmniboxSuggestionDisposition) {
 /// the user has chosen a Space: re-opening the URL there must not be caught
 /// by the same rule and prompted again (which would loop). The bypass is a
 /// one-shot exemption matched on (url, windowId).
+///
+/// `activateWindow` controls whether the open also makes the target window
+/// key and front. Pass NO when the Mac side's Space-switch animation owns
+/// window fronting — the routed switch keeps the LEAVING window front until
+/// the animation settles, and activating the target here would surface it
+/// mid-animation (the switch would land with no visible animation). The tab
+/// is still appended as the window's foreground tab either way.
 - (void)openTabBypassingSpaceRoutingWithUrl:(NSString *)url
-                                    windowId:(int64_t)windowId;
+                                    windowId:(int64_t)windowId
+                              activateWindow:(BOOL)activateWindow;
 
 /// Navigate `windowId`'s ACTIVE tab to `url` IN PLACE, bypassing Space URL
 /// routing for that one navigation. Used by the "ask every time" flow when the
