@@ -344,7 +344,7 @@ class SidebarViewController: NSViewController {
         // empty 32pt gap below the address bar for a row that isn't shown.
         let spacesEnabled = PhiPreferences.GeneralSettings.spacesFeatureEnabled.loadValue()
             && !state.isIncognito
-            && SpaceManager.shared.spaces.count > 1
+            && (SpaceManager.shared.spaces.count > 1 || headerView.forcesSpaceSwitchVisible)
         // Base = nav row (+ address bar in sidebar layouts). The Spaces switch
         // row adds 32 (24 row + 8 gap) only when the row is shown, so the header
         // reclaims the row's height when the row is hidden.
@@ -1096,6 +1096,20 @@ class SidebarViewController: NSViewController {
         ) { [weak self] in
             self?.dismissCreateSpaceOverlay()
         }
+        // Keep the Spaces icon row visible above the form while creating. Force
+        // it on so it shows even with a single Space (normally hidden — nothing
+        // to switch to) and reserve its header height BEFORE the overlay anchors,
+        // so the strip's frame is settled when the overlay pins beneath it.
+        headerView.forcesSpaceSwitchVisible = true
+        updateHeaderHeight()
+        view.layoutSubtreeIfNeeded()
+        // Pin the overlay's top just under the icon row so the nav row and strip
+        // stay uncovered; the form fills the rest of the sidebar below. Fall back
+        // to the full sidebar if the row is somehow absent (incognito never
+        // mounts it — but incognito has no Spaces to create).
+        let stripRow = spacesStripRowView
+        let anchorsBelowStrip = stripRow?.isHidden == false
+
         // Match the current Space's sidebar background (color + opacity) by
         // reusing the sidebar root's visual-effect recipe; the form hosting
         // view above is transparent so this shows through.
@@ -1105,7 +1119,12 @@ class SidebarViewController: NSViewController {
         backdrop.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(backdrop)
         backdrop.snp.makeConstraints { make in
-            make.edges.equalToSuperview()
+            make.leading.trailing.bottom.equalToSuperview()
+            if anchorsBelowStrip, let stripRow {
+                make.top.equalTo(stripRow.snp.bottom)
+            } else {
+                make.top.equalToSuperview()
+            }
         }
 
         let host = ThemedHostingController(rootView: panel, themeSource: state.themeContext)
@@ -1119,15 +1138,21 @@ class SidebarViewController: NSViewController {
         addChild(host)
         view.addSubview(host.view)
         host.view.snp.makeConstraints { make in
-            make.edges.equalToSuperview()
+            make.leading.trailing.bottom.equalToSuperview()
+            if anchorsBelowStrip, let stripRow {
+                make.top.equalTo(stripRow.snp.bottom)
+            } else {
+                make.top.equalToSuperview()
+            }
         }
         backdrop.alphaValue = 0
         host.view.alphaValue = 0
         createSpaceOverlay = host
         createSpaceOverlayBackdrop = backdrop
-        // Suppress the Spaces-strip hover card while the form covers the strip —
-        // the floating tooltip panel sits above the overlay, so a pip hovered
-        // just before it opened would otherwise linger on top of the form.
+        // Mark the create flow active: the strip stays visible above the form
+        // for reference, so its pip clicks are disabled (a switch would swap the
+        // form's window away) while hover info keeps working — see
+        // `SpacesStripView.spacePip` / `isHoverCardPresented`.
         spacesStripSlot.isCreatingSpace = true
         NSAnimationContext.runAnimationGroup { context in
             context.duration = 0.18
@@ -1143,6 +1168,10 @@ class SidebarViewController: NSViewController {
         createSpaceOverlay = nil
         createSpaceOverlayBackdrop = nil
         spacesStripSlot.isCreatingSpace = false
+        // Release the forced strip visibility. A Space just created leaves the
+        // count > 1, so the row stays; a cancel from a single Space re-hides it.
+        headerView.forcesSpaceSwitchVisible = false
+        updateHeaderHeight()
         NSAnimationContext.runAnimationGroup({ context in
             context.duration = 0.15
             context.allowsImplicitAnimation = true

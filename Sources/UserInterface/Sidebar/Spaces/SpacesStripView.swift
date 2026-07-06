@@ -502,6 +502,12 @@ struct SpacesStripView: View {
         // stays on screen for the animation).
         let isActive = space.spaceId == slot.activeSpaceId
         return Button {
+            // While the Create-a-Space overlay is open the strip stays visible
+            // for reference only: a click must NOT switch Spaces (that swaps
+            // away the very window hosting the form). Hover still shows the
+            // pip's info card — see `isHoverCardPresented`. Guarding the action
+            // (rather than `.disabled`) keeps `.onHover` live so the card works.
+            guard !slot.isCreatingSpace else { return }
             // A click means "switch", not "hover": drop this pip's hover card
             // and keep it down — across the window swap, in the target Space
             // window's strip too — until the pointer leaves the pip. Without
@@ -554,13 +560,15 @@ struct SpacesStripView: View {
     }
 
     /// A pip's hover card shows while it (and only it) is hovered, and never
-    /// during a reorder drag, while its icon picker is open, while the
-    /// Create-a-Space overlay covers the strip, or while the pip is
+    /// during a reorder drag, while its icon picker is open, or while the pip is
     /// click-suppressed (the user just clicked it to switch Spaces) — so the
-    /// card doesn't trail the cursor, fight the picker, linger over the form,
-    /// or blink back after a switch. `.onHover` drives `hoveredSpaceId`.
+    /// card doesn't trail the cursor, fight the picker, or blink back after a
+    /// switch. It DOES show while the Create-a-Space overlay is open: the strip
+    /// stays visible beside the form there and its clicks are disabled, so the
+    /// hover card is the only way to read a pip's info. `.onHover` drives
+    /// `hoveredSpaceId`.
     private func isHoverCardPresented(for space: SpaceModel) -> Bool {
-        hoveredSpaceId == space.spaceId && stripDraggingId == nil && iconEditSpaceId == nil && !slot.isCreatingSpace
+        hoveredSpaceId == space.spaceId && stripDraggingId == nil && iconEditSpaceId == nil
             && slot.hoverCardSuppressedSpaceId != space.spaceId
     }
 

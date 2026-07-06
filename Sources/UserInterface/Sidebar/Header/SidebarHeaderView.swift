@@ -40,6 +40,17 @@ class SidebarHeaderView: NSView, TitlebarAwareHitTestable {
     /// Last-applied switch visibility, so the toggle observer only remakes
     /// constraints when the master Spaces flag actually flips.
     private var spaceSwitchVisible: Bool?
+    /// Forces the Spaces-switch row visible even with a single Space. Set while
+    /// the sidebar create-Space overlay is open so the icon row stays visible
+    /// above the form (the user is managing Spaces, so the row is relevant even
+    /// when there is nothing to switch to yet). See
+    /// `SidebarViewController.showCreateSpaceOverlay`.
+    var forcesSpaceSwitchVisible = false {
+        didSet {
+            guard oldValue != forcesSpaceSwitchVisible else { return }
+            updateSpaceSwitchVisibility()
+        }
+    }
 
     private var isFloating: Bool = false
     
@@ -265,7 +276,7 @@ class SidebarHeaderView: NSView, TitlebarAwareHitTestable {
     func updateSpaceSwitchVisibility() {
         guard let view = spaceSwitchView else { return }
         let enabled = PhiPreferences.GeneralSettings.spacesFeatureEnabled.loadValue()
-            && SpaceManager.shared.spaces.count > 1
+            && (SpaceManager.shared.spaces.count > 1 || forcesSpaceSwitchVisible)
         guard spaceSwitchVisible != enabled else { return }
         spaceSwitchVisible = enabled
 

@@ -1748,10 +1748,11 @@ final class SpaceWindowSlot: ObservableObject {
         iconPickerRequestToken &+= 1
     }
 
-    /// True while this window's inline "Create a Space" overlay covers the
-    /// sidebar. The Spaces strip observes it to suppress its hover tooltip,
-    /// which renders in a floating panel above the overlay and would otherwise
-    /// linger over the form (see `SpacesStripView.isHoverCardPresented`).
+    /// True while this window's inline "Create a Space" overlay is open in the
+    /// sidebar. The Spaces strip stays visible above the form for reference and
+    /// observes this to disable pip clicks — switching Spaces would swap the
+    /// form's window away — while keeping the hover info card live (see
+    /// `SpacesStripView.spacePip` / `isHoverCardPresented`).
     @Published var isCreatingSpace: Bool = false
 
     /// The Space the user just deliberately switched to by clicking or picking
