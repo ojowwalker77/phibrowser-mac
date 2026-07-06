@@ -489,6 +489,9 @@
     "Confirm Logout" : {
       "comment" : "Account settings - Logout confirmation dialog title"
     },
+    "Confirm logout in the opened browser." : {
+      "comment" : "Account settings - Status shown while waiting for logout to finish"
+    },
     "Conflicts with: %@" : {
       "comment" : "Shortcuts settings - Warning text showing conflicting shortcuts"
     },
