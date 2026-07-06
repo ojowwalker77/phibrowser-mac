@@ -11,6 +11,7 @@ import Combine
 
 class OverlayToastViewModel: ObservableObject {
     let browserState: BrowserState
+    private let toastCenter: OverlayToastCenter
     
     // MARK: - Toast Components
     
@@ -28,6 +29,12 @@ class OverlayToastViewModel: ObservableObject {
     
     /// Whether the notification card should be visible
     @Published var isNotificationCardVisible: Bool = false
+
+    /// Generic window-scoped toasts owned by `OverlayToastCenter`.
+    @Published private(set) var genericToasts: [OverlayToastItem] = []
+
+    /// Current window layout mode used for layout-sensitive overlay positioning.
+    @Published private(set) var layoutMode: LayoutMode
     
     // MARK: - Hit Testing
     
@@ -40,15 +47,30 @@ class OverlayToastViewModel: ObservableObject {
     /// Delay used so removal animations can finish before the overlay hides.
     private let hideDelay: TimeInterval = 0.3
     
-    init(browserState: BrowserState, notificationCardManager: NotificationCardManager = .shared) {
+    init(
+        browserState: BrowserState,
+        notificationCardManager: NotificationCardManager = .shared,
+        toastCenter: OverlayToastCenter = .shared
+    ) {
         self.browserState = browserState
+        self.toastCenter = toastCenter
         self.livingDownloadsManager = LivingDownloadsManager(downloadsManager: browserState.downloadsManager)
         self.notificationCardManager = notificationCardManager
+        self.layoutMode = browserState.layoutMode
         
         setupBindings()
     }
     
     private func setupBindings() {
+        browserState.$layoutMode
+            .removeDuplicates()
+            .receive(on: DispatchQueue.main)
+            .assign(to: &$layoutMode)
+
+        toastCenter.visibleToastsPublisher(for: browserState.windowId)
+            .receive(on: DispatchQueue.main)
+            .assign(to: &$genericToasts)
+
         // Show immediately when items appear, hide after a short delay when the list empties.
         livingDownloadsManager.$livingItems
             .map { !$0.isEmpty }
@@ -105,5 +127,24 @@ class OverlayToastViewModel: ObservableObject {
     /// - Returns: true if the point is inside any hit-testable area
     func shouldHandleHitTest(at point: CGPoint) -> Bool {
         return hitTestFrames.contains { $0.contains(point) }
+    }
+
+    func genericToasts(for placement: OverlayToastPlacement) -> [OverlayToastItem] {
+        genericToasts.filter { $0.placement == placement }
+    }
+
+    var genericToastTopOffset: CGFloat {
+        Self.genericToastTopOffset(for: layoutMode)
+    }
+
+    static func genericToastTopOffset(for layoutMode: LayoutMode) -> CGFloat {
+        switch layoutMode {
+        case .comfortable:
+            return 88
+        case .performance:
+            return 16
+        case .balanced:
+            return 56
+        }
     }
 }

@@ -19,6 +19,14 @@ private struct OverlayHitTestFrameKey: PreferenceKey {
     }
 }
 
+private struct NotificationCardHeightKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
 /// Marks a view as hit-testable inside the overlay container.
 private struct OverlayHitTestableModifier: ViewModifier {
     let coordinateSpace: String
@@ -68,6 +76,7 @@ private extension View {
 
 struct OverlayToastContainer: View {
     @ObservedObject var viewModel: OverlayToastViewModel
+    @State private var notificationCardHeight: CGFloat = 0
     
     /// Padding from window edges.
     private let edgePadding: CGFloat = 16
@@ -76,7 +85,22 @@ struct OverlayToastContainer: View {
     private let notificationCardTopOffset: CGFloat = 36
     
     /// Distance from the right edge for the notification card.
-    private let notificationCardRightOffset: CGFloat = 8
+    private let notificationCardRightOffset: CGFloat = 18
+
+    /// Distance from the right edge for generic top-trailing toasts.
+    private let genericToastRightOffset: CGFloat = 16
+
+    /// Vertical spacing between independent overlay surfaces in the same corner.
+    private let overlayVerticalSpacing: CGFloat = 8
+
+    /// Animation used when generic toasts appear, disappear, or replace each other.
+    private let genericToastAnimation = Animation.easeInOut(duration: 0.125)
+
+    /// Generic toasts drop in from the top, but dismiss without positional motion.
+    private let genericToastTransition = AnyTransition.asymmetric(
+        insertion: .move(edge: .top).combined(with: .opacity),
+        removal: .opacity
+    )
     
     /// Fixed width for the notification card.
     private let notificationCardWidth: CGFloat = 220
@@ -86,52 +110,11 @@ struct OverlayToastContainer: View {
     
     var body: some View {
         GeometryReader { containerGeometry in
-            ZStack(alignment: .topTrailing) {
-                if viewModel.isLivingDownloadsVisible {
-                    VStack {
-                        Spacer()
-                        HStack {
-                            Spacer()
-                            LivingDownloadsListView(manager: viewModel.livingDownloadsManager)
-                                .overlayHitTestable(in: coordinateSpaceName)
-                                .padding(.trailing, edgePadding)
-                                .padding(.bottom, edgePadding)
-                        }
-                    }
-                    .transition(.move(edge: .trailing).combined(with: .opacity))
-                    .animation(.easeInOut(duration: 0.25), value: viewModel.isLivingDownloadsVisible)
-                }
-                
-                if viewModel.isNotificationCardVisible {
-                    VStack {
-                        HStack {
-                            Spacer()
-                            NotificationMessageCardView(
-                                manager: viewModel.notificationCardManager,
-                                layoutMode: .legacy,
-                                onRun: { card in
-                                    NotificationCardManager.shared.decide(card: card, decision: .accept)
-                                },
-                                onDismiss: { _ in
-                                    NotificationCardManager.shared.hideCard()
-                                },
-                                onDelete: { card in
-                                    NotificationCardManager.shared.decide(card: card, decision: .reject)
-                                }
-                            )
-                            .frame(width: notificationCardWidth)
-                            .overlayHitTestable(
-                                in: coordinateSpaceName,
-                                expansion: .init(left: 6, right: 0, top: 0, bottom: 20)
-                            )
-                            .padding(.trailing, notificationCardRightOffset)
-                        }
-                        Spacer()
-                    }
-                    .padding(.top, notificationCardTopOffset)
-                    .transition(.move(edge: .trailing).combined(with: .opacity))
-                    .animation(.easeInOut(duration: 0.25), value: viewModel.isNotificationCardVisible)
-                }
+            ZStack {
+                livingDownloadsArea
+                notificationCardArea
+                topCenterToastArea
+                topTrailingToastArea
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .coordinateSpace(name: coordinateSpaceName)
@@ -148,8 +131,114 @@ struct OverlayToastContainer: View {
                 viewModel.hitTestFrames = appKitFrames
                 AppLogDebug("[OverlayHitTest] frames updated: \(appKitFrames)")
             }
+            .onPreferenceChange(NotificationCardHeightKey.self) { height in
+                notificationCardHeight = height
+            }
         }
         .ignoresSafeArea()
+    }
+
+    @ViewBuilder
+    private var livingDownloadsArea: some View {
+        if viewModel.isLivingDownloadsVisible {
+            VStack {
+                Spacer()
+                HStack {
+                    Spacer()
+                    LivingDownloadsListView(manager: viewModel.livingDownloadsManager)
+                        .overlayHitTestable(in: coordinateSpaceName)
+                        .padding(.trailing, edgePadding)
+                        .padding(.bottom, edgePadding)
+                }
+            }
+            .transition(.move(edge: .trailing).combined(with: .opacity))
+            .animation(.easeInOut(duration: 0.25), value: viewModel.isLivingDownloadsVisible)
+        }
+    }
+
+    private var topCenterToastArea: some View {
+        VStack(spacing: 8) {
+            ForEach(viewModel.genericToasts(for: .topCenter)) { toast in
+                OverlayToastView(toast: toast)
+                    .overlayHitTestable(in: coordinateSpaceName)
+                    .transition(genericToastTransition)
+            }
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .padding(.top, viewModel.genericToastTopOffset)
+        .padding(.horizontal, edgePadding)
+        .animation(.easeInOut(duration: 0.25), value: viewModel.layoutMode)
+        .animation(genericToastAnimation, value: viewModel.genericToasts(for: .topCenter))
+    }
+
+    @ViewBuilder
+    private var notificationCardArea: some View {
+        if viewModel.isNotificationCardVisible {
+            VStack(alignment: .trailing, spacing: 0) {
+                NotificationMessageCardView(
+                    manager: viewModel.notificationCardManager,
+                    layoutMode: .legacy,
+                    onRun: { card in
+                        NotificationCardManager.shared.decide(card: card, decision: .accept)
+                    },
+                    onDismiss: { _ in
+                        NotificationCardManager.shared.hideCard()
+                    },
+                    onDelete: { card in
+                        NotificationCardManager.shared.decide(card: card, decision: .reject)
+                    }
+                )
+                .frame(width: notificationCardWidth)
+                .background(
+                    GeometryReader { geometry in
+                        Color.clear.preference(
+                            key: NotificationCardHeightKey.self,
+                            value: geometry.size.height
+                        )
+                    }
+                )
+                .overlayHitTestable(
+                    in: coordinateSpaceName,
+                    expansion: .init(left: 6, right: 0, top: 0, bottom: 20)
+                )
+                .transition(.move(edge: .trailing).combined(with: .opacity))
+
+                Spacer(minLength: 0)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+            .padding(.top, notificationCardTopOffset)
+            .padding(.trailing, notificationCardRightOffset)
+            .animation(.easeInOut(duration: 0.25), value: viewModel.isNotificationCardVisible)
+        }
+    }
+
+    private var topTrailingToastArea: some View {
+        VStack(alignment: .trailing, spacing: 8) {
+            ForEach(viewModel.genericToasts(for: .topTrailing)) { toast in
+                OverlayToastView(toast: toast)
+                    .overlayHitTestable(in: coordinateSpaceName)
+                    .transition(genericToastTransition)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+        .padding(.top, topTrailingToastTopOffset)
+        .padding(.trailing, genericToastRightOffset)
+        .animation(.easeInOut(duration: 0.25), value: viewModel.layoutMode)
+        .animation(.easeInOut(duration: 0.25), value: viewModel.isNotificationCardVisible)
+        .animation(.easeInOut(duration: 0.25), value: notificationCardHeight)
+        .animation(genericToastAnimation, value: viewModel.genericToasts(for: .topTrailing))
+    }
+
+    private var topTrailingToastTopOffset: CGFloat {
+        guard viewModel.isNotificationCardVisible else {
+            return viewModel.genericToastTopOffset
+        }
+
+        let notificationCardBottomOffset = notificationCardTopOffset + notificationCardHeight + overlayVerticalSpacing
+        return max(viewModel.genericToastTopOffset, notificationCardBottomOffset)
     }
 }
 

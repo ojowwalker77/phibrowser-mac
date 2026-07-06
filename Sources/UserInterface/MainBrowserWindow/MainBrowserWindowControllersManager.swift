@@ -288,6 +288,7 @@ class MainBrowserWindowControllersManager: MainBrowserWindowLookup {
             return
         }
         WindowThemeMessageRouter.shared.stopObservingWindow(windowId: windowController.windowId)
+        OverlayToastCenter.shared.clearWindow(windowId: windowController.windowId)
         // Normal AND Incognito Space windows live in slots (mirrors the
         // registerWindow gate in MainBrowserWindowController.init). Skipping
         // the Incognito Space's window here left its dead controller
