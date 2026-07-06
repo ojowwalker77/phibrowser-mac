@@ -2570,7 +2570,9 @@ final class SpaceWindowSlot: ObservableObject {
         onSwapSettled: (() -> Void)? = nil
     ) {
         guard let targetWindow = target.window else {
-            previous?.window?.orderOut(nil)
+            if let previousWindow = previous?.window {
+                orderOutRearmingMoveToActiveSpace(previousWindow)
+            }
             // Target has no window — the switch failed, so do NOT fire
             // `onSwapSettled`: a caller closing the leaving window on the back
             // of it would leave the slot with nothing on screen.
@@ -3375,20 +3377,21 @@ final class SpaceWindowSlot: ObservableObject {
     /// Forwarded from `MainBrowserWindowController`'s will-enter / will-exit
     /// fullscreen notifications.
     ///
-    /// `.moveToActiveSpace` (applied in `registerWindow`) makes macOS pull a
-    /// window into the frontmost Space whenever the app activates — exactly
-    /// what a hidden sibling needs so it surfaces on the user's current
-    /// desktop. But it is destructive for a window that owns its own native
-    /// fullscreen Space: once a SECOND user-perceived window enters fullscreen
-    /// (its own macOS Space), the next app activation drags this slot's
-    /// fullscreen window out of its Space, leaving an empty black desktop in
-    /// Mission Control. So a window must not carry `.moveToActiveSpace` while
-    /// its slot is in fullscreen. Applied across the whole slot because its
-    /// windows share one fullscreen Space (hidden siblings are re-grouped into
-    /// it by `syncSlotTabGroup` on the next switch); restoring on exit returns
-    /// the normal sibling-follow behavior. Corrections for transitions that
-    /// settle differently than the will-hooks promised come in through
-    /// `reconcileFullScreenWithWindowState`.
+    /// `.moveToActiveSpace` (armed on hidden slot windows — see
+    /// `scheduleMoveToActiveSpaceStrip` for the lifecycle) makes macOS pull a
+    /// window into the frontmost Space when it is shown or the app activates —
+    /// exactly what a hidden sibling needs so it surfaces on the user's
+    /// current desktop. But it is destructive for a window that owns its own
+    /// native fullscreen Space: once a SECOND user-perceived window enters
+    /// fullscreen (its own macOS Space), the next app activation drags this
+    /// slot's fullscreen window out of its Space, leaving an empty black
+    /// desktop in Mission Control. So a window must not carry
+    /// `.moveToActiveSpace` while its slot is in fullscreen. Applied across
+    /// the whole slot because its windows share one fullscreen Space (hidden
+    /// siblings are re-grouped into it by `syncSlotTabGroup` on the next
+    /// switch); the exit hook re-arms the slot's hidden windows. Corrections
+    /// for transitions that settle differently than the will-hooks promised
+    /// come in through `reconcileFullScreenWithWindowState`.
     func windowFullScreenStateChanged(isFullScreen: Bool) {
         self.isFullScreen = isFullScreen
         // A Space switch's frame pin must not survive a fullscreen transition:
@@ -3401,7 +3404,13 @@ final class SpaceWindowSlot: ObservableObject {
             guard let window = controller.window else { continue }
             if isFullScreen {
                 window.collectionBehavior.remove(.moveToActiveSpace)
-            } else {
+            } else if !window.isVisible {
+                // Re-arm hidden siblings only. The on-screen window must not
+                // carry the flag in steady state — it breaks macOS's
+                // per-desktop focus restoration (see
+                // `scheduleMoveToActiveSpaceStrip`); a tabbed sibling still
+                // stacked on screen is re-armed when the next sweep orders it
+                // out.
                 window.collectionBehavior.insert(.moveToActiveSpace)
             }
         }
@@ -3493,6 +3502,48 @@ final class SpaceWindowSlot: ObservableObject {
 
         removeNativeTabBarAccessories(from: window)
         hideSlotTabBars()
+        scheduleMoveToActiveSpaceStrip(for: window)
+    }
+
+    /// Drops `.moveToActiveSpace` from a window once it has settled on screen.
+    ///
+    /// Hidden slot windows carry the flag so that ANY show — a pip switch, a
+    /// URL-rule route, Chromium re-surfacing a restored window — lands them on
+    /// the user's CURRENT desktop instead of switching desktops back to
+    /// wherever they were last shown. But the flag must not stay on the
+    /// on-screen window: the window server treats a `.moveToActiveSpace`
+    /// window as residing on no particular desktop, so after the user switches
+    /// desktops away and back, macOS's per-desktop focus restoration skips it
+    /// and the app is left deactivated — the browser visibly "loses focus" on
+    /// every desktop round-trip. It is the same window-server behavior that
+    /// drags a fullscreen window out of its own Space on app activation (see
+    /// `windowFullScreenStateChanged`).
+    ///
+    /// Deferred one runloop turn so the order-front's move-to-active-space has
+    /// been processed first; the `isVisible` guard keeps a superseded switch's
+    /// strip from disarming a window that was already hidden (and re-armed) in
+    /// the meantime. Re-armed by `orderOutRearmingMoveToActiveSpace` when the
+    /// window next goes off screen.
+    private func scheduleMoveToActiveSpaceStrip(for window: NSWindow) {
+        DispatchQueue.main.async { [weak window] in
+            guard let window, window.isVisible else { return }
+            window.collectionBehavior.remove(.moveToActiveSpace)
+        }
+    }
+
+    /// Orders a slot window off screen and re-arms `.moveToActiveSpace` on it
+    /// so its next show surfaces on the user's current desktop (see
+    /// `scheduleMoveToActiveSpaceStrip` for the full lifecycle). The re-arm is
+    /// skipped while the slot owns a fullscreen Space or is about to restore
+    /// into one — a window carrying the flag is dragged out of its own
+    /// fullscreen Space on the next app activation, blanking it (see
+    /// `windowFullScreenStateChanged`); the fullscreen-exit hook re-arms the
+    /// slot's hidden windows instead.
+    private func orderOutRearmingMoveToActiveSpace(_ window: NSWindow) {
+        window.orderOut(nil)
+        if !slotHasFullScreenWindow && !pendingRestoreFullScreen {
+            window.collectionBehavior.insert(.moveToActiveSpace)
+        }
     }
 
     private func observeNativeTabBarAccessories(for controller: MainBrowserWindowController) {
@@ -3540,7 +3591,7 @@ final class SpaceWindowSlot: ObservableObject {
             if let previousWindow,
                !windowsShareTabGroup(previousWindow, targetWindow),
                !previousWindow.styleMask.contains(.fullScreen) {
-                previousWindow.orderOut(nil)
+                orderOutRearmingMoveToActiveSpace(previousWindow)
             }
             // Tabbed siblings can't be ordered out in a shared fullscreen Space
             // (it flashes a blank workspace), so they stay stacked behind the
@@ -3600,13 +3651,13 @@ final class SpaceWindowSlot: ObservableObject {
     /// on screen, so a settled slot does no work.
     private func sweepNonTargetSlotWindows(keeping keepWindow: NSWindow?, alsoHide extra: NSWindow?) {
         if let extra, extra !== keepWindow, extra.isVisible {
-            extra.orderOut(nil)
+            orderOutRearmingMoveToActiveSpace(extra)
         }
         for controller in windowsBySpaceId.values {
             guard let window = controller.window,
                   window !== keepWindow,
                   window.isVisible else { continue }
-            window.orderOut(nil)
+            orderOutRearmingMoveToActiveSpace(window)
         }
     }
 
@@ -3665,7 +3716,7 @@ final class SpaceWindowSlot: ObservableObject {
         var hidCount = 0
         for (spaceId, controller) in windowsBySpaceId where spaceId != activeId {
             guard let window = controller.window, window.isVisible else { continue }
-            window.orderOut(nil)
+            orderOutRearmingMoveToActiveSpace(window)
             hidCount += 1
         }
         // Re-front the active window if anything was hidden or it somehow fell
@@ -3700,7 +3751,7 @@ final class SpaceWindowSlot: ObservableObject {
             hideSlotTabBars()
             return
         }
-        window.orderOut(nil)
+        orderOutRearmingMoveToActiveSpace(window)
     }
 
     /// Re-asserts this slot's one-visible-window invariant after Chromium
@@ -3766,7 +3817,7 @@ final class SpaceWindowSlot: ObservableObject {
             if inSharedFullScreen, windowsShareTabGroup(window, activeWindow) {
                 continue
             }
-            window.orderOut(nil)
+            orderOutRearmingMoveToActiveSpace(window)
             hidCount += 1
         }
         visibleController = activeController
@@ -3908,11 +3959,18 @@ final class SpaceWindowSlot: ObservableObject {
             // switching Phi Spaces yanks the user back to the sibling's
             // original desktop. `.moveToActiveSpace` makes the sibling
             // surface on the user's current desktop on each show instead.
+            // The flag is transient, not permanent: a window that keeps it
+            // while on screen is credited to no desktop by the window server,
+            // so a macOS desktop round-trip skips the app during focus
+            // restoration and the browser loses focus. It is stripped once
+            // the window settles front (`scheduleMoveToActiveSpaceStrip`) and
+            // re-armed when it goes back off screen
+            // (`orderOutRearmingMoveToActiveSpace`).
             // Skip it while this slot already owns a fullscreen Space: a
             // window carrying `.moveToActiveSpace` is dragged out of its own
             // fullscreen Space on the next app activation, blanking it. The
             // window joins the slot's fullscreen Space via `syncSlotTabGroup`
-            // below, and the fullscreen-exit hook restores the behavior. See
+            // below, and the fullscreen-exit hook re-arms hidden siblings. See
             // `windowFullScreenStateChanged`.
             // Also skip while the slot is pending a restore into fullscreen:
             // its active window registers BEFORE `applyPendingRestoreFullScreen`
@@ -4382,6 +4440,15 @@ final class SpaceWindowSlot: ObservableObject {
         // closed. The whole slot is going away; there is nothing to adopt.
         if isCascadingSlotClose { return }
         hideSlotTabBars()
+        // This window is the slot's on-screen window now — drop
+        // `.moveToActiveSpace` once the front settles, or the next macOS
+        // desktop round-trip skips the app during focus restoration. Covers
+        // the Chromium-driven surfaces (URL-rule routing, session restore,
+        // extension-created windows) that never pass through
+        // `makeKeyAndOrderFrontHidingSlotTabBar`.
+        if let keyWindow = controller.window {
+            scheduleMoveToActiveSpaceStrip(for: keyWindow)
+        }
         let previousSpaceId = activeSpaceId
         let previous = visibleController
 
