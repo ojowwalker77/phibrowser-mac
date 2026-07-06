@@ -48,6 +48,7 @@ class AccountSettingViewController: NSViewController, SettingsPane {
     
     private weak var avatarWindowController: AccountWebWindowController?
     private var cancellables = Set<AnyCancellable>()
+    private var settingsWindowCloseObserver: NSObjectProtocol?
 
     private var avatarEditURL: String {
         #if DEBUG
@@ -77,6 +78,12 @@ class AccountSettingViewController: NSViewController, SettingsPane {
         super.init(coder: coder)
     }
 
+    deinit {
+        if let settingsWindowCloseObserver {
+            NotificationCenter.default.removeObserver(settingsWindowCloseObserver)
+        }
+    }
+
     override func loadView() {
         view = NSView()
         view.wantsLayer = true
@@ -92,6 +99,10 @@ class AccountSettingViewController: NSViewController, SettingsPane {
         bindViewModel()
     }
 
+    override func viewDidAppear() {
+        super.viewDidAppear()
+        registerSettingsWindowCloseObserverIfNeeded()
+    }
 
     override func viewWillAppear() {
         super.viewWillAppear()
@@ -253,6 +264,23 @@ class AccountSettingViewController: NSViewController, SettingsPane {
             isVisible: AuthManager.shared.requiresReauthentication
         )
     }
+
+    private func registerSettingsWindowCloseObserverIfNeeded() {
+        guard settingsWindowCloseObserver == nil,
+              let window = view.window else {
+            return
+        }
+
+        settingsWindowCloseObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.willCloseNotification,
+            object: window,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.accountViewModel.cancelOngoingLogoutSession(reason: "settings_window_closed")
+            }
+        }
+    }
 }
 
 
@@ -332,7 +360,7 @@ class AccountViewModel: ObservableObject {
     var cancellables = Set<AnyCancellable>()
     private var activeLogoutAttemptID: UUID?
     private var logoutTimeoutWorkItem: DispatchWorkItem?
-    private var timedOutLogoutAttemptIDs = Set<UUID>()
+    private var cancelledLogoutAttemptIDs = Set<UUID>()
     
     /// Loads the cached profile from user defaults.
     private func loadCachedProfile() -> Profile? {
@@ -448,18 +476,18 @@ class AccountViewModel: ObservableObject {
         // Step 3: clear the Auth0 session and credentials.
         AppLogDebug("🚪 [Logout] Step 3: Clearing Auth0 session and credentials")
         let success = await AuthManager.shared.logOut()
-        let didTimeout = finishLogoutAttempt(logoutAttemptID)
+        let wasCancelled = finishLogoutAttempt(logoutAttemptID)
         guard success else {
-            if didTimeout {
-                AppLogWarn("🚪 [Logout] Auth0 logout timed out and was cancelled")
+            if wasCancelled {
+                AppLogWarn("🚪 [Logout] Auth0 logout was cancelled")
                 return
             }
             AppLogError("🚪 [Logout] Auth0 logout failed")
             showLogoutFailedAlert()
             return
         }
-        guard !didTimeout else {
-            AppLogWarn("🚪 [Logout] Ignoring logout completion after timeout")
+        guard !wasCancelled else {
+            AppLogWarn("🚪 [Logout] Ignoring logout completion after cancellation")
             return
         }
         AppLogDebug("🚪 [Logout] Auth0 session cleared")
@@ -496,27 +524,38 @@ class AccountViewModel: ObservableObject {
         let timeoutWorkItem = DispatchWorkItem { [weak self] in
             guard let self, self.activeLogoutAttemptID == attemptID else { return }
             AppLogWarn("🚪 [Logout] Auth0 logout timed out after \(Self.logoutTimeoutSeconds)s")
-            self.timedOutLogoutAttemptIDs.insert(attemptID)
-            self.activeLogoutAttemptID = nil
-            self.logoutTimeoutWorkItem = nil
-            self.isLogoutInProgress = false
-            AuthManager.shared.cancelOngoingWebAuthentication()
+            self.cancelOngoingLogoutSession(reason: "timeout")
         }
         logoutTimeoutWorkItem = timeoutWorkItem
         DispatchQueue.main.asyncAfter(deadline: .now() + .seconds(Self.logoutTimeoutSeconds), execute: timeoutWorkItem)
     }
 
     @MainActor
+    func cancelOngoingLogoutSession(reason: String) {
+        guard let attemptID = activeLogoutAttemptID else {
+            return
+        }
+
+        AppLogDebug("🚪 [Logout] Cancelling pending logout session reason=\(reason)")
+        cancelledLogoutAttemptIDs.insert(attemptID)
+        logoutTimeoutWorkItem?.cancel()
+        logoutTimeoutWorkItem = nil
+        activeLogoutAttemptID = nil
+        isLogoutInProgress = false
+        AuthManager.shared.cancelOngoingWebAuthentication()
+    }
+
+    @MainActor
     private func finishLogoutAttempt(_ attemptID: UUID) -> Bool {
-        let didTimeout = timedOutLogoutAttemptIDs.remove(attemptID) != nil
+        let wasCancelled = cancelledLogoutAttemptIDs.remove(attemptID) != nil
         guard activeLogoutAttemptID == attemptID else {
-            return didTimeout
+            return wasCancelled
         }
         logoutTimeoutWorkItem?.cancel()
         logoutTimeoutWorkItem = nil
         activeLogoutAttemptID = nil
         isLogoutInProgress = false
-        return didTimeout
+        return wasCancelled
     }
 
     func updateUserName(_ newName: String) async {
