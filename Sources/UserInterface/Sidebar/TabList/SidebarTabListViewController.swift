@@ -31,6 +31,7 @@ enum SidebarNewTabStickyResolver {
 class SidebarTabListViewController: NSViewController {
     private static let bottomContentInset: CGFloat = 130
     private static let bookmarkRenameClickInterval: TimeInterval = 0.5
+    private static let farringdonCleanupMinimumNormalTabCount = 7
 
     /// A temporary, UI-only representation of the currently focusing bookmark tab.
     /// This is used to keep the focusing bookmark visible even when its real parent folders are collapsed.
@@ -2619,7 +2620,7 @@ extension SidebarTabListViewController: NSOutlineViewDelegate {
                 newTabCell = NewTabButtonCellView()
                 newTabCell?.identifier = identifier
             }
-            newTabCell?.cleanupAction = farringdonCleanupActionIfEnabled()
+            newTabCell?.cleanupAction = farringdonCleanupActionIfVisible()
             cellView = newTabCell!
             
         case .separator:
@@ -2911,16 +2912,19 @@ extension SidebarTabListViewController: SidebarTabListItemOwner {
         FarringdonOrganizer.organizeFocusedWindow()
     }
 
-    /// The broom (organize-tabs) action is an AI feature; when AI is disabled
-    /// Kensington isn't running, so the button is hidden by leaving the action nil.
-    private func farringdonCleanupActionIfEnabled() -> (() -> Void)? {
-        guard PhiPreferences.AISettings.phiAIEnabled.loadValue() else { return nil }
+    /// The broom (organize-tabs) action is only useful once the window has
+    /// enough open normal tabs to organize.
+    private func farringdonCleanupActionIfVisible() -> (() -> Void)? {
+        guard PhiPreferences.AISettings.phiAIEnabled.loadValue(),
+              browserState.normalTabs.count >= Self.farringdonCleanupMinimumNormalTabCount else {
+            return nil
+        }
         return { [weak self] in self?.triggerFarringdonCleanup() }
     }
 
-    /// Reflects an AI-enabled toggle onto the live New Tab cells without a reload.
+    /// Reflects cleanup-button eligibility changes onto live New Tab cells without a reload.
     private func updateNewTabCleanupVisibility() {
-        let action = farringdonCleanupActionIfEnabled()
+        let action = farringdonCleanupActionIfVisible()
         if let item = newTabButtonItem {
             let row = outlineView.row(forItem: item)
             if row >= 0,
@@ -2987,11 +2991,13 @@ extension SidebarTabListViewController: TabSectionDelegate {
         guard isActive else { return }
         if change.needsFullReload {
             refreshAllItems()
+            updateNewTabCleanupVisibility()
             clearFloatingProxyIfTabClosed()
             return
         }
         
         applyIncrementalTabChange(change)
+        updateNewTabCleanupVisibility()
         clearFloatingProxyIfTabClosed()
     }
     
@@ -3572,7 +3578,7 @@ extension SidebarTabListViewController {
         floatingView.cellView.clickAction = { [weak self] in
             self?.browserState.windowController?.newBrowserTab(nil)
         }
-        floatingView.cellView.cleanupAction = farringdonCleanupActionIfEnabled()
+        floatingView.cellView.cleanupAction = farringdonCleanupActionIfVisible()
         floatingView.hoverStateChanged = { [weak self] hovering in
             self?.setVisibleTabHoverSuppressed(hovering)
         }
