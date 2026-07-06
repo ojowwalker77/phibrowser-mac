@@ -154,6 +154,9 @@ extension Tab: ContextMenuRepresentable {
             items.append(copyRightURLItem)
         } else {
             let copyUrlItem = NSMenuItem(title: NSLocalizedString("Copy Link", comment: "Tab context menu - Menu item to copy the tab URL to clipboard"), action: #selector(MainBrowserWindowController.myCopyLink(_:)), keyEquivalent: "")
+            if browserStateForMenu?.focusingTab?.guid == guid {
+                applyCopyURLShortcut(to: copyUrlItem)
+            }
             items.append(copyUrlItem)
         }
 
@@ -332,6 +335,13 @@ extension Tab: ContextMenuRepresentable {
             }
             menu.addItem(item)
         }
+    }
+
+    private func applyCopyURLShortcut(to item: NSMenuItem) {
+        item.tag = CommandWrapper.PHI_COPY_URL.rawValue
+        guard let key = Shortcuts.key(for: .PHI_COPY_URL) else { return }
+        item.keyEquivalent = key.characters
+        item.keyEquivalentModifierMask = key.modifiers
     }
   
     @objc private func addToBookmarkFolder(_ menuItem: NSMenuItem) {

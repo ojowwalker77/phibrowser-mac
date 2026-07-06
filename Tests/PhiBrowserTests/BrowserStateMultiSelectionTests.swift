@@ -142,6 +142,37 @@ final class BrowserStateMultiSelectionTests: XCTestCase {
         }
     }
 
+    func testCopySelectedTabURLCopiesFocusedTab() throws {
+        let state = try makeState()
+        state.tabs = [
+            Tab(guid: 1, url: "chrome://settings", isActive: false, index: 0)
+        ]
+        state.updateNormalTabs()
+        state.focuseTab(state.tabs[0])
+        NSPasteboard.general.clearContents()
+
+        XCTAssertEqual(state.selectedTabCountForURLCopy, 1)
+        XCTAssertTrue(state.copySelectedTabURLs())
+
+        XCTAssertEqual(NSPasteboard.general.string(forType: .string), "phi://settings")
+        XCTAssertFalse(state.multiSelection.isActive)
+    }
+
+    func testCopySelectedTabURLsCopiesMultiSelection() throws {
+        let state = try makeState()
+        seed(state, guids: [1, 2, 3])
+        state.focuseTab(state.tabs[0])
+        state.toggleMultiSelection(for: state.tabs[1])
+        NSPasteboard.general.clearContents()
+
+        XCTAssertEqual(state.selectedTabCountForURLCopy, 2)
+        XCTAssertTrue(state.copySelectedTabURLs())
+
+        XCTAssertEqual(NSPasteboard.general.string(forType: .string),
+                       "https://e1.example\nhttps://e2.example")
+        XCTAssertFalse(state.multiSelection.isActive)
+    }
+
     func testBookmarkMultiSelectionExpandsFocusedSplitPartner() throws {
         let state = try makeState()
         seed(state, guids: [1, 2, 3])

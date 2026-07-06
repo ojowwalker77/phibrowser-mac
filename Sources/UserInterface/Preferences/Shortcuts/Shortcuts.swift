@@ -124,6 +124,7 @@ enum CommandWrapper: Int, Equatable {
     case PHI_SELECT_SPACE_7          = 90017
     case PHI_SELECT_SPACE_8          = 90018
     case PHI_FARRINGDON_TOGGLE       = 90019
+    case PHI_COPY_URL                = 90020
 
     // System Preserved
     case IDS_HIDE_OTHERS_MAC         = 110
@@ -243,6 +244,7 @@ extension Shortcuts {
         .PHI_SELECT_SPACE_7: .init(characters: "8", modifiers: .control),
         .PHI_SELECT_SPACE_8: .init(characters: "9", modifiers: .control),
         .PHI_FARRINGDON_TOGGLE: .init(characters: "g", modifiers: [.control, .shift]),
+        .PHI_COPY_URL: .init(characters: "c", modifiers: [.command, .shift]),
 
         // System Preserved Shortcuts
         .IDS_HIDE_OTHERS_MAC: .init(characters: "h", modifiers: [.command, .option]),

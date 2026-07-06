@@ -177,6 +177,10 @@ extension AppController {
                 }
             } else
             
+            if menuItem.title == "Edit", let subMenu = menuItem.submenu {
+                installOrUpdateCopyURLMenuItem(in: subMenu)
+            } else
+
             if menuItem.title == "File", let subMenu = menuItem.submenu {
                 subMenu.items.forEach { item in
                     if item.tag == CommandWrapper.IDC_SAVE_PAGE.rawValue {
@@ -473,6 +477,26 @@ extension AppController {
         let bookmarkableTabsCount = MainBrowserWindowControllersManager.shared.activeWindowController?.browserState.normalTabs.filter { !$0.isLocalPage }.count ?? 0
         return bookmarkableTabsCount > 1
     }
+
+    private func installOrUpdateCopyURLMenuItem(in menu: NSMenu) {
+        menu.items.removeAll { $0.tag == CommandWrapper.PHI_COPY_URL.rawValue }
+
+        let item = NSMenuItem(
+            title: NSLocalizedString("Copy URL", comment: "Edit menu - Copy the selected tab URL to the clipboard"),
+            action: #selector(copySelectedTabURLs(_:)),
+            keyEquivalent: ""
+        )
+        applyEffectiveShortcut(.PHI_COPY_URL, to: item)
+        item.target = self
+
+        if let copyIndex = menu.items.firstIndex(where: {
+            $0.tag == CommandWrapper.IDC_CONTENT_CONTEXT_COPY.rawValue || $0.title == "Copy"
+        }) {
+            menu.insertItem(item, at: copyIndex + 1)
+        } else {
+            menu.addItem(item)
+        }
+    }
     
     @objc func toggleSidebar(_ sender: Any?) {
         MainBrowserWindowControllersManager.shared.activeWindowController?.browserState.toggleSidebar()
@@ -480,6 +504,11 @@ extension AppController {
     
     @objc func toggleChatbar(_ sendar: Any?) {
         MainBrowserWindowControllersManager.shared.activeWindowController?.browserState.toggleAIChat()
+    }
+
+    @MainActor
+    @objc func copySelectedTabURLs(_ sender: Any?) {
+        MainBrowserWindowControllersManager.shared.activeWindowController?.browserState.copySelectedTabURLs()
     }
 
     /// Starts a new AI conversation in the focused tab's sidebar.
@@ -1626,6 +1655,17 @@ extension AppController {
                 return currentSpacesSlot() != nil
             }
             return true
+        }
+        if item.action == #selector(copySelectedTabURLs(_:)) {
+            guard let state = MainBrowserWindowControllersManager.shared.getActiveWindowState() else {
+                return false
+            }
+            if let menuItem = item as? NSMenuItem {
+                menuItem.title = state.selectedTabCountForURLCopy > 1
+                    ? NSLocalizedString("Copy URLs", comment: "Edit menu - Copy the selected tab URLs to the clipboard")
+                    : NSLocalizedString("Copy URL", comment: "Edit menu - Copy the selected tab URL to the clipboard")
+            }
+            return state.hasCopyableSelectedTabURLs
         }
         if item.action == #selector(bookmarkThisTab(_:)) {
             return canBookmarkCurrentTab()

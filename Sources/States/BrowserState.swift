@@ -1152,13 +1152,52 @@ class BrowserState {
         closeTabs(keeping: selectedTabIds)
     }
 
+    var selectedTabCountForURLCopy: Int {
+        tabsForCopyingSelectedURLs.count
+    }
+
+    var hasCopyableSelectedTabURLs: Bool {
+        !copyableURLStrings(from: tabsForCopyingSelectedURLs).isEmpty
+    }
+
+    @discardableResult
+    func copySelectedTabURLs() -> Bool {
+        let shouldClearMultiSelection = multiSelection.isActive
+        let tabs = tabsForCopyingSelectedURLs
+        if shouldClearMultiSelection {
+            clearMultiSelection()
+        }
+        return copyURLsToPasteboard(from: tabs)
+    }
+
     func copyLinksOfMultiSelectedTabs() {
-        let urls = orderedMultiSelectedTabsIncludingSplitPartners.compactMap { $0.url }
+        let tabs = orderedMultiSelectedTabsIncludingSplitPartners
         clearMultiSelection()
-        guard !urls.isEmpty else { return }
+        copyURLsToPasteboard(from: tabs)
+    }
+
+    private var tabsForCopyingSelectedURLs: [Tab] {
+        if multiSelection.isActive {
+            return orderedMultiSelectedTabsIncludingSplitPartners
+        }
+        return focusingTab.map { [$0] } ?? []
+    }
+
+    private func copyableURLStrings(from tabs: [Tab]) -> [String] {
+        tabs.compactMap { tab in
+            guard let url = tab.url, !url.isEmpty else { return nil }
+            return URLProcessor.phiBrandEnsuredUrlString(url)
+        }
+    }
+
+    @discardableResult
+    private func copyURLsToPasteboard(from tabs: [Tab]) -> Bool {
+        let urls = copyableURLStrings(from: tabs)
+        guard !urls.isEmpty else { return false }
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.setString(urls.joined(separator: "\n"), forType: .string)
+        return true
     }
 
     @MainActor

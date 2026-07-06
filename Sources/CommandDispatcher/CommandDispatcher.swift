@@ -33,6 +33,7 @@ struct CommandDispatcher {
         .PHI_SELECT_NEXT_SPACE,
         .PHI_SELECT_PREVIOUS_SPACE,
         .PHI_FARRINGDON_TOGGLE,
+        .PHI_COPY_URL,
     ] + CommandWrapper.spaceSelectionCommands
 
     /// Commands swallowed while the focused tab shows the native NTP — it has no
@@ -146,6 +147,8 @@ struct CommandDispatcher {
             guard PhiPreferences.AISettings.phiAIEnabled.loadValue() else { return false }
             FarringdonOrganizer.organizeFocusedWindow()
             return true
+        case .PHI_COPY_URL:
+            return windowController.browserState.copySelectedTabURLs()
         case let c where c.spaceSelectionIndex != nil:
             guard let index = c.spaceSelectionIndex else { return false }
             return activateSpace(at: index, from: windowController)

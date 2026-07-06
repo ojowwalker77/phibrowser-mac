@@ -57,7 +57,8 @@ extension Shortcuts {
                         .IDC_CLOSE_TAB,
                         .IDC_PRINT]
             case .edit:
-                return [.IDC_FIND,
+                return [.PHI_COPY_URL,
+                        .IDC_FIND,
                         .IDC_FIND_NEXT,
                         .IDC_FIND_PREVIOUS,
                         .IDC_FOCUS_SEARCH]
@@ -340,6 +341,7 @@ extension CommandWrapper {
         .PHI_TAB_SWITCHER_BACKWARD: .init(title: "Show Tab Switcher(Reverse)", keywords: ["tab switcher", "backward"]),
         .PHI_NEW_CONVERSATION: .init(title: "New Conversation", keywords: ["new conversation", "new chat", "ai", "chat"]),
         .PHI_FARRINGDON_TOGGLE: .init(title: "Organize Tabs with AI", keywords: ["organize tabs", "tidy tabs", "group tabs", "clean", "farringdon", "ai"]),
+        .PHI_COPY_URL: .init(title: "Copy URL", keywords: ["copy url", "copy link", "url"]),
         .PHI_SELECT_NEXT_SPACE: .init(title: "Next Space", keywords: ["space", "next space", "forward"]),
         .PHI_SELECT_PREVIOUS_SPACE: .init(title: "Previous Space", keywords: ["space", "previous space", "backward"]),
         .PHI_SELECT_SPACE_0: .init(title: "Go to Space 1", keywords: ["space", "space1"]),

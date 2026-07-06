@@ -503,6 +503,12 @@
     "Copy Right URL" : {
       "comment" : "Bookmark context menu - Copy the right (secondary) URL of a split-view bookmark\nTab context menu - Copy the right pane's URL for a split"
     },
+    "Copy URL" : {
+      "comment" : "Edit menu - Copy the selected tab URL to the clipboard"
+    },
+    "Copy URLs" : {
+      "comment" : "Edit menu - Copy the selected tab URLs to the clipboard"
+    },
     "Coral" : {
       "comment" : "Coral theme color name"
     },

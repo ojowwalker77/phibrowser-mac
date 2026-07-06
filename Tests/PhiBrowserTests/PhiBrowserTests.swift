@@ -8,6 +8,15 @@ import AppKit
 @testable import Phi
 
 final class PhiBrowserTests: XCTestCase {
+    func testCopyURLShortcutIsCustomizableFromEditShortcuts() {
+        XCTAssertEqual(
+            Shortcuts.DefaultShortcuts[.PHI_COPY_URL],
+            ShortcutsKey(characters: "c", modifiers: [.command, .shift])
+        )
+        XCTAssertTrue(Shortcuts.Group.edit.commands.contains(.PHI_COPY_URL))
+        XCTAssertEqual(CommandWrapper.PHI_COPY_URL.displayName, "Copy URL")
+    }
+
     func testThemeSnapshotRoundTripPreservesEditableColorsAndOverlayOpacity() {
         let theme = Theme(id: "theme-snapshot-round-trip", name: "Snapshot")
         theme.setColor(
