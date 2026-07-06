@@ -779,12 +779,17 @@ extension AppController {
     // MARK: - Spaces top-level menu
 
     /// Whether the menu-bar "Spaces" top-level menu should be visible. Hidden
-    /// when the Spaces feature is off, and hidden when the focused window is
-    /// incognito — incognito windows expose no Spaces, matching the suppressed
-    /// sidebar strip and the off-the-record "Open Link In Space" menu.
+    /// when the Spaces feature is off, and hidden when the focused window
+    /// doesn't participate in Spaces — standalone incognito windows expose no
+    /// Spaces, matching the suppressed sidebar strip and the off-the-record
+    /// "Open Link In Space" menu. The Incognito Space's window IS a
+    /// Space, so the menu stays (its mutating items are disabled separately
+    /// in `validateUserInterfaceItem`). `!= false` keeps the no-window case
+    /// showing the menu, as before.
     private var shouldShowSpacesMenu: Bool {
         PhiPreferences.GeneralSettings.spacesFeatureEnabled.loadValue()
-            && !isActiveWindowIncognito()
+            && MainBrowserWindowControllersManager.shared
+                .activeWindowController?.browserState.participatesInSpaces != false
     }
 
     /// Re-evaluates the menu-bar "Spaces" top-level item's visibility against
@@ -1532,6 +1537,22 @@ extension AppController {
         ]
         if let action = item.action, spacesActions.contains(action) {
             guard spacesFeatureEnabled, LoginController.shared.isLoggedin() else { return false }
+            // The built-in Incognito Space's name, profile binding and
+            // existence are fixed: rename would be a silent store no-op on
+            // its sentinel id, its OTR profile can't be re-bound, and the
+            // Space is removed via its settings toggle, not delete. Icon and
+            // theme stay enabled — `changeIcon`/`setTheme` persist the
+            // sentinel's choices outside SwiftData. Navigation and the rules
+            // editor stay available too.
+            let mutatingSpaceActions: [Selector] = [
+                #selector(renameActiveSpace(_:)),
+                #selector(selectSpaceProfile(_:)),
+                #selector(deleteActiveSpace(_:)),
+            ]
+            if mutatingSpaceActions.contains(action),
+               currentActiveSpace()?.spaceId == SpaceManager.incognitoSpaceId {
+                return false
+            }
             if action == #selector(renameActiveSpace(_:)) || action == #selector(requestActiveSpaceIconPicker(_:)) {
                 return currentActiveSpace() != nil
             }

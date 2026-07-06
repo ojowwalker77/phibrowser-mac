@@ -285,7 +285,7 @@ class SidebarViewController: NSViewController {
     private func activateAdjacentSpace(by step: Int) {
         guard !PhiPreferences.GeneralSettings.loadLayoutMode().isTraditional,
               PhiPreferences.GeneralSettings.spacesFeatureEnabled.loadValue(),
-              !state.isIncognito else { return }
+              state.participatesInSpaces else { return }
         let spaces = SpaceManager.shared.spaces
         guard let slot = state.windowController?.slot ?? SpaceManager.shared.keySlot,
               let currentId = slot.activeSpaceId,
@@ -343,7 +343,7 @@ class SidebarViewController: NSViewController {
         // height under the exact same condition, or the header would keep an
         // empty 32pt gap below the address bar for a row that isn't shown.
         let spacesEnabled = PhiPreferences.GeneralSettings.spacesFeatureEnabled.loadValue()
-            && !state.isIncognito
+            && state.participatesInSpaces
             && (SpaceManager.shared.spaces.count > 1 || headerView.forcesSpaceSwitchVisible)
         // Base = nav row (+ address bar in sidebar layouts). The Spaces switch
         // row adds 32 (24 row + 8 gap) only when the row is shown, so the header
@@ -435,12 +435,14 @@ class SidebarViewController: NSViewController {
         // It remains a child hosting controller of this VC for theming; only
         // its view lives in the header.
         //
-        // Incognito windows have no Spaces: an off-the-record session is a
-        // single ephemeral context, so skip mounting entirely (matching how AI
-        // chat and memory are suppressed above). Not mounting leaves the header's
-        // address bar pinned directly under the nav row — its default no-strip
-        // layout — and avoids spinning up a SpaceWindowSlot for the window.
-        if !state.isIncognito {
+        // Standalone incognito windows have no Spaces: an off-the-record
+        // session outside a slot is a single ephemeral context, so skip
+        // mounting entirely (matching how AI chat and memory are suppressed
+        // above); not mounting leaves the header's address bar pinned directly
+        // under the nav row and avoids spinning up a SpaceWindowSlot. The
+        // Incognito Space's window DOES mount the strip — it lives in a
+        // slot and the strip is how the user switches back out of it.
+        if state.participatesInSpaces {
             addChild(spacesStripHostingController)
             headerView.mountSpaceSwitch(spacesStripHostingController.view)
             spacesStripRowView = spacesStripHostingController.view
@@ -819,7 +821,7 @@ class SidebarViewController: NSViewController {
     /// window (see `applySpacesStripBleedGuard`). Alpha (not `isHidden`) so the
     /// header layout is untouched. No-op in Incognito, which mounts no strip.
     func setSpacesStripHidden(_ hidden: Bool) {
-        guard !state.isIncognito else { return }
+        guard state.participatesInSpaces else { return }
         spacesStripHostingController.view.alphaValue = hidden ? 0 : 1
     }
 

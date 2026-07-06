@@ -288,7 +288,14 @@ class MainBrowserWindowControllersManager: MainBrowserWindowLookup {
             return
         }
         WindowThemeMessageRouter.shared.stopObservingWindow(windowId: windowController.windowId)
-        if windowController.browserType == .normal {
+        // Normal AND Incognito Space windows live in slots (mirrors the
+        // registerWindow gate in MainBrowserWindowController.init). Skipping
+        // the Incognito Space's window here left its dead controller
+        // registered: a window-driven cascade that included the Incognito
+        // Space never drained its last entry, so the cascade-veto recovery
+        // "recovered" onto the already-closed NSWindow and surfaced a blank
+        // shell.
+        if windowController.browserType == .normal || windowController.browserType == .incognitoSpace {
             // Slot.unregisterWindow handles the per-slot "surface another
             // visible controller if this was the visible one" logic and
             // asks SpaceManager to drop the slot when it becomes empty.

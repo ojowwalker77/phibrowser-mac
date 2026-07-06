@@ -259,9 +259,12 @@ class BrowserState {
     
     /// Whether this window can accept a cross-window drag from `source`.
     /// - Same-profile normal windows: allowed
-    /// - Incognito-to-incognito: allowed
-    /// - Normal vs incognito or different profiles: prohibited
+    /// - Incognito-to-incognito and Incognito-Space-to-Incognito-Space: allowed
+    /// - Any other mix (normal vs off-the-record, incognito window vs
+    ///   Incognito Space — distinct OTR profiles — or different profiles):
+    ///   prohibited
     func canAcceptCrossWindowDrag(from source: BrowserState) -> Bool {
+        if isIncognitoSpace != source.isIncognitoSpace { return false }
         if isIncognito && source.isIncognito { return true }
         if isIncognito != source.isIncognito { return false }
         return profileId == source.profileId
@@ -273,7 +276,21 @@ class BrowserState {
     /// Identifies which Space this window renders. Persisted pinned tabs and
     /// bookmarks under the same Space share this id; see `SpaceModel`.
     let spaceId: String
+    /// True for every off-the-record window — standalone incognito windows
+    /// AND the Incognito Space's window — so all data-privacy guards
+    /// (no bookmarks, no pinned tabs, no persistence, no AI features) apply
+    /// to both. A missed distinction fails safe: the Incognito Space behaves
+    /// like an incognito window.
     let isIncognito: Bool
+    /// True only for the Incognito Space's window, backed by its own
+    /// dedicated OTR profile. Refines `isIncognito` where the two kinds
+    /// differ: the Incognito Space's window lives inside a Space slot and
+    /// shows the Spaces UI; a standalone incognito window does not.
+    let isIncognitoSpace: Bool
+    /// Whether this window participates in the Spaces UI (strip, picker,
+    /// swipe/menu switching). Standalone incognito windows are orthogonal to
+    /// Spaces; the Incognito Space's window is one.
+    var participatesInSpaces: Bool { !isIncognito || isIncognitoSpace }
     let searchSuggestionChanged = PassthroughSubject<([[String: Any]], String), Never>()
     
     // MARK: - AI Chat Tab Identifier Helpers
@@ -375,12 +392,14 @@ class BrowserState {
          localStore: LocalStore,
          profileId: String = LocalStore.defaultProfileId,
          spaceId: String = LocalStore.defaultSpaceId,
-         isIncognito: Bool = false) {
+         isIncognito: Bool = false,
+         isIncognitoSpace: Bool = false) {
         self.windowId = windowId
         self.localStore = localStore
         self.profileId = profileId
         self.spaceId = spaceId
         self.isIncognito = isIncognito
+        self.isIncognitoSpace = isIncognitoSpace
         self.imagePreviewState = BrowserImagePreviewState(loader: ImagePreviewLoader())
         self.themeContext = BrowserThemeContext(
             configuration: BrowserThemeConfigurationResolver.resolve(isIncognito: isIncognito)

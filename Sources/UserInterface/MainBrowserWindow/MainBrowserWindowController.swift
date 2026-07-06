@@ -64,7 +64,8 @@ class MainBrowserWindowController: NSWindowController {
             localStore: account.localStorage,
             profileId: profileId,
             spaceId: spaceId,
-            isIncognito: browserType == .incognito
+            isIncognito: browserType == .incognito || browserType == .incognitoSpace,
+            isIncognitoSpace: browserType == .incognitoSpace
         )
         self.browserState = state
         self.windowId = windowId
@@ -78,12 +79,13 @@ class MainBrowserWindowController: NSWindowController {
         browserState.windowController = self
         setupWindow()
         MainBrowserWindowControllersManager.shared.retainWindowControllerUntilWindowClosed(self)
-        // Only normal windows participate in the Space mapping; incognito and
-        // shadow windows are orthogonal to Spaces. The slot was resolved by
-        // the caller (PhiChromiumCoordinator / MainBrowserWindowControllersManager)
+        // Only normal and Incognito Space windows participate in the Space
+        // mapping; standalone incognito and shadow windows are orthogonal to
+        // Spaces. The slot was resolved by the caller
+        // (PhiChromiumCoordinator / MainBrowserWindowControllersManager)
         // — register into it so it picks up this controller as its
         // `windowsBySpaceId[spaceId]` entry.
-        if browserType == .normal {
+        if browserType == .normal || browserType == .incognitoSpace {
             slot?.registerWindow(self, for: spaceId)
         }
 

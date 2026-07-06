@@ -341,8 +341,9 @@ extension PhiChromiumCoordinator: PhiChromiumBridgeDelegate {
         AppLogInfo("🌐 [Chromium] mainBrowserWindowCreated called - windowId: \(windowId), restoredFrom: \(restoredFromWindowId), type: \(browserType.rawValue)")
 
 
-        guard browserType == .normal || browserType == .incognito || browserType == .shadow else {
-            AppLogInfo("🌐 [Chromium] Ignoring window type: \(browserType.rawValue) (not normal or incognito)")
+        guard browserType == .normal || browserType == .incognito
+                || browserType == .incognitoSpace || browserType == .shadow else {
+            AppLogInfo("🌐 [Chromium] Ignoring window type: \(browserType.rawValue) (not normal/incognito/incognitoSpace)")
             return
         }
 
@@ -383,7 +384,12 @@ extension PhiChromiumCoordinator: PhiChromiumBridgeDelegate {
         // — the only path that surfaces several windows into one slot, and so
         // the only one that needs the post-restore visibility reconcile below.
         var isRestoredWindow = false
-        if browserType == .normal {
+        // Incognito Space windows take the same slot-resolution path as
+        // normal ones: they are spawned by a slot with a pending spawn
+        // intent, and `spaceId(boundTo:preferring:)` passes through because
+        // the synthetic Incognito Space's profileId IS the wire id Chromium
+        // reports for them. Standalone incognito stays orthogonal below.
+        if browserType == .normal || browserType == .incognitoSpace {
             if let claim = SpaceManager.shared.claimPendingSpawn(forWindowId: Int(windowId)) {
                 resolvedSlot = claim.slot
                 spaceId = SpaceManager.shared.spaceId(boundTo: profileId,

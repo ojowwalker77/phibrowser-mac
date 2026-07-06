@@ -924,7 +924,14 @@ private struct SpacePickerPopup: View {
                         SpacePickerRow(
                             space: space,
                             isActive: space.spaceId == slot.activeSpaceId,
-                            isDeletable: space.spaceId != LocalStore.defaultSpaceId,
+                            // Neither the default Space nor the built-in
+                            // Incognito Space can be deleted, and the
+                            // Incognito Space's name is fixed (toggle it off
+                            // in Spaces settings instead). Icon and theme
+                            // remain user-changeable for it.
+                            isDeletable: space.spaceId != LocalStore.defaultSpaceId
+                                && space.spaceId != SpaceManager.incognitoSpaceId,
+                            isRenamable: space.spaceId != SpaceManager.incognitoSpaceId,
                             tint: iconColor(for: space),
                             profileName: profileDisplayName(for: space.profileId),
                             onActivate: { onActivate(space.spaceId) },
@@ -1179,6 +1186,11 @@ private struct SpacePickerRow: View {
     let space: SpaceModel
     let isActive: Bool
     let isDeletable: Bool
+    /// False for the built-in Incognito Space, whose NAME is fixed (a rename
+    /// would be a silent store no-op on its sentinel id). Icon and theme stay
+    /// editable everywhere — `SpaceManager.changeIcon`/`setTheme` persist the
+    /// sentinel's choices outside SwiftData.
+    var isRenamable: Bool = true
     let tint: Color
     let profileName: String
     let onActivate: () -> Void
@@ -1241,7 +1253,9 @@ private struct SpacePickerRow: View {
             )
         }
         .contextMenu {
-            Button(NSLocalizedString("Rename\u{2026}", comment: "")) { onRename() }
+            if isRenamable {
+                Button(NSLocalizedString("Rename\u{2026}", comment: "")) { onRename() }
+            }
             Button(NSLocalizedString("Change Icon\u{2026}", comment: "Opens the icon/emoji picker for a Space")) {
                 showsIconPicker = true
             }

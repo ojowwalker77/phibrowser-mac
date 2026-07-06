@@ -16,6 +16,12 @@ NS_ASSUME_NONNULL_BEGIN
 // Note: ChromiumBrowserTypeIncognito means TYPE_NORMAL + incognito profile.
 // Non-normal incognito windows (e.g. DevTools, Popup opened from incognito)
 // are reported as their actual type (DevTools, Popup, etc.), not as Incognito.
+// ChromiumBrowserTypeIncognitoSpace means TYPE_NORMAL + the Incognito
+// Space's dedicated off-the-record profile (separate from the incognito
+// primary OTR, so the two sessions never mix). A global singleton: profileId
+// is ignored on creation and reported as the synthetic wire id
+// "PhiIncognitoSpace" (the OTR's real basename is its parent's, which would
+// collide with regular Spaces).
 typedef NS_ENUM(NSUInteger, ChromiumBrowserType) {
     ChromiumBrowserTypeNormal = 0,
     ChromiumBrowserTypePopup,
@@ -24,7 +30,8 @@ typedef NS_ENUM(NSUInteger, ChromiumBrowserType) {
     ChromiumBrowserTypeIncognito,  // TYPE_NORMAL + incognito profile
     ChromiumBrowserTypeApp,
     ChromiumBrowserTypeDevTools,
-    ChromiumBrowserTypeShadow
+    ChromiumBrowserTypeShadow,
+    ChromiumBrowserTypeIncognitoSpace  // TYPE_NORMAL + Incognito Space OTR profile
 };
 
 typedef NS_ENUM(NSUInteger, BrowserType) {
@@ -962,6 +969,16 @@ typedef NS_ENUM(NSUInteger, PhiOmniboxSuggestionDisposition) {
 /// not-yet-loaded profile (first cross-profile activation per session).
 - (void)ensureProfileLoaded:(NSString *)profileId
                  completion:(void (^)(BOOL success))completion;
+
+/// Ensures the Incognito Space's parent profile is loaded so the Space's
+/// dedicated off-the-record profile can be materialized synchronously at
+/// window spawn. The OTR itself is purely in-memory: it is created on first
+/// spawn, destroyed when its last window closes (that is the Space's
+/// clear-on-close), and never touches disk. Callers must invoke this before
+/// `createBrowserWithWindowType:ChromiumBrowserTypeIncognitoSpace` — that
+/// spawn path refuses to create a window while the parent is not in memory,
+/// same no-fallback contract as an unknown profileId.
+- (void)ensureIncognitoSpaceProfileLoaded:(void (^)(BOOL success))completion;
 
 // ==========================================================================
 // Per-profile search, download & data settings (Mac → Chromium)
