@@ -31,7 +31,6 @@ enum SidebarNewTabStickyResolver {
 class SidebarTabListViewController: NSViewController {
     private static let bottomContentInset: CGFloat = 130
     private static let bookmarkRenameClickInterval: TimeInterval = 0.5
-    private static let farringdonCleanupMinimumNormalTabCount = 7
 
     /// A temporary, UI-only representation of the currently focusing bookmark tab.
     /// This is used to keep the focusing bookmark visible even when its real parent folders are collapsed.
@@ -2915,10 +2914,7 @@ extension SidebarTabListViewController: SidebarTabListItemOwner {
     /// The broom (organize-tabs) action is only useful once the window has
     /// enough open normal tabs to organize.
     private func farringdonCleanupActionIfVisible() -> (() -> Void)? {
-        guard PhiPreferences.AISettings.phiAIEnabled.loadValue(),
-              browserState.normalTabs.count >= Self.farringdonCleanupMinimumNormalTabCount else {
-            return nil
-        }
+        guard FarringdonOrganizer.canOrganizeTabs(in: browserState) else { return nil }
         return { [weak self] in self?.triggerFarringdonCleanup() }
     }
 

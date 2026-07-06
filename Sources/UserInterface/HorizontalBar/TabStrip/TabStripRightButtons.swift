@@ -10,11 +10,14 @@ import AppKit
 /// Contains CardEntryButton and future buttons
 struct TabStripRightButtons: View {
     @ObservedObject var cardManager: NotificationCardManager
+    var normalTabCount: Int
+    let isIncognito: Bool
     let onCardEntryTap: () -> Void
     let onSearchTabsTap: (NSView?) -> Void
 
-    // Organize-tabs is an AI feature; hide it when AI is disabled (Kensington
-    // isn't running then). `@AppStorage` keeps it reactive to the toggle.
+    // Organize-tabs is unavailable when AI is disabled, in incognito windows,
+    // or when there are too few normal tabs. `@AppStorage` keeps the AI toggle
+    // reactive.
     @AppStorage(PhiPreferences.AISettings.phiAIEnabled.rawValue)
     private var phiAIEnabled: Bool = PhiPreferences.AISettings.phiAIEnabled.defaultValue
 
@@ -30,13 +33,14 @@ struct TabStripRightButtons: View {
                     )
             }
 
-            if phiAIEnabled {
+            if showFarringdonButton {
                 TabStripFarringdonButton()
             }
 
             TabStripSearchTabsButton(action: onSearchTabsTap)
         }
         .animation(.spring(response: 0.3, dampingFraction: 0.7), value: showCardEntry)
+        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: showFarringdonButton)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
 //        .offset(y: -4) // Visual alignment adjustment
         .ignoresSafeArea()
@@ -44,6 +48,14 @@ struct TabStripRightButtons: View {
     
     private var showCardEntry: Bool {
         cardManager.latestCard != nil
+    }
+
+    private var showFarringdonButton: Bool {
+        FarringdonOrganizer.canOrganizeTabs(
+            phiAIEnabled: phiAIEnabled,
+            isIncognito: isIncognito,
+            normalTabCount: normalTabCount
+        )
     }
 }
 

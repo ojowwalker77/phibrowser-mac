@@ -143,8 +143,9 @@ struct CommandDispatcher {
         case .PHI_SELECT_PREVIOUS_SPACE:
             return activateSpace(by: -1, from: windowController)
         case .PHI_FARRINGDON_TOGGLE:
-            // AI off → Kensington isn't running; let the key fall through.
-            guard PhiPreferences.AISettings.phiAIEnabled.loadValue() else { return false }
+            guard FarringdonOrganizer.canOrganizeTabs(in: windowController.browserState) else {
+                return false
+            }
             FarringdonOrganizer.organizeFocusedWindow()
             return true
         case .PHI_COPY_URL:

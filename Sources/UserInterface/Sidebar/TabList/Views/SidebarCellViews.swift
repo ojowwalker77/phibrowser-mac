@@ -1047,11 +1047,28 @@ extension Notification.Name {
 /// request to the Kensington extension, which resolves the focused window itself.
 /// Used by the sidebar broom, the horizontal-tab broom, and the keyboard shortcut.
 enum FarringdonOrganizer {
+    static let minimumNormalTabCount = 7
+
+    static func canOrganizeTabs(phiAIEnabled: Bool,
+                                isIncognito: Bool,
+                                normalTabCount: Int) -> Bool {
+        phiAIEnabled && !isIncognito && normalTabCount >= minimumNormalTabCount
+    }
+
+    static func canOrganizeTabs(in browserState: BrowserState) -> Bool {
+        canOrganizeTabs(
+            phiAIEnabled: PhiPreferences.AISettings.phiAIEnabled.loadValue(),
+            isIncognito: browserState.isIncognito,
+            normalTabCount: browserState.normalTabs.count
+        )
+    }
+
     @MainActor
     static func organizeFocusedWindow() {
-        // AI off → Kensington isn't running; do nothing (and don't start the
-        // sweep). The buttons are hidden in this state, this is a backstop.
-        guard PhiPreferences.AISettings.phiAIEnabled.loadValue() else { return }
+        // Buttons and shortcuts share the same eligibility gate; this is the
+        // backstop for hidden UI and direct command dispatch.
+        guard let state = MainBrowserWindowControllersManager.shared.getActiveWindowState(),
+              canOrganizeTabs(in: state) else { return }
         NotificationCenter.default.post(name: .farringdonOrganizeDidStart, object: nil)
         ExtensionMessaging.shared.broadcast(type: "farringdon.toggleTabs", payload: "{}")
     }

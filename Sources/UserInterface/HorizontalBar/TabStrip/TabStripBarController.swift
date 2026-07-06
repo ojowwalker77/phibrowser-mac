@@ -257,6 +257,8 @@ final class TabStripBarController: NSViewController {
     private func setupUI() {
         let rightButtons = TabStripRightButtons(
             cardManager: NotificationCardManager.shared,
+            normalTabCount: browserState.normalTabs.count,
+            isIncognito: browserState.isIncognito,
             onCardEntryTap: { [weak self] in
                 self?.handleCardEntryTap()
             },
@@ -324,10 +326,22 @@ final class TabStripBarController: NSViewController {
         // picker's in `applySpacesPickerVisibility`.
         applySpacesPickerVisibility()
         observeSpacesFeatureFlag()
+        observeRightButtonsNormalTabCount()
 
         (view as? TabStripBarView)?.onSpaceSwipe = { [weak self] step in
             self?.activateAdjacentSpace(by: step)
         }
+    }
+
+    private func observeRightButtonsNormalTabCount() {
+        browserState.$normalTabs
+            .map(\.count)
+            .removeDuplicates()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] count in
+                self?.rightButtonsHostingView?.rootView.normalTabCount = count
+            }
+            .store(in: &cancellables)
     }
 
     /// Switches THIS window's active Space, clamped at the first/last Space
