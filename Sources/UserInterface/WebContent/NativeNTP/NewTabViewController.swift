@@ -202,7 +202,17 @@ final class NewTabViewController: NSViewController {
         guard isViewLoaded else { return }
         let clipSize = scrollView.contentView.bounds.size
         guard clipSize.width > 0, clipSize.height > 0 else { return }
-        let omniSize = omniBoxController.contentSize
+        // Fit the omnibox to the visible clip. Its natural width (the Cmd+L
+        // panel's 680) overflows narrow surfaces — an NTP rendering inside a
+        // splitview pane — which pushed the content column wider than the
+        // clip: the icon then centered off into the hidden overflow and the
+        // box ran edge-to-edge. Capping the width keeps the column within
+        // the clip, so everything re-centers as the pane is resized.
+        let omniNatural = omniBoxController.contentSize
+        let omniHorizontalInset: CGFloat = 24
+        let fittedOmniWidth = min(omniNatural.width,
+                                  max(clipSize.width - omniHorizontalInset * 2, 240))
+        let omniSize = NSSize(width: fittedOmniWidth, height: omniNatural.height)
         
         // Measure incognito label size using the cell to include internal padding
         var labelSize: NSSize

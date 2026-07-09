@@ -157,7 +157,14 @@ class OmniBoxViewController: NSViewController {
         inputeAreaContainer.snp.makeConstraints { make in
             make.top.leading.trailing.equalToSuperview()
             make.height.equalTo(baseHeight)
-            make.width.equalTo(Self.boxWidth)
+            // High, not required: the natural width sizes the freestanding
+            // Cmd+L panel (which frames this view at `contentSize`), but the
+            // native NTP embeds the box in surfaces narrower than 680 — a
+            // splitview pane — and frames it to fit (see
+            // `NewTabViewController.updateContentLayout`). There the required
+            // leading/trailing pins must win and compress the box instead of
+            // fighting the frame.
+            make.width.equalTo(Self.boxWidth).priority(.high)
         }
         
         iconImageView.snp.makeConstraints { make in

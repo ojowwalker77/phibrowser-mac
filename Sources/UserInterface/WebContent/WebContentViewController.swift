@@ -1196,7 +1196,10 @@ class WebContentViewController: NSViewController {
         guard !tab.isInContentFullscreen,
               let group = browserState?.splitGroup(forTabId: tab.guid),
               let partner = partnerTab(for: group, ownTabId: tab.guid),
-              partner.webContentView != nil else {
+              // A native-NTP partner is mountable even before (or without) a
+              // Chromium view — its pane renders the native NTP view (see
+              // `partnerPaneView(for:)`).
+              partner.webContentView != nil || partner.usesNativeNTP else {
             return false
         }
         return true
@@ -1213,26 +1216,64 @@ class WebContentViewController: NSViewController {
         return contentMode != .webContent
     }
 
+    private func ensureNativeNtpController(state: BrowserState) -> NewTabViewController {
+        if let existing = nativeNtpController {
+            return existing
+        }
+        let created = NewTabViewController(state: state)
+        nativeNtpController = created
+        return created
+    }
+
     private func showNativeNtp(for tab: Tab) {
         guard let state = browserState else { return }
 
-        let controller: NewTabViewController
-        if let existing = nativeNtpController {
-            controller = existing
-        } else {
-            let created = NewTabViewController(state: state)
-            nativeNtpController = created
-            controller = created
-        }
-
+        let controller = ensureNativeNtpController(state: state)
         if controller.parent == nil {
             addChild(controller)
         }
 
+        // Split-aware: while this tab is a pane of an active split, the NTP
+        // renders INSIDE its pane of the split host. Mounting it full-bleed
+        // below would wipe the split host out of hostView and collapse the
+        // split to just this pane the moment the NTP tab gets focused.
+        if let group = activeSplitForCurrentTab() {
+            // In-window only: SplitPaneHostView.attach preconditions on a
+            // window, and this method is reachable while the controller is
+            // off-window — e.g. via `updateAssociatedTab` →
+            // `restoreFocusForCurrentTab` during a focus switch, before the
+            // container mounts the view. Off-window, touch nothing: the NTP
+            // view may currently be serving as a pane inside the focused
+            // partner's LIVE split host, and the full-bleed mount below
+            // would steal it mid-display. The deferred content update /
+            // viewDidAppear re-runs the mount path in-window.
+            guard view.window != nil else {
+                contentMode = .nativeNtp
+                return
+            }
+            controller.updateForTab(tab)
+            // Drop the full-bleed edge constraints from a prior solo mount
+            // BEFORE the split host reparents this view into its pane
+            // container. The container is a DESCENDANT of the same hostView,
+            // so AppKit does not auto-remove them on the move (the view never
+            // leaves the constraint holder's subtree) — the stale required
+            // "edges == hostView" then fights the pane's frame-based layout
+            // and the engine resolves by collapsing the whole window to the
+            // omnibox's required-height chain.
+            controller.view.snp.removeConstraints()
+            installSplitContent(group: group, ownTabId: tab.guid, ownNativeView: controller.view)
+            contentMode = .nativeNtp
+            return
+        }
+
         if controller.view.superview !== hostView {
             hostView.subviews.forEach { $0.removeFromSuperview() }
+            currentSplitHost = nil
             hostView.addSubview(controller.view)
-            controller.view.snp.makeConstraints { make in
+            // remake, not make: a repeated full-bleed mount (split dissolved
+            // and re-formed, content refreshes) must replace any surviving
+            // edge constraints instead of stacking duplicates.
+            controller.view.snp.remakeConstraints { make in
                 make.edges.equalToSuperview()
             }
         }
@@ -1415,6 +1456,46 @@ class WebContentViewController: NSViewController {
         reconcileSplitCrashViews(host: host, group: group)
     }
 
+    /// The view representing this controller's tab inside a split pane: the
+    /// native incognito NTP view while the tab is showing it, the Chromium
+    /// web content view otherwise. Ensures the NTP controller exists and
+    /// reflects the tab, so the pane renders the real native NTP even while
+    /// this controller is not the focused one (the focused pane's controller
+    /// borrows this view into its own split host — the same stealing dance
+    /// `installSplitContent` already does with `Tab.webContentView`).
+    func splitPaneContentView() -> NSView? {
+        guard let tab = associatedTab else { return nil }
+        if shouldShowNativeNtp(for: tab), let state = browserState {
+            let controller = ensureNativeNtpController(state: state)
+            if controller.parent == nil {
+                addChild(controller)
+            }
+            controller.updateForTab(tab)
+            return controller.view
+        }
+        return tab.webContentView
+    }
+
+    /// The partner pane's content view, resolved through the partner tab's
+    /// own controller so a native-NTP partner contributes its native NTP
+    /// view rather than the underlying (blank-ish) Chromium chrome://newtab
+    /// contents. Falls back to the raw web content view when the container
+    /// lookup is unavailable (e.g. this controller not yet parented).
+    ///
+    /// The lookup is `splitPaneCompanionController` — NOT the focus-switch
+    /// get-or-create — because this runs inside `installSplitContent` and the
+    /// focus path's `updateAssociatedTab` re-enters the partner's own mount,
+    /// which then resolves US as its partner: two native-NTP panes remount
+    /// each other in unbounded mutual recursion (stack-overflow crash).
+    private func partnerPaneView(for partner: Tab) -> NSView? {
+        if let container = parent as? WebContentContainerViewController,
+           let partnerController = container.splitPaneCompanionController(for: partner),
+           let paneView = partnerController.splitPaneContentView() {
+            return paneView
+        }
+        return partner.webContentView
+    }
+
     /// Mount or update the SplitPaneHostView so that this tab and its partner
     /// render side-by-side. Falls back to single-view if partner's nativeView
     /// is missing (e.g. partner not yet finished loading its WebContents).
@@ -1422,7 +1503,7 @@ class WebContentViewController: NSViewController {
                                      ownTabId: Int,
                                      ownNativeView: NSView) {
         guard let partner = partnerTab(for: group, ownTabId: ownTabId),
-              let partnerNativeView = partner.webContentView else {
+              let partnerNativeView = partnerPaneView(for: partner) else {
             // Partner not ready — show ourself alone for now; the splits
             // subscription will re-trigger when the partner's view arrives.
             addWebContentView(ownNativeView, tabId: ownTabId)

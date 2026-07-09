@@ -1268,6 +1268,14 @@ extension BrowserState {
         // check never passes.
         let createURL =
             (partnerNavigateURL?.isEmpty == false) ? partnerNavigateURL! : "chrome://newtab"
+        // An incognito pane landing on the NTP must use the NATIVE new-tab
+        // page, exactly like Cmd+T (`newBrowserTab`) — the Chromium
+        // chrome://newtab renders blank off-the-record. Without the enqueue
+        // the arriving tab misses `usesNativeNTP` and its pane shows the
+        // blank Chromium contents.
+        if isIncognito, partnerNavigateURL?.isEmpty != false {
+            enqueueNativeNTP()
+        }
         createTab(createURL, customGuid: pendingGuid, focusAfterCreate: true)
         // Timeout cleanup: if the new tab never arrives (Chromium failure,
         // partner closed mid-flight, etc.), drop the pending record and clear
