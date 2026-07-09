@@ -48,6 +48,11 @@ final class SentinelVersionGuard {
     private let restartRequestPoster: (SentinelVersionGuardSnapshot, String) -> Void
     private let sentinelLauncher: () -> Void
     private let logger: (String) -> Void
+    private let sleep: (TimeInterval) async -> Void
+    /// Seconds to wait between confirming whether Sentinel adopted the expected version.
+    private let confirmInterval: TimeInterval
+    /// Maximum number of confirm-and-re-post cycles before giving up on convergence.
+    private let maxConfirmationRetries: Int
 
     private let lastMismatchKeyDefaultsKey = "SentinelVersionGuard.lastMismatchKey"
     private let lastAttemptTimestampDefaultsKey = "SentinelVersionGuard.lastAttemptTimestamp"
@@ -70,7 +75,12 @@ final class SentinelVersionGuard {
         sentinelInfoProvider: @escaping (String) -> RunningSentinelInfo? = SentinelVersionGuard.defaultRunningSentinelInfo,
         restartRequestPoster: @escaping (SentinelVersionGuardSnapshot, String) -> Void = SentinelVersionGuard.postRestartRequest,
         sentinelLauncher: @escaping () -> Void = SentinelHelper.launch,
-        logger: @escaping (String) -> Void = { AppLogInfo("[SentinelVersionGuard] \($0)") }
+        logger: @escaping (String) -> Void = { AppLogInfo("[SentinelVersionGuard] \($0)") },
+        sleep: @escaping (TimeInterval) async -> Void = { seconds in
+            try? await Task.sleep(nanoseconds: UInt64(max(seconds, 0) * 1_000_000_000))
+        },
+        confirmInterval: TimeInterval = 3,
+        maxConfirmationRetries: Int = 3
     ) {
         self.userDefaults = userDefaults
         self.cooldown = cooldown
@@ -81,16 +91,51 @@ final class SentinelVersionGuard {
         self.restartRequestPoster = restartRequestPoster
         self.sentinelLauncher = sentinelLauncher
         self.logger = logger
+        self.sleep = sleep
+        self.confirmInterval = confirmInterval
+        self.maxConfirmationRetries = maxConfirmationRetries
     }
 
     func runStartupCheck(delaySeconds: TimeInterval = 3) async {
         if delaySeconds > 0 {
-            let nanoseconds = UInt64(delaySeconds * 1_000_000_000)
-            try? await Task.sleep(nanoseconds: nanoseconds)
+            await sleep(delaySeconds)
         }
 
         let decision = evaluateCurrentState()
         apply(decision)
+
+        // A single restart request is not enough. It can be missed entirely (Sentinel
+        // registers its restart observer late, during its own cold launch) or Sentinel
+        // may simply not have relaunched yet. Confirm the running Sentinel actually
+        // adopts the expected version, re-posting a bounded number of times until it
+        // converges — otherwise the browser and Sentinel can stay on mismatched versions.
+        guard case .requestRestart(let snapshot) = decision else { return }
+        await confirmConvergence(snapshot)
+    }
+
+    /// After a restart request, waits for the running Sentinel to report the expected
+    /// version. Re-posts the request on each unconverged check, up to
+    /// `maxConfirmationRetries` times, then logs a warning if convergence never happened.
+    private func confirmConvergence(_ snapshot: SentinelVersionGuardSnapshot) async {
+        for attempt in 1...maxConfirmationRetries {
+            await sleep(confirmInterval)
+
+            guard let info = sentinelInfoProvider(snapshot.sentinelBundleID),
+                  let running = info.version, !running.isEmpty else {
+                logger("convergence check: Sentinel not reporting a version; stopping confirmation")
+                return
+            }
+
+            if running == snapshot.browserVersion {
+                logger("convergence check: Sentinel converged to \(running) after \(attempt) check(s)")
+                return
+            }
+
+            logger("convergence check: Sentinel still \(running), expected \(snapshot.browserVersion); re-posting restart (\(attempt)/\(maxConfirmationRetries))")
+            restartRequestPoster(snapshot, UUID().uuidString)
+        }
+
+        logger("convergence check: WARNING Sentinel did not converge to \(snapshot.browserVersion) after \(maxConfirmationRetries) retries")
     }
 
     func evaluateCurrentState() -> SentinelVersionGuardDecision {

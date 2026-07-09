@@ -131,6 +131,79 @@ final class SentinelVersionGuardTests: XCTestCase {
         XCTAssertEqual(launchCount, 1)
     }
 
+    func testConvergenceStopsOnceSentinelAdoptsExpectedVersion() async {
+        // Sentinel reports the old version at evaluation, then the expected version on
+        // the first confirmation read: only the initial request should be posted.
+        let guarder = makeConvergenceGuard(
+            browserVersion: "1.2.1",
+            sentinelVersions: ["1.2.0", "1.2.1"],
+            maxRetries: 3
+        )
+
+        await guarder.runStartupCheck(delaySeconds: 0)
+
+        XCTAssertEqual(postedSnapshots.count, 1)
+    }
+
+    func testConvergenceRepostsUntilRetriesExhausted() async {
+        // Sentinel never adopts the expected version: initial post + one re-post per retry.
+        let guarder = makeConvergenceGuard(
+            browserVersion: "1.2.1",
+            sentinelVersions: ["1.2.0"],
+            maxRetries: 2
+        )
+
+        await guarder.runStartupCheck(delaySeconds: 0)
+
+        XCTAssertEqual(postedSnapshots.count, 3)
+    }
+
+    func testConvergenceStopsWhenSentinelStopsReporting() async {
+        // If Sentinel is no longer reporting a version, stop confirming (nothing to converge).
+        let guarder = makeConvergenceGuard(
+            browserVersion: "1.2.1",
+            sentinelVersions: ["1.2.0", nil],
+            maxRetries: 3
+        )
+
+        await guarder.runStartupCheck(delaySeconds: 0)
+
+        XCTAssertEqual(postedSnapshots.count, 1)
+    }
+
+    private func makeConvergenceGuard(
+        browserVersion: String,
+        sentinelVersions: [String?],
+        maxRetries: Int
+    ) -> SentinelVersionGuard {
+        var callIndex = 0
+        return SentinelVersionGuard(
+            userDefaults: defaults,
+            now: { self.now },
+            browserBundleIDProvider: { "com.phibrowser.Mac" },
+            browserVersionProvider: { browserVersion },
+            sentinelInfoProvider: { sentinelBundleID in
+                let version = sentinelVersions[min(callIndex, sentinelVersions.count - 1)]
+                callIndex += 1
+                guard let version else { return nil }
+                return SentinelVersionGuard.RunningSentinelInfo(
+                    bundleID: sentinelBundleID,
+                    version: version
+                )
+            },
+            restartRequestPoster: { snapshot, _ in
+                self.postedSnapshots.append(snapshot)
+            },
+            sentinelLauncher: {
+                self.launchCount += 1
+            },
+            logger: { _ in },
+            sleep: { _ in },
+            confirmInterval: 0,
+            maxConfirmationRetries: maxRetries
+        )
+    }
+
     private func makeGuard(
         browserBundleID: String,
         browserVersion: String,
