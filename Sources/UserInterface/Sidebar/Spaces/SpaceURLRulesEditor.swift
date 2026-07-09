@@ -67,9 +67,10 @@ struct URLRulesEditor: View {
     /// "Incognito" entry. Incognito Spaces are runtime-only, so a rule never
     /// points at a specific one — it carries the stable generic id
     /// (`SpaceManager.incognitoRuleTargetId`), resolved to a live Incognito
-    /// Space (created on demand) at route time.
+    /// Space (created on demand) at route time. Agent Spaces are ephemeral
+    /// background workspaces and must never appear as a routing target.
     private var ruleTargetSpaces: [SpaceModel] {
-        manager.spaces.filter { !SpaceManager.isIncognitoSpaceId($0.spaceId) }
+        manager.spaces.filter { !SpaceManager.isIncognitoSpaceId($0.spaceId) && !$0.isAgentSpace }
             + [manager.incognitoRuleTargetSpace()]
     }
 

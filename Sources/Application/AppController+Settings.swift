@@ -22,6 +22,7 @@ final class SettingsPresentationState: ObservableObject {
 extension AppController {
     
     private func panes() -> [SettingsPane] {
+        var panes: [SettingsPane] =
         [AccountSettingViewController(),
          GeneralSettingViewController(),
          ProfilesSettingViewController(),
@@ -30,6 +31,10 @@ extension AppController {
          IMChannelsSettingViewController(),
          ShortcutsSettingViewController(),
         ]
+        if PhiPreferences.AgentSpaces.skillFeatureEnabled {
+            panes.append(DeveloperSettingViewController())
+        }
+        return panes
     }
     
     /// Returns the shared settings window controller, creating it on first access.

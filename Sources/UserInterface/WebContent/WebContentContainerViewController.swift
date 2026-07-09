@@ -24,6 +24,11 @@ class WebContentContainerViewController: NSViewController {
     /// Currently displayed WebContentViewController
     private weak var currentWebContentController: WebContentViewController?
 
+    /// The visible tab's web-content panel size, or nil when nothing is
+    /// mounted (placeholder mode, window still restoring). See
+    /// `WebContentViewController.webPanelSize`.
+    var currentWebPanelSize: CGSize? { currentWebContentController?.webPanelSize }
+
     /// Owned by this controller while in placeholder mode; released on exit.
     /// Mutually exclusive with the active tab's WCVC (only one is visible
     /// in contentContainer at a time).

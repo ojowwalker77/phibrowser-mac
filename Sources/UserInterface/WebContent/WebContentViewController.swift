@@ -129,6 +129,14 @@ class WebContentViewController: NSViewController {
 
     var addressBarAnchorView: NSView? { headerView.addressBarAnchorView }
 
+    /// Size of the web-content host area — the panel a page actually renders
+    /// into (window minus sidebar, header, and bookmark bar), in points. Read
+    /// by the agent-space bridge (`agentSpace.panelSize`) so a CDP client can
+    /// size its hidden agent window's emulated viewport to the real thing:
+    /// the hidden window's own view size is 0×0, and measuring a tab's
+    /// WebContents over CDP is polluted by native-NTP shell tabs.
+    var webPanelSize: CGSize { hostView.bounds.size }
+
     private var titleAwareArea = TitlebarAwareView()
     private var headerHeightConstraint: Constraint?
 
@@ -163,6 +171,29 @@ class WebContentViewController: NSViewController {
         overlay.hitTestPassthroughHandler = { [weak self, weak overlay] point in
             guard let self, let overlay else { return false }
             return self.shouldPassThroughAgentAnimationOverlayHit(at: point, in: overlay)
+        }
+        return overlay
+    }()
+
+    // MARK: - Agent Space Overlay
+    /// Native overlay for agent Spaces (cursor + control pill + watch-mode
+    /// input interception). Mounted above the web content whenever this
+    /// window's Space has a live agent task, and torn down when the task ends.
+    private lazy var agentSpaceOverlay: AgentSpaceOverlayView = {
+        let overlay = AgentSpaceOverlayView()
+        overlay.onTakeControl = { [weak self] in
+            guard let spaceId = self?.browserState?.spaceId else { return }
+            AgentSpaceManager.shared.takeControl(spaceId: spaceId)
+        }
+        overlay.onHandBack = { [weak self] in
+            guard let spaceId = self?.browserState?.spaceId else { return }
+            AgentSpaceManager.shared.handBack(spaceId: spaceId)
+        }
+        overlay.onFinish = { [weak self] in
+            guard let spaceId = self?.browserState?.spaceId,
+                  let task = AgentSpaceManager.shared.task(forSpaceId: spaceId) else { return }
+            AgentSpaceManager.shared.taskDidComplete(
+                taskId: task.taskId, success: true, keep: true)
         }
         return overlay
     }()
@@ -422,6 +453,21 @@ class WebContentViewController: NSViewController {
             }
             .store(in: &cancellables)
         updateAgentAnimationOverlay()
+
+        AgentSpaceManager.shared.$tasksBySpaceId
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] tasks in
+                self?.updateAgentSpaceOverlay(tasks: tasks)
+            }
+            .store(in: &cancellables)
+        updateAgentSpaceOverlay()
+
+        AgentSpaceManager.shared.effectRequested
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] effect in
+                self?.playAgentSpaceEffect(effect)
+            }
+            .store(in: &cancellables)
 
         // Observe AI Chat collapse state once the split item exists.
         setupAIChatObserver()
@@ -2449,6 +2495,60 @@ class WebContentViewController: NSViewController {
 
     // MARK: - Agent Animation Overlay
 
+    // MARK: - Agent Space Overlay mounting
+
+    private func updateAgentSpaceOverlay(tasks: [String: AgentTask]? = nil) {
+        guard let spaceId = browserState?.spaceId else { return }
+        guard let task = (tasks ?? AgentSpaceManager.shared.tasksBySpaceId)[spaceId] else {
+            hideAgentSpaceOverlay()
+            return
+        }
+        showAgentSpaceOverlay()
+        var display = task
+        if let cursor = task.cursor {
+            display.cursor = convertAgentCursorPoint(cursor)
+        }
+        agentSpaceOverlay.update(with: display)
+    }
+
+    private func showAgentSpaceOverlay() {
+        guard agentSpaceOverlay.superview == nil else { return }
+        leftContainerView.addSubview(agentSpaceOverlay, positioned: .above, relativeTo: nil)
+        agentSpaceOverlay.snp.makeConstraints { make in
+            make.edges.equalToSuperview()
+        }
+    }
+
+    private func hideAgentSpaceOverlay() {
+        guard agentSpaceOverlay.superview != nil else { return }
+        agentSpaceOverlay.removeFromSuperview()
+    }
+
+    /// Agent cursor points arrive in CSS viewport coordinates (origin at the
+    /// web content's top-left). Convert into the overlay's coordinate space.
+    private func convertAgentCursorPoint(_ point: CGPoint) -> CGPoint {
+        let hostPoint = NSPoint(
+            x: point.x,
+            y: hostView.isFlipped ? point.y : hostView.bounds.height - point.y)
+        return hostView.convert(hostPoint, to: agentSpaceOverlay)
+    }
+
+    /// Plays a transient input-mirror animation (click ripple, typing pulse,
+    /// scroll hint) on the agent overlay. Effects arrive in the same widget
+    /// coordinates as the agent cursor; a point-less effect anchors on the
+    /// task's last cursor position.
+    private func playAgentSpaceEffect(_ effect: AgentEffect) {
+        guard let spaceId = browserState?.spaceId, spaceId == effect.spaceId,
+              agentSpaceOverlay.superview != nil else { return }
+        guard let raw = effect.point
+                ?? AgentSpaceManager.shared.tasksBySpaceId[spaceId]?.cursor else { return }
+        agentSpaceOverlay.playEffect(
+            kind: effect.kind,
+            at: convertAgentCursorPoint(raw),
+            size: effect.size,
+            dy: effect.dy)
+    }
+
     private func updateAgentAnimationOverlay() {
         guard let tab = associatedTab else {
             hideAgentAnimationOverlay()
@@ -2473,6 +2573,12 @@ class WebContentViewController: NSViewController {
                 context.duration = 0.3
                 self.agentAnimationOverlay.animator().alphaValue = 1
             }
+        }
+        // In an agent Space the operating mask and the "Take control" overlay
+        // are both mounted; keep the latter on top so its button stays clickable
+        // over the mask (which otherwise captures the whole tab).
+        if agentSpaceOverlay.superview != nil {
+            leftContainerView.addSubview(agentSpaceOverlay, positioned: .above, relativeTo: agentAnimationOverlay)
         }
         if associatedTab === browserState?.focusingTab {
             view.window?.makeFirstResponder(agentAnimationOverlay)

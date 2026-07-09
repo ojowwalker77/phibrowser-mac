@@ -1,0 +1,826 @@
+// Copyright 2026 Phinomenon Inc.
+//
+// Use of this source code is governed by an Apache license that can be
+// found in the LICENSE file.
+
+import AppKit
+import Combine
+import Foundation
+import SwiftUI
+
+/// Ownership of an agent Space's window at any moment: the agent is driving it,
+/// or the user has taken control (agent commands are rejected until hand-back).
+enum AgentTaskOwnership {
+    case agent
+    case user
+}
+
+/// Where an agent task is driven from. `.phiAgent` tasks are orchestrated by
+/// the phi-agent backend (Kensington extension origin) and participate in its
+/// HTTP ownership handshake; `.cdp` tasks are driven by an external CDP client
+/// (e.g. the Claude Code skill) and must never block on phi-agent HTTP.
+enum AgentTaskOrigin {
+    case phiAgent
+    case cdp
+}
+
+/// Lifecycle state of an agent task, surfaced as a badge on the Space pip.
+/// `.running` vs `.idle` is driver-reported (the CDP skill flips it: running
+/// while a heredoc executes, idle between rounds).
+enum AgentTaskStatus: Equatable {
+    case starting
+    case running
+    case idle
+    case completed
+    case failed(message: String)
+}
+
+/// Runtime record for one agent task. Durable task state lives with the task's
+/// driver (phi-agent, or the CDP client); the only persisted artifact on the
+/// Swift side is the SpaceModel row, which is an ordinary user Space.
+struct AgentTask {
+    let taskId: String
+    let spaceId: String
+    let profileId: String
+    let origin: AgentTaskOrigin
+    /// Small, stable ordinal (1, 2, 3…) shown as a corner badge so several live
+    /// agent Spaces can be told apart at a glance. Assigned at creation as the
+    /// lowest number not currently in use, so it's reused after a Space closes.
+    let number: Int
+    var windowId: Int
+    var ownership: AgentTaskOwnership
+    var status: AgentTaskStatus
+    var statusCaption: String
+    var cursor: CGPoint?
+    var cursorTabId: Int?
+    var hasUnseenError: Bool
+    /// The tab currently wearing the operating overlay (the mask AI chat shows
+    /// when it drives a tab). Tracked so ownership flips and completion can
+    /// clear it. `nil` when no tab is masked.
+    var maskedTabId: Int? = nil
+    /// When the task expires if the agent stays silent (see the keep-alive
+    /// sweep in `AgentSpaceManager`). Refreshed by every control message from
+    /// the owning driver; `agentSpace.ping` sets it explicitly. Ignored while
+    /// the user holds control.
+    var keepAliveDeadline: Date = .distantFuture
+}
+
+/// A transient visual mirror of one agent input action (a click, typing into
+/// a field, a scroll), rendered as a short animation by the Space's overlay so
+/// a watching user can follow what the agent is doing. Not task state: effects
+/// are fire-and-forget and never persisted, so they stream through
+/// `AgentSpaceManager.effectRequested` instead of `tasksBySpaceId`.
+struct AgentEffect {
+    enum Kind: String {
+        case click
+        case type
+        case scroll
+    }
+
+    let spaceId: String
+    let kind: Kind
+    /// Widget-space point, same coordinate space as `AgentTask.cursor`.
+    /// `nil` anchors the effect on the task's last cursor position.
+    let point: CGPoint?
+    /// For `.type`: the focused element's widget-space size, so the overlay
+    /// can outline the field being typed into.
+    let size: CGSize?
+    /// For `.scroll`: the wheel's deltaY — the sign gives the direction hint.
+    let dy: CGFloat?
+}
+
+/// App-scoped owner of agent-task state. Window lifecycle stays in
+/// `SpaceWindowSlot`; the Space list stays in `SpaceManager`. This module only
+/// owns the mapping from an agent Space to its live task and drives the
+/// ownership handshake across the three channels (Chromium agent-mode flag,
+/// extension broadcast, phi-agent HTTP — the last one for `.phiAgent` tasks
+/// only).
+@MainActor
+final class AgentSpaceManager: ObservableObject {
+    static let shared = AgentSpaceManager()
+
+    /// Visual signature every agent Space is created with. Used both at
+    /// creation and by `SpaceManager`'s orphan sweep to recognize an agent
+    /// Space that outlived its (in-memory) task — e.g. one persisted across a
+    /// relaunch. Kept here so the two sites can never drift.
+    /// Display-name prefix; the full name is the prefix plus the Space's ordinal
+    /// (R1, R2, …). Also part of the signature the orphan sweep matches on.
+    static let spaceNamePrefix = "R"
+    // Robot emoji (🤖) from the emoji catalog — see Resources/Emoji/emoji-catalog.json.
+    static let spaceIconName = "emoji:1F916"
+    static let spaceColorHex = "#8E8E93"
+
+    /// An agent Space's display name for its ordinal — "R1", "R2", …
+    static func agentSpaceName(_ number: Int) -> String { "\(spaceNamePrefix)\(number)" }
+
+    /// True if `name` looks like an agent Space's ordinal name (the prefix
+    /// followed by one or more digits).
+    nonisolated static func isAgentSpaceName(_ name: String) -> Bool {
+        guard name.hasPrefix(spaceNamePrefix) else { return false }
+        let rest = name.dropFirst(spaceNamePrefix.count)
+        return !rest.isEmpty && rest.allSatisfy(\.isNumber)
+    }
+
+    /// True if `space` looks like an agent Space (created by `createAgentSpace`).
+    /// Pure/`nonisolated` so the Space-list sweep can call it off the main actor.
+    nonisolated static func isAgentSpaceModel(name: String, iconName: String, colorHex: String) -> Bool {
+        isAgentSpaceName(name) && iconName == spaceIconName && colorHex == spaceColorHex
+    }
+
+    @Published private(set) var tasksBySpaceId: [String: AgentTask] = [:]
+
+    /// Transient input-mirror effects (click ripple, typing pulse, scroll
+    /// hint) streamed straight to the overlay mounters — see `AgentEffect`.
+    let effectRequested = PassthroughSubject<AgentEffect, Never>()
+
+    private var spaceIdByTaskId: [String: String] = [:]
+
+    // MARK: - Keep-alive timeout
+
+    /// How long a driving agent may stay silent before its Space auto-closes.
+    /// Every control message refreshes the deadline by this much; the agent can
+    /// buy a longer window (up to `maxKeepAliveTTL`) with `agentSpace.ping` —
+    /// the skill does so when a round ends, so a task survives the gaps between
+    /// heredoc rounds but an abandoned Space (crashed or killed session) still
+    /// goes away instead of lingering as a stale pip until the next relaunch.
+    /// A round start (`agentSpace.setState` running) resets the deadline back
+    /// to this window, so a bought grace never outlives the gap it covered.
+    static let defaultKeepAliveTTL: TimeInterval = 120
+    /// Between-rounds grace granted on hand-back (the driving session may take
+    /// a while to run its next round) — matches the skill's round-end ping.
+    static let interRoundKeepAliveTTL: TimeInterval = 30 * 60
+    static let maxKeepAliveTTL: TimeInterval = 60 * 60
+    private static let keepAliveSweepInterval: TimeInterval = 10
+
+    private var keepAliveSweepTimer: Timer?
+
+    /// The floating handoff prompt (one at a time) and the Space it asks the
+    /// user to visit — see `presentHandoffPrompt`.
+    private var handoffPromptPanel: NSPanel?
+    private var handoffPromptSpaceId: String?
+
+    private init() {}
+
+    /// Refreshes `taskId`'s expiry. A plain control message never SHORTENS a
+    /// window an explicit ping bought (`max` with the current deadline); an
+    /// explicit `ttlSeconds` is authoritative in both directions.
+    func touchKeepAlive(taskId: String, ttlSeconds: TimeInterval? = nil) {
+        guard let spaceId = spaceIdByTaskId[taskId],
+              var task = tasksBySpaceId[spaceId] else { return }
+        if let ttl = ttlSeconds {
+            let clamped = min(max(ttl, 1), Self.maxKeepAliveTTL)
+            task.keepAliveDeadline = Date().addingTimeInterval(clamped)
+        } else {
+            task.keepAliveDeadline = max(task.keepAliveDeadline,
+                                         Date().addingTimeInterval(Self.defaultKeepAliveTTL))
+        }
+        tasksBySpaceId[spaceId] = task
+    }
+
+    private func ensureKeepAliveSweep() {
+        guard keepAliveSweepTimer == nil else { return }
+        let timer = Timer(timeInterval: Self.keepAliveSweepInterval, repeats: true) { _ in
+            MainActor.assumeIsolated { AgentSpaceManager.shared.sweepExpiredTasks() }
+        }
+        keepAliveSweepTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
+    }
+
+    private func stopKeepAliveSweepIfIdle() {
+        guard tasksBySpaceId.isEmpty else { return }
+        keepAliveSweepTimer?.invalidate()
+        keepAliveSweepTimer = nil
+    }
+
+    /// Closes agent Spaces whose driver has gone silent past the deadline.
+    /// Only `.cdp` tasks — phi-agent tasks have their own backend lifecycle —
+    /// and only while the AGENT holds control: a Space handed to the user
+    /// (login, captcha) must wait for them however long they take.
+    private func sweepExpiredTasks() {
+        let now = Date()
+        let expired = tasksBySpaceId.values.filter {
+            $0.origin == .cdp && $0.ownership == .agent && $0.keepAliveDeadline < now
+        }
+        for task in expired {
+            AppLogInfo("[AgentSpace] task \(task.taskId) expired — no agent activity, auto-closing its Space")
+            taskDidComplete(taskId: task.taskId, success: false, keep: false,
+                            message: "expired: no agent activity")
+        }
+        stopKeepAliveSweepIfIdle()
+    }
+
+    // MARK: - Queries
+
+    func isAgentSpace(_ spaceId: String) -> Bool {
+        tasksBySpaceId[spaceId] != nil
+    }
+
+    func isAgentOwned(_ spaceId: String) -> Bool {
+        tasksBySpaceId[spaceId]?.ownership == .agent
+    }
+
+    /// Lowest positive ordinal not currently worn by a live agent Space, so
+    /// concurrent Spaces read 1, 2, 3… and a number frees up when its Space ends.
+    private func nextAgentNumber() -> Int {
+        let used = Set(tasksBySpaceId.values.map(\.number))
+        var n = 1
+        while used.contains(n) { n += 1 }
+        return n
+    }
+
+    func task(forSpaceId spaceId: String) -> AgentTask? {
+        tasksBySpaceId[spaceId]
+    }
+
+    func task(forTaskId taskId: String) -> AgentTask? {
+        guard let spaceId = spaceIdByTaskId[taskId] else { return nil }
+        return tasksBySpaceId[spaceId]
+    }
+
+    // MARK: - Creation
+
+    /// Resolves the profile (by id, then display name), creates a hidden Space
+    /// bound to it, spawns its window without surfacing it, and records the
+    /// task. `completion` receives `(spaceId, windowId)` or nil on failure.
+    func createAgentSpace(
+        taskId: String,
+        profileName: String,
+        origin: AgentTaskOrigin = .phiAgent,
+        completion: @escaping (_ spaceId: String?, _ windowId: Int?) -> Void
+    ) {
+        if let existingSpaceId = spaceIdByTaskId[taskId] {
+            guard let existing = tasksBySpaceId[existingSpaceId],
+                  existing.origin == origin else {
+                // A different driver owns this taskId. Reveal nothing about its
+                // Space — the same "as if it doesn't exist" boundary the control
+                // handlers draw — and fail the create instead of sharing ids.
+                AppLogWarn("[AgentSpace] createAgentSpace: taskId \(taskId) belongs to another origin")
+                completion(nil, nil)
+                return
+            }
+            guard existing.windowId != 0 else {
+                // A concurrent create is still spawning the window. Returning
+                // windowId 0 would poison every windowId-scoped call the caller
+                // makes this round — fail cleanly and let it retry.
+                AppLogWarn("[AgentSpace] createAgentSpace: taskId \(taskId) is still spawning")
+                completion(nil, nil)
+                return
+            }
+            AppLogWarn("[AgentSpace] createAgentSpace: taskId \(taskId) already exists")
+            completion(existingSpaceId, existing.windowId)
+            return
+        }
+        // The cached profile list is empty when ProfileManager's init ran
+        // before the Chromium bridge was up and no profile UI has refreshed it
+        // since; a headless CDP create can't rely on UI having run, so refresh
+        // here (same pattern as ProfileManager's own mutations).
+        ProfileManager.shared.refresh()
+        let profiles = ProfileManager.shared.profiles
+        let resolved =
+            profiles.first(where: { $0.profileId == profileName })
+            ?? profiles.first(where: { $0.displayName == profileName })
+            ?? (profileName.isEmpty ? profiles.first : nil)
+        guard let profile = resolved else {
+            AppLogWarn("[AgentSpace] createAgentSpace: no profile matching '\(profileName)'")
+            completion(nil, nil)
+            return
+        }
+
+        // Ordinal picked up front so the Space name (R1, R2, …) and the task's
+        // badge number are the same value.
+        let number = nextAgentNumber()
+        guard let spaceId = SpaceManager.shared.createSpace(
+            name: Self.agentSpaceName(number),
+            colorHex: Self.spaceColorHex,
+            iconName: Self.spaceIconName,
+            profileId: profile.profileId,
+            makeDefaultActive: false
+        ) else {
+            AppLogWarn("[AgentSpace] createAgentSpace: createSpace failed")
+            completion(nil, nil)
+            return
+        }
+
+        // Record the task now (ownership=agent, starting) so isAgentSpace() is
+        // true before the coordinator's window-created callback runs.
+        tasksBySpaceId[spaceId] = AgentTask(
+            taskId: taskId,
+            spaceId: spaceId,
+            profileId: profile.profileId,
+            origin: origin,
+            number: number,
+            windowId: 0,
+            ownership: .agent,
+            status: .starting,
+            statusCaption: "",
+            cursor: nil,
+            cursorTabId: nil,
+            hasUnseenError: false,
+            keepAliveDeadline: origin == .cdp
+                ? Date().addingTimeInterval(Self.defaultKeepAliveTTL)
+                : .distantFuture
+        )
+        spaceIdByTaskId[taskId] = spaceId
+        ensureKeepAliveSweep()
+
+        guard let slot = SpaceManager.shared.keySlot ?? SpaceManager.shared.slots.first else {
+            // No window open at all — the persisted-active Space hasn't been
+            // surfaced. v1: fail cleanly; the caller retries once a window is up.
+            AppLogWarn("[AgentSpace] createAgentSpace: no slot available to spawn into")
+            tasksBySpaceId[spaceId] = nil
+            spaceIdByTaskId[taskId] = nil
+            SpaceManager.shared.deleteSpace(spaceId: spaceId)
+            completion(nil, nil)
+            return
+        }
+
+        slot.spawnHiddenWindow(forSpaceId: spaceId) { [weak self] windowId in
+            guard let self else { completion(nil, nil); return }
+            guard let windowId else {
+                self.tasksBySpaceId[spaceId] = nil
+                self.spaceIdByTaskId[taskId] = nil
+                SpaceManager.shared.deleteSpace(spaceId: spaceId)
+                completion(nil, nil)
+                return
+            }
+            if var task = self.tasksBySpaceId[spaceId] {
+                task.windowId = windowId
+                task.status = .running
+                self.tasksBySpaceId[spaceId] = task
+            }
+            completion(spaceId, windowId)
+            // The task is running with a live window now — autoview may surface
+            // it. Deferred a beat so the hidden spawn's window churn (key
+            // suppression, re-hide) settles before the deliberate switch.
+            self.autoViewReevaluate(delay: 0.8)
+        }
+    }
+
+    // MARK: - Ownership handshake
+
+    /// The user switched into the agent Space's window (watch mode). Ownership
+    /// stays with the agent; clear any unseen-error badge.
+    func userDidSurface(spaceId: String) {
+        guard var task = tasksBySpaceId[spaceId] else { return }
+        task.hasUnseenError = false
+        tasksBySpaceId[spaceId] = task
+        guard task.origin == .phiAgent else { return }
+        // Presence is informational; fire-and-forget.
+        let taskId = task.taskId
+        Task { try? await APIClient.shared.setAgentSpacePresence(taskId: taskId, userPresent: true) }
+    }
+
+    /// The user switched away from the agent Space's window. Ordering the
+    /// window out makes macOS occlusion mark its WebContents hidden, and the
+    /// one-shot visibility forcing in Chromium only re-fires on tab insertion
+    /// or active-tab change — so re-assert agent mode shortly after the swap to
+    /// keep the agent's renderer painting off screen.
+    func userDidLeave(spaceId: String) {
+        guard let task = tasksBySpaceId[spaceId], task.ownership == .agent,
+              task.windowId != 0 else { return }
+        let windowId = task.windowId
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
+            guard let self,
+                  let current = self.tasksBySpaceId[spaceId],
+                  current.ownership == .agent, current.windowId == windowId else { return }
+            ChromiumLauncher.sharedInstance().bridge?
+                .setAgentMode(true, windowId: Int64(windowId))
+        }
+    }
+
+    /// The user takes control (interrupt). Order: synchronous Chromium flag →
+    /// extension broadcast → phi-agent HTTP (`.phiAgent` tasks only). Local
+    /// state stays `.user` even if the HTTP call fails (local enforcement
+    /// already holds).
+    func takeControl(spaceId: String) {
+        guard var task = tasksBySpaceId[spaceId] else { return }
+        task.ownership = .user
+        tasksBySpaceId[spaceId] = task
+        // The user is driving now — drop the operating mask.
+        refreshOperatingMask(forSpaceId: spaceId,
+                             activeTabId: currentActiveTabId(forSpaceId: spaceId))
+
+        ChromiumLauncher.sharedInstance().bridge?
+            .setAgentMode(false, windowId: Int64(task.windowId))
+        broadcastOwnership(taskId: task.taskId, owner: "user")
+        guard task.origin == .phiAgent else { return }
+        let taskId = task.taskId
+        Task {
+            try? await APIClient.shared.handoffAgentSpace(taskId: taskId, reason: "user_interrupt")
+        }
+    }
+
+    /// The agent asked to give control to the user (e.g. login or captcha).
+    /// Same state transition as a user interrupt; the caller (the agent) is
+    /// the one requesting it, so no phi-agent notification fires here for
+    /// `.cdp` tasks either way. `message` — what the agent needs the user to do
+    /// — is surfaced in a prompt with a shortcut to switch into the Space.
+    func interruptByAgentRequest(taskId: String, message: String? = nil) -> Bool {
+        guard let spaceId = spaceIdByTaskId[taskId] else { return false }
+        AppLogInfo("[AgentSpace] agent handed control to user: task=\(taskId) spaceId=\(spaceId)")
+        takeControl(spaceId: spaceId)
+        presentHandoffPrompt(spaceId: spaceId, message: message)
+        return true
+    }
+
+    /// Prompts the user that the agent needs them, showing the agent's message
+    /// and a one-click switch into the agent Space to finish the step.
+    ///
+    /// A floating panel centered over the visible browser window — NOT a
+    /// window-attached sheet: a sheet inherits its anchor window's fate, and
+    /// at handoff time the window stack is churning (autoview switches, the
+    /// key window can be the agent's hidden window), which stranded the
+    /// prompt off-center or off-screen. The panel floats above Space swaps,
+    /// always lands mid-window, and is non-blocking so the user can act when
+    /// ready. Dismissed automatically when its task no longer needs the user
+    /// (hand-back, takeover, completion, deletion).
+    private func presentHandoffPrompt(spaceId: String, message: String?) {
+        dismissHandoffPrompt()
+
+        let body = (message?.isEmpty == false)
+            ? message!
+            : NSLocalizedString(
+                "The agent handed control back to you to finish a step — for example, signing in.",
+                comment: "Agent handoff prompt - default body")
+        let view = HandoffPromptView(
+            title: NSLocalizedString(
+                "The agent needs you", comment: "Agent handoff prompt - title"),
+            message: body,
+            switchTitle: NSLocalizedString(
+                "Switch to Agent Space", comment: "Agent handoff prompt - open the agent Space"),
+            laterTitle: NSLocalizedString(
+                "Later", comment: "Agent handoff prompt - dismiss"),
+            onSwitch: { [weak self] in
+                AppLogInfo("[AgentSpace] handoff prompt: switch to agent Space")
+                self?.dismissHandoffPrompt()
+                SpaceManager.shared.activateInFocusedWindow(spaceId: spaceId)
+            },
+            onLater: { [weak self] in
+                AppLogInfo("[AgentSpace] handoff prompt: dismissed (Later)")
+                self?.dismissHandoffPrompt()
+            })
+
+        let hosting = NSHostingView(rootView: view)
+        hosting.layoutSubtreeIfNeeded()
+        let size = hosting.fittingSize
+        let panel = HandoffPromptPanel(
+            contentRect: NSRect(origin: .zero, size: size),
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered, defer: false)
+        panel.isFloatingPanel = true
+        panel.level = .floating
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.hasShadow = true
+        panel.hidesOnDeactivate = false
+        panel.isReleasedWhenClosed = false
+        panel.isMovableByWindowBackground = true
+        panel.contentView = hosting
+
+        // Dead center of the browser window the user is looking at; the
+        // screen's center when no browser window is up.
+        let slot = SpaceManager.shared.keySlot ?? SpaceManager.shared.slots.first
+        let anchor = slot?.visibleController?.window?.frame
+            ?? NSScreen.main?.visibleFrame
+            ?? NSRect(x: 0, y: 0, width: 1280, height: 800)
+        panel.setFrameOrigin(NSPoint(x: anchor.midX - size.width / 2,
+                                     y: anchor.midY - size.height / 2))
+        panel.orderFrontRegardless()
+
+        handoffPromptPanel = panel
+        handoffPromptSpaceId = spaceId
+    }
+
+    /// Closes the handoff prompt. With a `spaceId`, only when the prompt
+    /// belongs to that Space — the automatic dismissals (hand-back, takeover,
+    /// completion, deletion) must not tear down a newer task's prompt.
+    private func dismissHandoffPrompt(forSpaceId spaceId: String? = nil) {
+        if let spaceId, handoffPromptSpaceId != spaceId { return }
+        handoffPromptPanel?.close()
+        handoffPromptPanel = nil
+        handoffPromptSpaceId = nil
+    }
+
+    /// The user hands control back to the agent. For `.phiAgent` tasks the
+    /// backend must accept before the agent resumes, so the HTTP call goes
+    /// first. `.cdp` tasks flip locally and synchronously — the CDP client
+    /// observes the ownership broadcast and resumes on its own.
+    func handBack(spaceId: String) {
+        guard let task = tasksBySpaceId[spaceId] else { return }
+        let taskId = task.taskId
+        let windowId = task.windowId
+
+        if task.origin == .cdp {
+            var t = task
+            t.ownership = .agent
+            tasksBySpaceId[spaceId] = t
+            refreshOperatingMask(forSpaceId: spaceId,
+                                 activeTabId: currentActiveTabId(forSpaceId: spaceId))
+            ChromiumLauncher.sharedInstance().bridge?
+                .setAgentMode(true, windowId: Int64(windowId))
+            broadcastOwnership(taskId: taskId, owner: "agent")
+            // The clock was paused while the user held control; restart it with
+            // the between-rounds grace — the driving session may take a while
+            // to notice the hand-back and run its next round.
+            touchKeepAlive(taskId: taskId, ttlSeconds: Self.interRoundKeepAliveTTL)
+            // The agent no longer needs the user — retire a lingering prompt.
+            dismissHandoffPrompt(forSpaceId: spaceId)
+            return
+        }
+
+        Task { [weak self] in
+            do {
+                try await APIClient.shared.setAgentSpacePresence(
+                    taskId: taskId, userPresent: false, handback: true)
+            } catch {
+                AppLogWarn("[AgentSpace] handBack: phi-agent rejected, not resuming agent")
+                return
+            }
+            await MainActor.run {
+                guard let self, var t = self.tasksBySpaceId[spaceId] else { return }
+                t.ownership = .agent
+                self.tasksBySpaceId[spaceId] = t
+                self.refreshOperatingMask(forSpaceId: spaceId,
+                                          activeTabId: self.currentActiveTabId(forSpaceId: spaceId))
+                ChromiumLauncher.sharedInstance().bridge?
+                    .setAgentMode(true, windowId: Int64(windowId))
+                self.broadcastOwnership(taskId: taskId, owner: "agent")
+                self.dismissHandoffPrompt(forSpaceId: spaceId)
+            }
+        }
+    }
+
+    /// The agent resumes control after the user explicitly confirmed (the CDP
+    /// client's takeover, mirroring ego's semantics — policy enforcement lives
+    /// in the client). Flips locally; no phi-agent involvement.
+    func resumeAgentControl(taskId: String) -> Bool {
+        guard let spaceId = spaceIdByTaskId[taskId],
+              var task = tasksBySpaceId[spaceId] else { return false }
+        guard task.ownership == .user else { return true }
+        task.ownership = .agent
+        tasksBySpaceId[spaceId] = task
+        refreshOperatingMask(forSpaceId: spaceId,
+                             activeTabId: currentActiveTabId(forSpaceId: spaceId))
+        ChromiumLauncher.sharedInstance().bridge?
+            .setAgentMode(true, windowId: Int64(task.windowId))
+        broadcastOwnership(taskId: taskId, owner: "agent")
+        // Restart the paused keep-alive clock now that the agent drives again —
+        // explicit TTL, since a plain touch only extends and could not shorten
+        // a longer window banked before the user took control.
+        touchKeepAlive(taskId: taskId, ttlSeconds: Self.defaultKeepAliveTTL)
+        dismissHandoffPrompt(forSpaceId: spaceId)
+        return true
+    }
+
+    // MARK: - Agent autoview
+
+    /// View ▸ Agent Autoview. While enabled, the focused window follows the
+    /// operating agent: when a task is running and the user is not already on
+    /// a running agent Space, surface it (watch mode). With several agents
+    /// running the watched one is never preempted — the next switch happens
+    /// when it stops operating (idle between rounds, completion, deletion),
+    /// picking the lowest-numbered running task for a stable order. A Space
+    /// the user holds control of (handoff in progress) blocks switching away:
+    /// they are mid-step there.
+    ///
+    /// Re-evaluated on every run-state edge, task completion/deletion, and
+    /// when the menu toggle turns on. `delay` defers the check past a
+    /// deletion's retreat animation so the two switches don't race.
+    func autoViewReevaluate(delay: TimeInterval = 0) {
+        guard PhiPreferences.AgentSpaces.autoViewEnabled else { return }
+        guard delay == 0 else {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                self?.autoViewReevaluate()
+            }
+            return
+        }
+        let currentSpaceId = SpaceManager.shared.activeSpaceId
+        if let currentSpaceId, let current = tasksBySpaceId[currentSpaceId] {
+            // Watching a running agent, or holding control of one — stay put.
+            if current.status == .running || current.ownership == .user { return }
+        }
+        guard let next = tasksBySpaceId.values
+            .filter({ $0.status == .running && $0.ownership == .agent && $0.windowId != 0 })
+            .min(by: { $0.number < $1.number }),
+            next.spaceId != currentSpaceId else { return }
+        AppLogInfo("[AgentSpace] autoview: surfacing running task \(next.taskId)")
+        SpaceManager.shared.activateInFocusedWindow(spaceId: next.spaceId)
+    }
+
+    // MARK: - State / completion (inbound from the agent)
+
+    func setStatusCaption(taskId: String, caption: String) {
+        guard let spaceId = spaceIdByTaskId[taskId], var task = tasksBySpaceId[spaceId] else { return }
+        task.statusCaption = caption
+        tasksBySpaceId[spaceId] = task
+    }
+
+    /// Driver-reported activity for the pip badge: `.running` while the agent is
+    /// executing a step, `.idle` between steps. Never overrides a terminal state
+    /// (`.completed`/`.failed`) — those own the pip until the Space is cleaned up.
+    func setRunState(taskId: String, running: Bool) {
+        guard let spaceId = spaceIdByTaskId[taskId], var task = tasksBySpaceId[spaceId] else { return }
+        switch task.status {
+        case .completed, .failed:
+            return
+        case .starting, .running, .idle:
+            task.status = running ? .running : .idle
+            if running && task.origin == .cdp {
+                // A round is starting to drive: reset the deadline to the short
+                // driving window. Plain heartbeats only ever extend the deadline
+                // (`touchKeepAlive` maxes), so without this the between-rounds
+                // grace bought by a previous round's end would keep masking a
+                // driver that dies mid-round for up to 30 minutes.
+                task.keepAliveDeadline = Date().addingTimeInterval(Self.defaultKeepAliveTTL)
+            }
+            tasksBySpaceId[spaceId] = task
+            // Both edges matter to autoview: running → surface it; idle → the
+            // watched agent finished its step, another running one may take over.
+            autoViewReevaluate()
+        }
+    }
+
+    func setCursor(taskId: String, tabId: Int, point: CGPoint) {
+        guard let spaceId = spaceIdByTaskId[taskId], var task = tasksBySpaceId[spaceId] else { return }
+        task.cursor = point
+        task.cursorTabId = tabId
+        tasksBySpaceId[spaceId] = task
+    }
+
+    func showEffect(taskId: String, kind: AgentEffect.Kind,
+                    point: CGPoint?, size: CGSize?, dy: CGFloat?) {
+        guard let spaceId = spaceIdByTaskId[taskId], tasksBySpaceId[spaceId] != nil else { return }
+        effectRequested.send(
+            AgentEffect(spaceId: spaceId, kind: kind, point: point, size: size, dy: dy))
+    }
+
+    func markError(taskId: String, message: String) {
+        guard let spaceId = spaceIdByTaskId[taskId], var task = tasksBySpaceId[spaceId] else { return }
+        task.status = .failed(message: message)
+        task.hasUnseenError = true
+        tasksBySpaceId[spaceId] = task
+    }
+
+    /// Task finished. Agent Spaces are ephemeral — they exist only while their
+    /// task is running, so completion always flips agent mode off, drops the
+    /// task record, and deletes the Space (closing its window). The `keep` flag
+    /// is accepted for protocol compatibility but no longer leaves a lingering
+    /// Space; a finished agent Space is never kept in the switcher.
+    func taskDidComplete(taskId: String, success: Bool, keep: Bool, message: String? = nil) {
+        guard let spaceId = spaceIdByTaskId[taskId], let task = tasksBySpaceId[spaceId] else { return }
+        // The Space is removed either way; keep the driver-reported outcome
+        // observable in the log (there is no surviving UI to show it on).
+        AppLogInfo("[AgentSpace] task \(taskId) completed success=\(success)"
+            + (message.map { " message=\($0)" } ?? ""))
+        if let masked = task.maskedTabId {
+            AgentAnimationManager.shared.setActive(false, for: masked)
+        }
+        ChromiumLauncher.sharedInstance().bridge?
+            .setAgentMode(false, windowId: Int64(task.windowId))
+        tasksBySpaceId[spaceId] = nil
+        spaceIdByTaskId[taskId] = nil
+        dismissHandoffPrompt(forSpaceId: spaceId)
+        SpaceManager.shared.deleteSpace(spaceId: spaceId)
+        stopKeepAliveSweepIfIdle()
+        // The watched agent may just have finished — hand the view to the next
+        // running one, after the deletion retreat's animation settles.
+        autoViewReevaluate(delay: 0.8)
+    }
+
+    /// The Space was deleted out from under its live task (a user delete from
+    /// the switcher/strip). Drop the task record and its overlay side effects
+    /// immediately so no stale record lingers for stateless CDP clients to
+    /// keep "finding" — the window itself is torn down by the deletion, so no
+    /// agent-mode flip is needed. Called by `SpaceManager.deleteSpace`; a
+    /// completion-driven delete is a no-op here because `taskDidComplete`
+    /// already removed the record.
+    func spaceWasDeleted(spaceId: String) {
+        guard let task = tasksBySpaceId[spaceId] else { return }
+        if let masked = task.maskedTabId {
+            AgentAnimationManager.shared.setActive(false, for: masked)
+        }
+        tasksBySpaceId[spaceId] = nil
+        spaceIdByTaskId[task.taskId] = nil
+        dismissHandoffPrompt(forSpaceId: spaceId)
+        stopKeepAliveSweepIfIdle()
+        autoViewReevaluate(delay: 0.8)
+    }
+
+    // MARK: - Operating-tab mask
+
+    /// Mirrors the agent's operating (active) tab with the same overlay AI chat
+    /// shows when it drives a tab (`AgentAnimationManager` → the edge-fog mask).
+    /// While the agent holds control, `activeTabId` wears the mask; otherwise
+    /// (user in control, or no active tab) it is cleared. Any previously masked
+    /// tab in this Space is cleared first, so exactly one tab is masked. Driven
+    /// from `BrowserState.focuseTab` (active-tab change) and the ownership flips.
+    func refreshOperatingMask(forSpaceId spaceId: String, activeTabId: Int?) {
+        guard var task = tasksBySpaceId[spaceId] else { return }
+        let newMasked = task.ownership == .agent ? activeTabId : nil
+        guard task.maskedTabId != newMasked else { return }
+        if let old = task.maskedTabId {
+            AgentAnimationManager.shared.setActive(false, for: old)
+        }
+        if let newMasked {
+            AgentAnimationManager.shared.setActive(true, for: newMasked)
+        }
+        task.maskedTabId = newMasked
+        tasksBySpaceId[spaceId] = task
+    }
+
+    /// The Phi tab id of the agent window's currently active (operating) tab.
+    private func currentActiveTabId(forSpaceId spaceId: String) -> Int? {
+        guard let task = tasksBySpaceId[spaceId], task.windowId != 0 else { return nil }
+        return MainBrowserWindowControllersManager.shared
+            .getBrowserState(for: task.windowId)?.focusingTab?.guid
+    }
+
+    // MARK: - Helpers
+
+    func ownership(forTaskId taskId: String) -> AgentTaskOwnership? {
+        guard let spaceId = spaceIdByTaskId[taskId] else { return nil }
+        return tasksBySpaceId[spaceId]?.ownership
+    }
+
+    /// Which driver owns this task. Used to scope inbound control messages to
+    /// their own origin so a CDP client can't drive a phi-agent Space (or vice
+    /// versa) just by naming its taskId.
+    func origin(forTaskId taskId: String) -> AgentTaskOrigin? {
+        guard let spaceId = spaceIdByTaskId[taskId] else { return nil }
+        return tasksBySpaceId[spaceId]?.origin
+    }
+
+    private func broadcastOwnership(taskId: String, owner: String) {
+        // taskId is caller-chosen (an LLM-authored task name can contain quotes)
+        // — serialize, never interpolate into JSON.
+        guard let data = try? JSONSerialization.data(
+                withJSONObject: ["taskId": taskId, "owner": owner]),
+              let payload = String(data: data, encoding: .utf8) else { return }
+        ExtensionMessaging.shared.broadcast(type: "agentSpace.ownershipChanged", payload: payload)
+    }
+}
+
+extension SpaceModel {
+    /// True when this Space is an agent Space created by `AgentSpaceManager`,
+    /// matched by its visual signature. Used to hide agent Spaces from the
+    /// settings surfaces they don't belong in (the Space list, URL-rule routing
+    /// targets); both a live agent Space and a not-yet-swept orphan match.
+    var isAgentSpace: Bool {
+        AgentSpaceManager.isAgentSpaceModel(
+            name: name, iconName: iconName, colorHex: colorHex)
+    }
+}
+
+// MARK: - Handoff prompt panel
+
+/// Borderless floating panel for the handoff prompt. `canBecomeKey` so its
+/// buttons and keyboard shortcuts work despite the borderless style mask.
+private final class HandoffPromptPanel: NSPanel {
+    override var canBecomeKey: Bool { true }
+}
+
+/// Content of the handoff prompt: the agent's message and the two choices,
+/// styled like a system alert but hosted in the floating panel above.
+private struct HandoffPromptView: View {
+    let title: String
+    let message: String
+    let switchTitle: String
+    let laterTitle: String
+    let onSwitch: () -> Void
+    let onLater: () -> Void
+
+    var body: some View {
+        VStack(spacing: 14) {
+            Text(title)
+                .font(.system(size: 14, weight: .semibold))
+                .multilineTextAlignment(.center)
+            Text(message)
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+            VStack(spacing: 8) {
+                Button(action: onSwitch) {
+                    Text(switchTitle).frame(maxWidth: .infinity)
+                }
+                .keyboardShortcut(.defaultAction)
+                .controlSize(.large)
+                .buttonStyle(.borderedProminent)
+                Button(action: onLater) {
+                    Text(laterTitle).frame(maxWidth: .infinity)
+                }
+                .keyboardShortcut(.cancelAction)
+                .controlSize(.large)
+                .buttonStyle(.bordered)
+            }
+        }
+        .padding(20)
+        .frame(width: 320)
+        .background(.regularMaterial,
+                    in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .strokeBorder(Color.primary.opacity(0.1))
+        }
+    }
+}

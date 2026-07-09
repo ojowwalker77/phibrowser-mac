@@ -26,6 +26,7 @@ extension AppController {
     static let spacesNewProfileItemTag = 500015
     static let spacesDeleteProfileParentItemTag = 500016
     static let viewMenuPhiSectionSeparatorTag = 500023
+    static let agentAutoViewItemTag = 500024
     static let spacesProfileSeparatorTag = 500020
     static let deleteProfileSubmenuIdentifier = NSUserInterfaceItemIdentifier("phi.spaces.deleteProfile")
     static let spacesMenuItemTag = 500018
@@ -79,7 +80,8 @@ extension AppController {
                     item.tag == AppController.layoutModeDefaultItemTag ||
                     item.tag == AppController.layoutModeNavigationAtTopItemTag ||
                     item.tag == AppController.layoutModeTraditionalItemTag ||
-                    item.tag == AppController.layoutModeTitleItemTag
+                    item.tag == AppController.layoutModeTitleItemTag ||
+                    item.tag == AppController.agentAutoViewItemTag
                 }
 
                 if submenu.items.last?.isSeparatorItem == false {
@@ -160,6 +162,18 @@ extension AppController {
                 Shortcuts.updateShortcut(for: newConversationItem)
                 newConversationItem.target = self
                 submenu.addItem(newConversationItem)
+
+                if PhiPreferences.AgentSpaces.skillFeatureEnabled {
+                    let agentAutoViewSeparator = NSMenuItem.separator()
+                    agentAutoViewSeparator.tag = AppController.viewMenuPhiSectionSeparatorTag
+                    submenu.addItem(agentAutoViewSeparator)
+                    let agentAutoViewItem = NSMenuItem(title: NSLocalizedString("Agent Autoview", comment: "View menu - Toggle that automatically switches to the Space of an operating agent"),
+                                                       action: #selector(toggleAgentAutoView(_:)),
+                                                       keyEquivalent: "")
+                    agentAutoViewItem.tag = AppController.agentAutoViewItemTag
+                    agentAutoViewItem.target = self
+                    submenu.addItem(agentAutoViewItem)
+                }
             } else
             
             if menuItem.title == "Phi", let subMenu = menuItem.submenu {
@@ -579,6 +593,20 @@ extension AppController {
         UserDefaults.standard.set(!currentValue, forKey: PhiPreferences.GeneralSettings.alwaysShowBookmarkBar.rawValue)
     }
 
+    /// View ▸ Agent Autoview — follow the operating agent's Space while it
+    /// works (see `AgentSpaceManager.autoViewReevaluate`). Turning it ON
+    /// surfaces an already-running agent immediately.
+    @objc func toggleAgentAutoView(_ sender: Any?) {
+        let enabled = !PhiPreferences.AgentSpaces.autoViewEnabled
+        PhiPreferences.AgentSpaces.autoViewEnabled = enabled
+        if enabled {
+            // Menu actions arrive on the main thread; the manager is main-actor.
+            MainActor.assumeIsolated {
+                AgentSpaceManager.shared.autoViewReevaluate()
+            }
+        }
+    }
+
     @objc func toggleBookmarkBarOnNewTab(_ sender: Any?) {
         let currentValue = PhiPreferences.GeneralSettings.showBookmarkBarOnNewTabPage.loadValue()
         UserDefaults.standard.set(!currentValue, forKey: PhiPreferences.GeneralSettings.showBookmarkBarOnNewTabPage.rawValue)
@@ -984,6 +1012,29 @@ extension AppController {
             closeSpaceItem.target = self
             menu.addItem(closeSpaceItem)
         }
+
+        // While the agent controls this Space, disable the actions that would
+        // mutate its workspace. New Space is left enabled (it doesn't touch the
+        // agent Space).
+        if focusedSpaceIsAgentControlled() {
+            [renameItem, changeIconItem, editThemeParent, changeProfileParent, deleteSpaceItem]
+                .forEach(Self.disableAgentLockedMenuItem)
+        } else if focusedSpaceIsAgentSpace() {
+            // The user took control, so most edits are allowed again — but
+            // re-profiling replaces the Space's windows and would break the
+            // agent, so Change Profile stays disabled for any agent Space.
+            Self.disableAgentLockedMenuItem(changeProfileParent)
+        }
+    }
+
+    /// Greys out a menu item that acts on an agent-controlled Space. Clearing
+    /// the action/target (and any submenu) makes AppKit's automatic menu
+    /// enabling disable it, so it reads as unavailable rather than vanishing.
+    private static func disableAgentLockedMenuItem(_ item: NSMenuItem) {
+        item.action = nil
+        item.target = nil
+        item.submenu = nil
+        item.isEnabled = false
     }
 
     /// Fills `menu` with one item per Space — its icon, ⌃-number switch shortcut,
@@ -1144,6 +1195,18 @@ extension AppController {
         deleteSpaceItem.target = self
         menu.addItem(deleteSpaceItem)
 
+        // While the agent controls this Space, disable the actions that would
+        // mutate its workspace (mirrors the tab-area context menu). New Space
+        // and the Next/Previous switchers below stay enabled.
+        if focusedSpaceIsAgentControlled() {
+            [renameItem, changeIconItem, editThemeParent, changeProfileParent, deleteSpaceItem]
+                .forEach(Self.disableAgentLockedMenuItem)
+        } else if focusedSpaceIsAgentSpace() {
+            // Change Profile stays disabled for an agent Space even after the
+            // user takes control — re-profiling would break the running agent.
+            Self.disableAgentLockedMenuItem(changeProfileParent)
+        }
+
         menu.addItem(.separator())
 
         let nextItem = NSMenuItem(
@@ -1291,6 +1354,46 @@ extension AppController {
         let id = slot?.activeSpaceId ?? SpaceManager.shared.activeSpaceId
         guard let id else { return nil }
         return SpaceManager.shared.spaces.first(where: { $0.spaceId == id })
+    }
+
+    /// True when the focused window is showing an agent Space that the agent
+    /// currently controls (not handed off to the user). While the agent holds
+    /// control, its workspace must not be mutated from the menus: New Tab and
+    /// the modify-this-Space actions (Rename / Change Icon / Edit Theme / Change
+    /// Profile / Delete) are disabled. New Space and switching Spaces stay
+    /// enabled so the user can always leave the agent Space.
+    func focusedSpaceIsAgentControlled() -> Bool {
+        guard let id = currentActiveSpace()?.spaceId else { return false }
+        return MainActor.assumeIsolated { AgentSpaceManager.shared.isAgentOwned(id) }
+    }
+
+    /// True when the focused Space is an agent Space, regardless of who holds
+    /// control. Used for actions that stay disabled even after the user takes
+    /// control — notably Change Profile, which would break the running agent.
+    func focusedSpaceIsAgentSpace() -> Bool {
+        guard let id = currentActiveSpace()?.spaceId else { return false }
+        return MainActor.assumeIsolated { AgentSpaceManager.shared.isAgentSpace(id) }
+    }
+
+    /// True when `item` lives in the Tab, Bookmarks, or History top-level menu —
+    /// the menus disabled wholesale while the focused Space is agent-controlled.
+    /// Bookmarks carries a stable identifier; Tab and History are matched by
+    /// title, as elsewhere in this file.
+    func itemIsInAgentLockedMenu(_ item: NSMenuItem) -> Bool {
+        // Walk up to the submenu that sits directly under the main menu.
+        var top: NSMenu? = item.menu
+        while let m = top, let sup = m.supermenu, sup !== NSApp.mainMenu {
+            top = sup
+        }
+        guard let topMenu = top else { return false }
+        if topMenu.identifier == AppController.bookmarksMenuIdentifier { return true }
+        if topMenu.title == "Tab" || topMenu.title == "History" { return true }
+        // The submenu's own title isn't always the menu name; fall back to the
+        // owning main-menu item's title.
+        if let owner = NSApp.mainMenu?.items.first(where: { $0.submenu === topMenu }) {
+            return owner.title == "Tab" || owner.title == "History"
+        }
+        return false
     }
 
     private func cycleActiveSpace(by step: Int) {
@@ -1536,6 +1639,16 @@ extension AppController {
             }
         }
 
+        // Agent lock: while the agent controls the focused Space, disable the
+        // menus the user must not drive against its workspace — New Tab (File
+        // menu) plus every item in the Tab, Bookmarks, and History menus.
+        // Their shortcuts are separately swallowed in
+        // `CommandDispatcher.handleKeyEquivalent`. Take control re-enables them.
+        if let menuItem = item as? NSMenuItem, focusedSpaceIsAgentControlled() {
+            if menuItem.tag == CommandWrapper.IDC_NEW_TAB.rawValue { return false }
+            if itemIsInAgentLockedMenu(menuItem) { return false }
+        }
+
         if item.action == #selector(toggleChatbar(_:)) {
             let phiAIEnabled = UserDefaults.standard.bool(forKey: PhiPreferences.AISettings.phiAIEnabled.rawValue)
             let state = MainBrowserWindowControllersManager.shared.getActiveWindowState()
@@ -1594,6 +1707,13 @@ extension AppController {
                 default:
                     break
                 }
+                return LoginController.shared.isLoggedin()
+            }
+        }
+
+        if item.action == #selector(toggleAgentAutoView(_:)) {
+            if let menuItem = item as? NSMenuItem {
+                menuItem.state = PhiPreferences.AgentSpaces.autoViewEnabled ? .on : .off
                 return LoginController.shared.isLoggedin()
             }
         }

@@ -300,6 +300,15 @@ final class SpaceManager: ObservableObject {
 
     @Published private(set) var spaces: [SpaceModel] = []
 
+    /// Whether an AUTOMATIC switch (deletion retreat, slot reconciliation,
+    /// new-slot seeding, tab-driven hand-off) may land on this Space. Agent
+    /// Spaces are ephemeral task workspaces and an Incognito Space is a
+    /// deliberate destination — both are surfaced only by an explicit user
+    /// switch, never picked as a fallback.
+    fileprivate func isAutomaticSwitchTarget(_ space: SpaceModel) -> Bool {
+        !Self.isIncognitoSpaceId(space.spaceId) && !space.isAgentSpace
+    }
+
     /// Raw store emission backing `spaces`, without the synthetic Incognito
     /// Spaces. Kept so `refreshIncognitoSpacePresence()` can recompute when
     /// an Incognito Space is created or closed without waiting for the next
@@ -470,7 +479,8 @@ final class SpaceManager: ObservableObject {
     /// (or the first known Space).
     @discardableResult
     func createSlot(initialSpaceId: String?) -> SpaceWindowSlot {
-        let fallback = persistedActiveSpaceId ?? spaces.first?.spaceId
+        let fallback = persistedActiveSpaceId
+            ?? (spaces.first(where: isAutomaticSwitchTarget) ?? spaces.first)?.spaceId
         let resolved = initialSpaceId ?? fallback
         let slot = SpaceWindowSlot(manager: self, initialSpaceId: resolved)
         slots.append(slot)
@@ -743,9 +753,14 @@ final class SpaceManager: ObservableObject {
                 uniqueKeysWithValues: windowMap.map { (String($0.key), $0.value) }
             )
             if let active = slot.activeSpaceId {
-                dict["activeSpaceId"] = SpaceManager.isIncognitoSpaceId(active)
-                    ? LocalStore.defaultSpaceId
-                    : active
+                // Ephemeral Spaces are rewritten to the default Space: an
+                // Incognito Space's session dies with its windows, and an
+                // agent Space is orphan-swept at the next launch — restoring
+                // a slot ONTO either would surface a Space that no longer
+                // exists (or is about to be deleted).
+                let isEphemeral = SpaceManager.isIncognitoSpaceId(active)
+                    || spaces.first(where: { $0.spaceId == active })?.isAgentSpace == true
+                dict["activeSpaceId"] = isEphemeral ? LocalStore.defaultSpaceId : active
             }
             // Only written when set, so a normal slot's plist entry stays small.
             if slot.snapshotIsFullScreen() {
@@ -834,7 +849,8 @@ final class SpaceManager: ObservableObject {
     func createSpace(name: String,
                      colorHex: String,
                      iconName: String,
-                     profileId: String) -> String? {
+                     profileId: String,
+                     makeDefaultActive: Bool = true) -> String? {
         guard let account = boundAccount else { return nil }
         let newSpaceId = UUID().uuidString
         account.localStorage.createSpace(
@@ -877,8 +893,12 @@ final class SpaceManager: ObservableObject {
         // the front of the *currently-focused* window — which does require that
         // spawn — is the caller's job via `activateInFocusedWindow`, so a create
         // made with no window open still seeds the pointer without paying the
-        // spawn cost.
-        persistActiveSpaceId(newSpaceId)
+        // spawn cost. Agent Spaces pass `makeDefaultActive: false`: they are
+        // background workspaces and must not steal the next window's landing
+        // Space.
+        if makeDefaultActive {
+            persistActiveSpaceId(newSpaceId)
+        }
         return newSpaceId
     }
 
@@ -892,7 +912,15 @@ final class SpaceManager: ObservableObject {
     /// slide). No-op when no window is open — the persisted default then seeds
     /// the next window to launch.
     func activateInFocusedWindow(spaceId: String) {
-        keySlot?.activate(spaceId: spaceId)
+        // `keySlot` is weak and can be nil in edge states (e.g. right after a
+        // sheet held key, or mid slot-teardown); falling back to the first
+        // live slot beats silently dropping the switch — the agent-handoff
+        // prompt's "Switch to Agent Space" button lands here.
+        guard let slot = keySlot ?? slots.first else {
+            AppLogWarn("[SpaceManager] activateInFocusedWindow(\(spaceId)): no live slot")
+            return
+        }
+        slot.activate(spaceId: spaceId)
     }
 
     /// Moves `tab` out of its current Space and into the Space identified by
@@ -1033,20 +1061,39 @@ final class SpaceManager: ObservableObject {
             alert.runModal()
             return
         }
+        // If this Space hosts a live agent task, drop the task record with the
+        // Space — otherwise it lingers and a stateless CDP client keeps
+        // "finding" a task whose window is gone, forcing a dedicated purge
+        // round. Main thread: deletes are UI-driven (same assumption as the
+        // other AgentSpaceManager hooks in this file).
+        MainActor.assumeIsolated {
+            AgentSpaceManager.shared.spaceWasDeleted(spaceId: spaceId)
+        }
         // A queued profile-change reopen for this Space is moot once the
         // Space itself goes away.
         pendingProfileChangeReopens.removeValue(forKey: spaceId)
-        // Any slot currently active on this Space retreats to the default
-        // Space with the usual switch animation, then closes the deleted
-        // Space's window — but only once the slide settles (`onSwapSettled`).
-        // By then the retreat has fronted the default Space and ordered the
-        // leaving window out, so the close lands on an already off-screen
-        // window and the browser never blinks. Closing it synchronously here
-        // would race the in-flight slide and tear down the still-front window
-        // mid-animation, which is why the retreat used to be instant.
+        // Any slot currently active on this Space retreats — back to the last
+        // regular Space it surfaced (so a completed agent task lands the user
+        // on the Space they came from, not the global default), falling back
+        // to the default Space when that Space is the one being deleted or no
+        // longer exists — with the usual switch animation, then closes the
+        // deleted Space's window, but only once the slide settles
+        // (`onSwapSettled`). By then the retreat has fronted the target Space
+        // and ordered the leaving window out, so the close lands on an
+        // already off-screen window and the browser never blinks. Closing it
+        // synchronously here would race the in-flight slide and tear down the
+        // still-front window mid-animation, which is why the retreat used to
+        // be instant.
         let retreatingSlots = slots.filter { $0.activeSpaceId == spaceId }
         for slot in retreatingSlots {
-            slot.activate(spaceId: LocalStore.defaultSpaceId) { [weak slot] in
+            let retreatTarget: String = {
+                if let last = slot.lastRegularSpaceId, last != spaceId,
+                   spaces.contains(where: { $0.spaceId == last }) {
+                    return last
+                }
+                return LocalStore.defaultSpaceId
+            }()
+            slot.activate(spaceId: retreatTarget) { [weak slot] in
                 guard let slot,
                       let controller = slot.windowController(for: spaceId) else { return }
                 // If the retreat never completed (e.g. its window spawn failed
@@ -1056,7 +1103,7 @@ final class SpaceManager: ObservableObject {
                 // worst case terminating the app over a Space delete. Leave it
                 // open instead; the Space row is still removed below.
                 guard slot.visibleController !== controller else {
-                    AppLogWarn("[SpaceManager] deleteSpace: not closing \(spaceId)'s window — it is still visible (retreat to default did not complete)")
+                    AppLogWarn("[SpaceManager] deleteSpace: not closing \(spaceId)'s window — it is still visible (retreat did not complete)")
                     return
                 }
                 // Evict before closing (as `changeProfile` does) so the window
@@ -1064,8 +1111,13 @@ final class SpaceManager: ObservableObject {
                 // skips the visible-close side effects. Without this the close is
                 // classified as window-driven and cascades the whole slot shut —
                 // the user-perceived window vanishes on a Space delete.
+                // `closeRetiredWindow` parks key on the visible window first:
+                // the deleted Space's window can still hold key (the user was
+                // just watching it), and closing a key window lets AppKit
+                // promote a hidden sibling that would then be adopted as a
+                // Space switch.
                 slot.evictWindow(for: spaceId)
-                controller.window?.close()
+                slot.closeRetiredWindow(controller)
             }
         }
         // Background windows of this Space in slots that weren't showing it are
@@ -1084,9 +1136,11 @@ final class SpaceManager: ObservableObject {
             guard slot.visibleController !== controller else { continue }
             // Evict before closing for the same reason as the retreating slots
             // above: a late window-driven unregister would otherwise cascade the
-            // slot shut.
+            // slot shut. `closeRetiredWindow` also parks key on the slot's
+            // visible window first so the close can't hand key to a hidden
+            // sibling.
             slot.evictWindow(for: spaceId)
-            controller.window?.close()
+            slot.closeRetiredWindow(controller)
         }
         // Cascade-delete the Space row, its tagged tabs/bookmarks, and its
         // URL rules in a SINGLE write (LocalStore.deleteSpace intentionally
@@ -1097,6 +1151,24 @@ final class SpaceManager: ObservableObject {
         // cleanup they would linger as inert rows that keep being pushed to
         // Chromium and dangle in the rules editor.
         boundAccount?.localStorage.deleteSpaceCascade(spaceId: spaceId)
+    }
+
+    /// Removes agent Spaces that have no live task. Agent Spaces are ephemeral
+    /// (owned by `AgentSpaceManager` only for the life of a task); one that was
+    /// persisted and outlived its in-memory task — typically across a relaunch —
+    /// is an orphan and must not linger as a stale "Agent" pip. Matched by the
+    /// agent-Space visual signature and confirmed taskless before deletion.
+    @MainActor
+    private func deleteOrphanedAgentSpaces(from allSpaces: [SpaceModel]) {
+        for space in allSpaces {
+            guard AgentSpaceManager.isAgentSpaceModel(
+                    name: space.name,
+                    iconName: space.iconName,
+                    colorHex: space.colorHex),
+                  !AgentSpaceManager.shared.isAgentSpace(space.spaceId) else { continue }
+            AppLogInfo("[SpaceManager] sweeping orphaned agent Space \(space.spaceId)")
+            deleteSpace(spaceId: space.spaceId)
+        }
     }
 
     /// Re-binds a Space to a different profile. A controller bakes its
@@ -1112,6 +1184,13 @@ final class SpaceManager: ObservableObject {
     func changeProfile(spaceId: String, toProfileId newProfileId: String) {
         guard spaceId != LocalStore.defaultSpaceId else {
             AppLogWarn("[SpaceManager] refusing to change the default space's profile")
+            return
+        }
+        // An agent Space is bound to the profile its task runs against;
+        // re-profiling replaces its windows and would break the running agent.
+        // Refuse regardless of ownership — even after the user takes control.
+        if let space = spaces.first(where: { $0.spaceId == spaceId }), space.isAgentSpace {
+            AppLogWarn("[SpaceManager] refusing to change profile of agent Space \(spaceId)")
             return
         }
         // An import currently writing into this Space must finish first:
@@ -1729,8 +1808,15 @@ final class SpaceManager: ObservableObject {
     /// without a pending spawn intent).
     fileprivate func persistActiveSpaceId(_ spaceId: String) {
         // Never remember an Incognito Space as last-active: cold launch and
-        // new slots must always land on a persistent Space.
+        // new slots must always land on a persistent Space. Agent Spaces are
+        // excluded for the same reason — they are deleted on completion (or
+        // orphan-swept at launch), so a user watching one must not make it
+        // the seed for the next window. Checked both by live task and by
+        // model signature so a mid-deletion Space (task record already
+        // dropped) is still caught.
         guard !Self.isIncognitoSpaceId(spaceId) else { return }
+        guard !MainActor.assumeIsolated({ AgentSpaceManager.shared.isAgentSpace(spaceId) }),
+              spaces.first(where: { $0.spaceId == spaceId })?.isAgentSpace != true else { return }
         boundAccount?.userDefaults.set(spaceId, forKey: .activeSpaceId)
     }
 
@@ -1774,6 +1860,11 @@ final class SpaceManager: ObservableObject {
         Task { @MainActor [weak self] in
             guard let self else { return }
             account.localStorage.ensureDefaultSpace(profileId: LocalStore.defaultProfileId)
+            // Agent Spaces are ephemeral — they should exist only while their
+            // (in-memory) task runs. Any that were persisted and outlived their
+            // task, e.g. across this relaunch, are orphans with no live task;
+            // sweep them so a stale "Agent" pip never lingers in the switcher.
+            self.deleteOrphanedAgentSpaces(from: account.localStorage.getAllSpaces())
             // No profileId filter — the sidebar shows every Space regardless
             // of which profile it's bound to. The publisher re-emits on any
             // SpaceModel write, so creating a Space on a non-default profile
@@ -2017,12 +2108,18 @@ final class SpaceManager: ObservableObject {
         // Reconcile each slot: if its active Space has been deleted out
         // from under it, fall back to the persisted default (still valid)
         // or the first known Space. Slots that are still on a valid Space
-        // are left alone.
+        // are left alone. Agent and Incognito Spaces are skipped as
+        // fallbacks (`isAutomaticSwitchTarget`): deleting a watched agent
+        // Space must land the user on a regular Space, not the next agent
+        // Space or Incognito. The unfiltered first Space stays as the last
+        // resort so a degenerate list still resolves somewhere.
         let fallback: String? = {
-            if let restored = persistedActiveSpaceId, validIds.contains(restored) {
+            if let restored = persistedActiveSpaceId,
+               let restoredModel = updated.first(where: { $0.spaceId == restored }),
+               isAutomaticSwitchTarget(restoredModel) {
                 return restored
             }
-            return updated.first?.spaceId
+            return (updated.first(where: isAutomaticSwitchTarget) ?? updated.first)?.spaceId
         }()
 
         // Gate on login: before login, windows are dangling and not yet in any
@@ -2107,6 +2204,15 @@ final class SpaceManager: ObservableObject {
 final class SpaceWindowSlot: ObservableObject {
 
     @Published private(set) var activeSpaceId: String?
+
+    /// The last REGULAR Space (not agent, not Incognito) this slot surfaced.
+    /// This is where a deletion retreat returns the user when the Space they
+    /// are standing on goes away: a completed agent task must land them back
+    /// on the Space they came from, not the global default. Updated wherever
+    /// the slot surfaces a Space (`activate`, external-switch adoption);
+    /// ephemeral Spaces are skipped so watching one never redirects the
+    /// retreat.
+    private(set) var lastRegularSpaceId: String?
 
     /// Bumped to ask this window's Spaces strip to open the icon/emoji picker for
     /// the active Space, anchored below its icon. Driven by the tab-area menu's
@@ -2401,6 +2507,37 @@ final class SpaceWindowSlot: ObservableObject {
     /// it synchronously as it appears to avoid a one-frame flash.
     private var tabBarAccessoryObservationsByWindowId: [Int: NSKeyValueObservation] = [:]
 
+    /// windowId → occlusion-state observation, installed only on agent-Space
+    /// windows. An agent-Space window must stay off screen while it isn't the
+    /// slot's surfaced Space, but Chromium orders it front whenever its
+    /// WebContents grabs focus (e.g. on navigation) — a bare `orderFront` that
+    /// fires no key notification, so `handleWindowDidBecomeKey` never sees it.
+    /// Occlusion DOES change when a window goes off→on screen, so this catches
+    /// every surfacing path and pushes the window straight back out.
+    private var agentOcclusionObservationsByWindowId: [Int: NSObjectProtocol] = [:]
+
+    /// Armed when `handleWindowDidBecomeKey` suppresses a spurious key on a
+    /// hidden agent-Space (or mid-deletion) window — i.e. whenever key status
+    /// is known to be parked on a window the user never surfaced. While armed,
+    /// a key change to any window other than the slot's on-screen one is
+    /// AppKit fallout, not a switch: the parked window losing key (Chromium
+    /// hiding it, or the deferred re-hide) makes AppKit promote a successor
+    /// itself, and with every slot window sharing one native tab group that
+    /// pick can be a HIDDEN sibling. Adopting it as an external switch lands
+    /// the user on a Space they never chose — observed as the agent-handoff
+    /// "wrong Space" yank, where key escaped to a sibling within one busy
+    /// main-thread turn, faster than any deferred re-key could run. Disarmed
+    /// when the visible window regains key; time-boxed by
+    /// `agentKeyFalloutWindow` so a genuine external switch (URL-rule route)
+    /// arriving later is never refused.
+    private var agentKeyFalloutArmedAt: Date?
+
+    /// How long after a suppressed spurious key the fallout guard above stays
+    /// armed. Observed fallout lands within ~100ms; the margin covers busy
+    /// main-thread turns. Kept short so a coincidental legitimate external
+    /// switch is refused for at most this long.
+    private static let agentKeyFalloutWindow: TimeInterval = 3.0
+
     /// Space IDs whose imminent window close is driven by the user
     /// closing the last tab in the active Space via the tab-row ✕
     /// button, not by closing the window itself. Populated by
@@ -2589,7 +2726,9 @@ final class SpaceWindowSlot: ObservableObject {
         // move, instant `animated: false` presents) pass `userInitiated: false`
         // and always run — they must, to keep the slot consistent. Re-activating
         // the current Space is a no-op and never gated.
+        AppLogInfo("[SpaceWindowSlot] activate(\(spaceId)) from=\(activeSpaceId ?? "nil") userInitiated=\(userInitiated) animated=\(animated)")
         if userInitiated, spaceId != activeSpaceId, isSwitchAnimationInFlight {
+            AppLogInfo("[SpaceWindowSlot] activate(\(spaceId)) dropped: switch animation in flight")
             return
         }
         isPerformingActivate = true
@@ -2599,7 +2738,39 @@ final class SpaceWindowSlot: ObservableObject {
             AppLogWarn("[SpaceWindowSlot] activate ignored: unknown spaceId \(spaceId)")
             return
         }
+
+        // Agent Space pre-hook. An agent Space's hidden window is spawned into a
+        // single slot; if the user switches to it from a DIFFERENT slot, adopt
+        // the existing hidden window here instead of spawning a second one (a
+        // Space maps 1:1 to a Chromium window). Then mark the surface so the
+        // agent overlay mounts in watch mode. `windowsBySpaceId` is per-slot, so
+        // only adopt when another slot currently owns it. Runs on the main
+        // thread (all activation is UI-driven), so the main-actor manager is
+        // reachable synchronously.
+        MainActor.assumeIsolated {
+            guard AgentSpaceManager.shared.isAgentSpace(spaceId) else { return }
+            if windowsBySpaceId[spaceId] == nil {
+                for other in manager.slots where other !== self {
+                    if let adopted = other.evictWindow(for: spaceId) {
+                        registerWindow(adopted, for: spaceId)
+                        break
+                    }
+                }
+            }
+            AgentSpaceManager.shared.userDidSurface(spaceId: spaceId)
+        }
+
         let previousSpaceId = activeSpaceId
+
+        // Agent Space post-hook: leaving an agent-owned Space orders its window
+        // out, and macOS occlusion then marks its WebContents hidden. Have the
+        // manager re-assert agent-mode visibility shortly after the swap so the
+        // agent's renderer keeps painting off screen.
+        if let previousSpaceId, previousSpaceId != spaceId {
+            MainActor.assumeIsolated {
+                AgentSpaceManager.shared.userDidLeave(spaceId: previousSpaceId)
+            }
+        }
 
         // Vertical push-in reads the leaving Space's sidebar band and color
         // BEFORE `activeSpaceId` flips below: the SpacesStrip name and the tint
@@ -2622,6 +2793,7 @@ final class SpaceWindowSlot: ObservableObject {
             // was registered last.
             manager.persistSlotsSnapshot()
         }
+        recordRegularSpace(spaceId)
 
         let previous = visibleController
         // The frame the entering Space's window inherits — resolved once, from
@@ -2690,7 +2862,14 @@ final class SpaceWindowSlot: ObservableObject {
                 // page. Re-activating the already-visible Space is excluded
                 // (`target !== previous`): the placeholder after closing the
                 // last tab is deliberate, only a real switch replaces it.
-                if target.browserState.tabs.isEmpty {
+                // Agent Spaces are also excluded: the agent owns that
+                // window's tabs (the spawn path seeds one), and a tab
+                // injected by a user surfacing to watch would flip the
+                // agent's active tab out from under it.
+                if target.browserState.tabs.isEmpty,
+                   !MainActor.assumeIsolated({
+                       AgentSpaceManager.shared.isAgentSpace(spaceId)
+                   }) {
                     target.browserState.createQuickLookupTab()
                 }
                 // After a cold-launch restore into fullscreen,
@@ -2978,6 +3157,88 @@ final class SpaceWindowSlot: ObservableObject {
                     // here so the previous window simply stays on screen.
                     AppLogWarn("[SpaceWindowSlot] ensureProfileLoaded failed for \(pid); not spawning")
                     self?.pendingSpawnSpaceIds.remove(spaceId)
+                    return
+                }
+                spawn()
+            }
+        } else {
+            spawn()
+        }
+    }
+
+    /// Spawns an agent Space's Chromium window WITHOUT surfacing or activating
+    /// it. Reuses the same spawn primitives as `activate` (the pendingSpawn
+    /// gate, `ensureProfileLoaded`, the `currentSpawn` attribution the
+    /// coordinator claims, and the deferred quick-lookup tab), but skips the
+    /// activeSpaceId flip, persistActiveSpaceId, swap animation, frame
+    /// inheritance, and orderOut — the window is created in agent mode
+    /// (`createAgentBrowser`), which Chromium never Show()s, so it stays ordered
+    /// out until the user switches to its Space. `completion` receives the new
+    /// windowId (or nil on failure).
+    func spawnHiddenWindow(forSpaceId spaceId: String,
+                           completion: @escaping (Int?) -> Void) {
+        guard let manager else { completion(nil); return }
+        if pendingSpawnSpaceIds.contains(spaceId) {
+            AppLogInfo("[SpaceWindowSlot] spawnHiddenWindow(\(spaceId)): spawn already in flight")
+            completion(nil)
+            return
+        }
+        guard let bridge = ChromiumLauncher.sharedInstance().bridge else {
+            AppLogWarn("[SpaceWindowSlot] spawnHiddenWindow cannot spawn: bridge unavailable")
+            completion(nil)
+            return
+        }
+        let targetProfileId = manager.spaces.first(where: { $0.spaceId == spaceId })?.profileId
+
+        let spawn: () -> Void = { [weak self, weak manager] in
+            guard let self = self else { completion(nil); return }
+            manager?.currentSpawn = SpaceManager.SpawnContext(
+                slot: self,
+                spaceId: spaceId,
+                inheritedFrame: nil,
+                inheritedSidebarWidth: 0,
+                inheritedSidebarCollapsed: nil
+            )
+            let dict = bridge.createAgentBrowser(withProfileId: targetProfileId)
+            manager?.currentSpawn = nil
+            guard let dict else {
+                AppLogWarn("[SpaceWindowSlot] createAgentBrowser returned nil")
+                self.pendingSpawnSpaceIds.remove(spaceId)
+                completion(nil)
+                return
+            }
+            guard let windowIdNumber = dict["windowId"] as? NSNumber else {
+                AppLogWarn("[SpaceWindowSlot] createAgentBrowser returned no windowId")
+                self.pendingSpawnSpaceIds.remove(spaceId)
+                completion(nil)
+                return
+            }
+            let id = windowIdNumber.intValue
+            if !self.contains(windowId: id),
+               self.pendingSpawnSpaceIdByWindowId[id] == nil {
+                self.pendingSpawnSpaceIdByWindowId[id] = spaceId
+            }
+            // The agent drives navigation itself, but seed a quick-lookup tab so
+            // the window has a live tab for the runtime to bind to, deferred past
+            // any session-restore burst exactly like the normal spawn path.
+            let wid = windowIdNumber.int64Value
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
+                guard let self,
+                      let state = self.windowsBySpaceId[spaceId]?.browserState,
+                      state.normalTabs.isEmpty else { return }
+                ChromiumLauncher.sharedInstance().bridge?
+                    .createQuickLookupTab(withWindowId: wid, customGuid: nil)
+            }
+            completion(id)
+        }
+
+        pendingSpawnSpaceIds.insert(spaceId)
+        if let pid = targetProfileId, !pid.isEmpty {
+            bridge.ensureProfileLoaded(pid) { [weak self] success in
+                guard success else {
+                    AppLogWarn("[SpaceWindowSlot] spawnHiddenWindow: ensureProfileLoaded failed for \(pid)")
+                    self?.pendingSpawnSpaceIds.remove(spaceId)
+                    completion(nil)
                     return
                 }
                 spawn()
@@ -4395,6 +4656,9 @@ final class SpaceWindowSlot: ObservableObject {
             if let token = keyObservationsByWindowId.removeValue(forKey: existing.windowId) {
                 NotificationCenter.default.removeObserver(token)
             }
+            if let token = agentOcclusionObservationsByWindowId.removeValue(forKey: existing.windowId) {
+                NotificationCenter.default.removeObserver(token)
+            }
             tabBarAccessoryObservationsByWindowId.removeValue(forKey: existing.windowId)?.invalidate()
             pendingCloseOnReplacementBySpaceId[spaceId] = existing
         }
@@ -4503,6 +4767,77 @@ final class SpaceWindowSlot: ObservableObject {
             self?.handleWindowDidBecomeKey(spaceId: spaceId)
         }
         keyObservationsByWindowId[controller.windowId] = token
+
+        // Agent-Space windows: keep them off screen unless the user has
+        // explicitly surfaced them. Chromium re-orders the window on screen on
+        // navigation focus without any key change, so watch occlusion (which
+        // does flip off→on) and shove it back out. See
+        // `agentOcclusionObservationsByWindowId`.
+        if MainActor.assumeIsolated({ AgentSpaceManager.shared.isAgentSpace(spaceId) }) {
+            let occlusionToken = NotificationCenter.default.addObserver(
+                forName: NSWindow.didChangeOcclusionStateNotification,
+                object: window,
+                queue: .main
+            ) { [weak self, weak controller] _ in
+                guard let self, let controller else { return }
+                self.scheduleEnforceAgentWindowHidden(controller)
+            }
+            agentOcclusionObservationsByWindowId[controller.windowId] = occlusionToken
+        }
+    }
+
+    /// Orders an agent-Space window back off screen on the NEXT runloop turn.
+    /// The re-hide must never run synchronously from a window notification: the
+    /// key/occlusion events that trigger it fire INSIDE AppKit's
+    /// `makeKeyAndOrderFront` / native tab-group mutation (during the agent
+    /// window's spawn and seed-tab insert), and reentrant `orderOut` there
+    /// corrupts AppKit's window-stack controller and throws — crashing the app,
+    /// reliably once a slot owns two agent windows. Deferring runs the ordering
+    /// on a clean stack, mirroring the deferred `window.close()` in
+    /// `registerWindow` (unsafe to close re-entrantly from a Chromium callback).
+    private func scheduleEnforceAgentWindowHidden(_ controller: MainBrowserWindowController) {
+        DispatchQueue.main.async { [weak self, weak controller] in
+            guard let self, let controller else { return }
+            self.enforceAgentWindowHidden(controller)
+        }
+    }
+
+    /// Pushes an agent-Space window back off screen if it surfaced without the
+    /// user switching to it, and reclaims any key status it holds. No-op while
+    /// `activate` is surfacing it deliberately (watch mode) or once it IS the
+    /// slot's surfaced controller. Idempotent — bails when the window is
+    /// already off screen and not key — so the two schedulers (spurious key
+    /// event, occlusion flip) can both fire harmlessly. Always invoked
+    /// deferred; see `scheduleEnforceAgentWindowHidden`.
+    ///
+    /// Ordering is load-bearing: the visible window takes key and native-tab-
+    /// group selection BEFORE the agent window is ordered out. Ordering out a
+    /// window that still holds key (or tab-group selection) makes AppKit pick
+    /// the successor itself — and with every slot window sharing one native
+    /// tab group that pick can be a HIDDEN sibling, whose didBecomeKey is then
+    /// adopted as an external Space switch (`handleWindowDidBecomeKey`),
+    /// yanking the user onto a Space they never chose. For the same reason the
+    /// key reclaim must also run when the agent window holds key while off
+    /// screen (a suppressed spurious key that never became occlusion-visible,
+    /// e.g. the ownership flip of an agent handoff): key parked on a hidden
+    /// agent window is handed to an arbitrary sibling by the next
+    /// Chromium-side hide.
+    private func enforceAgentWindowHidden(_ controller: MainBrowserWindowController) {
+        guard !isPerformingActivate else { return }
+        guard controller !== visibleController else { return }
+        guard let window = controller.window else { return }
+        // `isVisible` (ordered in), not just occlusion: a freshly keyed window
+        // is ordered in before occlusion flips, and a fully covered one never
+        // flips at all — both still need to be ordered out.
+        let isOrderedIn = window.isVisible || window.occlusionState.contains(.visible)
+        guard isOrderedIn || window.isKeyWindow else { return }
+        AppLogInfo("[SpaceWindowSlot] re-hiding agent-Space window \(controller.windowId) (orderedIn=\(isOrderedIn) key=\(window.isKeyWindow) activeSpaceId=\(activeSpaceId ?? "nil"))")
+        if let visible = visibleController?.window {
+            makeKeyAndOrderFrontHidingSlotTabBar(visible)
+        }
+        if isOrderedIn {
+            window.orderOut(nil)
+        }
     }
 
     /// Records that `spaceId`'s next window close is going to be the
@@ -4577,6 +4912,9 @@ final class SpaceWindowSlot: ObservableObject {
         // off to a sibling Space below; otherwise discarded.
         let leavingSnapshot = pendingTabDrivenCloseSnapshots.removeValue(forKey: spaceId)
         if let token = keyObservationsByWindowId.removeValue(forKey: controller.windowId) {
+            NotificationCenter.default.removeObserver(token)
+        }
+        if let token = agentOcclusionObservationsByWindowId.removeValue(forKey: controller.windowId) {
             NotificationCenter.default.removeObserver(token)
         }
         tabBarAccessoryObservationsByWindowId.removeValue(forKey: controller.windowId)?.invalidate()
@@ -4778,6 +5116,9 @@ final class SpaceWindowSlot: ObservableObject {
         if let token = keyObservationsByWindowId.removeValue(forKey: controller.windowId) {
             NotificationCenter.default.removeObserver(token)
         }
+        if let token = agentOcclusionObservationsByWindowId.removeValue(forKey: controller.windowId) {
+            NotificationCenter.default.removeObserver(token)
+        }
         tabBarAccessoryObservationsByWindowId.removeValue(forKey: controller.windowId)?.invalidate()
         manager?.pushSpaceStateToChromium()
         manager?.persistSlotsSnapshot()
@@ -4825,17 +5166,23 @@ final class SpaceWindowSlot: ObservableObject {
     /// hand-off target vary between identical closes. Falls back to any
     /// tabbed sibling for a controller bound to a Space mid-deletion (no
     /// strip row anymore); an arbitrary hand-off still beats cascading the
-    /// slot shut.
+    /// slot shut. Agent and Incognito Spaces are never hand-off targets
+    /// (both scans): a last-tab close must not dump the user into an agent's
+    /// hidden workspace or the Incognito Space.
     private func firstSiblingWithTabs() -> String? {
         if let manager {
-            for space in manager.spaces {
+            for space in manager.spaces where manager.isAutomaticSwitchTarget(space) {
                 if let candidate = windowsBySpaceId[space.spaceId],
                    !candidate.browserState.tabs.isEmpty {
                     return space.spaceId
                 }
             }
         }
-        return windowsBySpaceId.first(where: { !$0.value.browserState.tabs.isEmpty })?.key
+        return windowsBySpaceId.first(where: { entry in
+            !SpaceManager.isIncognitoSpaceId(entry.key)
+                && !MainActor.assumeIsolated({ AgentSpaceManager.shared.isAgentSpace(entry.key) })
+                && !entry.value.browserState.tabs.isEmpty
+        })?.key
     }
 
     /// Consumes a pending spawn intent for `windowId`. Returns nil when this
@@ -4894,6 +5241,35 @@ final class SpaceWindowSlot: ObservableObject {
         activeSpaceId = nil
     }
 
+    /// Records `spaceId` as the slot's last surfaced regular Space (see
+    /// `lastRegularSpaceId`). Ephemeral Spaces — agent (by live task or model
+    /// signature, matching `persistActiveSpaceId`) and Incognito — are
+    /// skipped, so surfacing one to watch leaves the retreat anchor on the
+    /// Space the user came from.
+    private func recordRegularSpace(_ spaceId: String) {
+        guard !SpaceManager.isIncognitoSpaceId(spaceId) else { return }
+        guard !MainActor.assumeIsolated({ AgentSpaceManager.shared.isAgentSpace(spaceId) }),
+              manager?.spaces.first(where: { $0.spaceId == spaceId })?.isAgentSpace != true
+        else { return }
+        lastRegularSpaceId = spaceId
+    }
+
+    /// Closes a window that has been evicted from this slot, first parking key
+    /// (and native-tab-group selection) on the slot's visible window and
+    /// arming the fallout guard. Closing a window that still holds key or
+    /// group selection makes AppKit promote a successor itself — potentially a
+    /// hidden sibling, whose key event would then be adopted as an external
+    /// switch and yank the user onto a Space they never chose (observed when
+    /// a completed agent task's window closed while the user was watching it).
+    func closeRetiredWindow(_ controller: MainBrowserWindowController) {
+        agentKeyFalloutArmedAt = Date()
+        if controller.window?.isKeyWindow == true,
+           let visible = visibleController?.window {
+            makeKeyAndOrderFrontHidingSlotTabBar(visible)
+        }
+        controller.window?.close()
+    }
+
     private func handleWindowDidBecomeKey(spaceId: String) {
         guard let controller = windowsBySpaceId[spaceId] else { return }
         // Ignore key changes that fire as a side effect of our own in-flight
@@ -4906,6 +5282,22 @@ final class SpaceWindowSlot: ObservableObject {
         // to the new Space"). Genuine user / URL-rule key changes run with
         // `isPerformingActivate == false`.
         if isPerformingActivate { return }
+        // Same reasoning one layer later: while this slot's own switch
+        // animation is in flight, every key change is churn from the swap
+        // itself or from whatever UI initiated it — NOT a switch. The concrete
+        // offender: the agent-handoff prompt's completion handler runs
+        // `activate(agentSpace)` synchronously, and AppKit re-keys the sheet's
+        // PARENT window (the origin Space) ~30ms later, mid-animation.
+        // Adopting that re-key as an external switch reverted `activeSpaceId`
+        // to the origin, made the in-flight agent surface look spurious, and
+        // bounced the user straight back — "plays the switch animation but
+        // lands on the origin Space". The swap's completion re-keys the real
+        // target after the flags clear, so the settled state is adopted
+        // normally.
+        if isSwitchAnimationInFlight {
+            AppLogInfo("[SpaceWindowSlot] ignoring key change for \(spaceId) during in-flight Space switch (activeSpaceId=\(activeSpaceId ?? "nil"))")
+            return
+        }
         // Ignore key changes that fire while the slot is tearing itself down.
         // A window-driven close cascades every Space's window shut one by one
         // (`cascadeCloseRemainingWindows`); the slot's windows share a native
@@ -4916,6 +5308,80 @@ final class SpaceWindowSlot: ObservableObject {
         // wrong Space instead of the one that was on screen when the window was
         // closed. The whole slot is going away; there is nothing to adopt.
         if isCascadingSlotClose { return }
+        // Ignore key changes on an agent Space's hidden window that isn't the
+        // slot's current Space. An agent Space is an ephemeral background
+        // workspace: its window is spawned hidden (`spawnHiddenWindow`) and
+        // joined to the slot's native tab group. It can be made key WITHOUT the
+        // user switching to it — AppKit keys the arriving tab as it lands, and
+        // (the real offender) the agent's own navigation focuses its
+        // WebContents, which orders its NSWindow front and activates the app.
+        // Left alone that both flips the slot's `activeSpaceId` to the agent's
+        // AND leaves the agent window physically on top of the user's, yanking
+        // them onto the agent Space the instant a task navigates. The user only
+        // ever surfaces an agent Space deliberately, through `activate` (pip
+        // click) — which sets `activeSpaceId` itself and guards this handler via
+        // `isPerformingActivate` — so a key event that reaches here for an agent
+        // Space that isn't already active is always spurious. Don't adopt it as
+        // the active Space, and push the window back off screen — but ONLY on a
+        // later runloop turn (`scheduleEnforceAgentWindowHidden`): this handler
+        // runs inside AppKit's makeKeyAndOrderFront, and ordering the window out
+        // synchronously here crashes. The deferred enforce also hands key (and
+        // native-tab-group selection) back to the visible window first — the
+        // agent window HOLDS key right now, and key left parked on it (or an
+        // orderOut while it is key) makes AppKit promote an arbitrary hidden
+        // sibling, which this handler would then adopt as an external switch,
+        // landing the user on a Space they never chose.
+        // Matched by live task OR model signature: `deleteSpace` drops the
+        // task record before the retreat and the deferred window close, so a
+        // key event fired by the dying window during that teardown (the CDP
+        // client may still be driving it) would otherwise no longer register
+        // as an agent Space and be adopted — yanking the user onto a Space
+        // that is mid-deletion.
+        let isAgentSpaceKey = MainActor.assumeIsolated { AgentSpaceManager.shared.isAgentSpace(spaceId) }
+            || manager?.spaces.first(where: { $0.spaceId == spaceId })?.isAgentSpace == true
+        if isAgentSpaceKey, activeSpaceId != spaceId {
+            AppLogInfo("[SpaceWindowSlot] suppressing spurious agent-Space key: spaceId=\(spaceId) activeSpaceId=\(activeSpaceId ?? "nil") visible=\(visibleController?.windowId ?? -1)")
+            agentKeyFalloutArmedAt = Date()
+            scheduleEnforceAgentWindowHidden(controller)
+            return
+        }
+        // Same teardown, later phase: once the deleted Space's row has left
+        // `spaces`, the signature check above can't see it either. A key
+        // event for a Space the manager doesn't know is never a switch the
+        // user made — `activate` refuses unknown spaceIds the same way — so
+        // don't adopt it; push the window back off screen like the agent
+        // case (it is about to be closed). The slot's first key is exempt
+        // (`visibleController == nil`): at cold launch windows register and
+        // key before the store's first emission.
+        if let manager, visibleController != nil, !manager.spaces.isEmpty,
+           !manager.spaces.contains(where: { $0.spaceId == spaceId }),
+           activeSpaceId != spaceId {
+            AppLogInfo("[SpaceWindowSlot] suppressing key for unknown (mid-deletion) Space: spaceId=\(spaceId) activeSpaceId=\(activeSpaceId ?? "nil") visible=\(visibleController?.windowId ?? -1)")
+            agentKeyFalloutArmedAt = Date()
+            scheduleEnforceAgentWindowHidden(controller)
+            return
+        }
+        // Fallout guard — see `agentKeyFalloutArmedAt`. Key was just parked on
+        // a hidden window the user never surfaced; it moving to anything but
+        // the slot's on-screen window is AppKit picking a successor, not a
+        // switch. Runs synchronously (the deferred re-hide loses this race on
+        // a busy main-thread turn), refuses the adoption below, and routes key
+        // back to the visible window on a clean stack. The visible window
+        // regaining key lands in the disarm branch, closing the episode.
+        if let armedAt = agentKeyFalloutArmedAt {
+            if controller === visibleController || spaceId == activeSpaceId {
+                agentKeyFalloutArmedAt = nil
+            } else if Date().timeIntervalSince(armedAt) < Self.agentKeyFalloutWindow {
+                AppLogInfo("[SpaceWindowSlot] refusing agent-key fallout adoption: spaceId=\(spaceId) window=\(controller.windowId) activeSpaceId=\(activeSpaceId ?? "nil")")
+                DispatchQueue.main.async { [weak self] in
+                    guard let self, let visible = self.visibleController?.window else { return }
+                    self.makeKeyAndOrderFrontHidingSlotTabBar(visible)
+                }
+                return
+            } else {
+                agentKeyFalloutArmedAt = nil
+            }
+        }
         hideSlotTabBars()
         // This window is the slot's on-screen window now — drop
         // `.moveToActiveSpace` once the front settles, or the next macOS
@@ -4964,6 +5430,7 @@ final class SpaceWindowSlot: ObservableObject {
         // focusing another profile's window never re-persisted — and the
         // next launch pairs the first window with another profile's Space.
         manager?.persistActiveSpaceId(spaceId)
+        recordRegularSpace(spaceId)
         if activeSpaceId != spaceId {
             activeSpaceId = spaceId
             manager?.persistSlotsSnapshot()
@@ -5125,6 +5592,10 @@ final class SpaceWindowSlot: ObservableObject {
             NotificationCenter.default.removeObserver(token)
         }
         keyObservationsByWindowId.removeAll()
+        for token in agentOcclusionObservationsByWindowId.values {
+            NotificationCenter.default.removeObserver(token)
+        }
+        agentOcclusionObservationsByWindowId.removeAll()
         for token in visibleFrameObservers {
             NotificationCenter.default.removeObserver(token)
         }

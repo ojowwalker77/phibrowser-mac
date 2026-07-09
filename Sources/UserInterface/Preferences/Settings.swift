@@ -12,4 +12,5 @@ extension Settings.PaneIdentifier {
     static let imchannels = Self("imchannels")
     static let profiles = Self("profiles")
     static let spaces = Self("spaces")
+    static let developer = Self("developer")
 }
