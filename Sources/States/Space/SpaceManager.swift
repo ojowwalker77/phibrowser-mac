@@ -2013,11 +2013,40 @@ final class SpaceWindowSlot: ObservableObject {
     /// hair of outward inset keeps sub-pixel jitter at the row's edge from
     /// reading as "left".
     func stripRowContainsPointer() -> Bool? {
-        guard let view = visibleController?.mainSplitViewController.sidebarViewController.spacesStripRowView,
+        guard let view = activeStripRowView(),
               let window = view.window else { return nil }
         let rectInWindow = view.convert(view.bounds, to: nil)
         let screenRect = window.convertToScreen(rectInWindow).insetBy(dx: -2, dy: -2)
         return screenRect.contains(NSEvent.mouseLocation)
+    }
+
+    /// The strip row actually presenting in the visible window. While the
+    /// floating sidebar panel is up, the docked sidebar is collapsed — its
+    /// row is out of the hierarchy (or zero-width), and verifying hovers
+    /// against it would veto genuine floating-strip hovers — so the floating
+    /// panel's row is the authority then; the docked sidebar's row otherwise.
+    private func activeStripRowView() -> NSView? {
+        guard let split = visibleController?.mainSplitViewController else { return nil }
+        let webContent = split.webContentContainerViewController
+        if let panel = webContent.floatingSidebarContainerView, panel.isHidden == false,
+           let floatingRow = webContent.floatingSidebarViewController?.spacesStripRowView {
+            return floatingRow
+        }
+        return split.sidebarViewController.spacesStripRowView
+    }
+
+    /// The sidebar surface a vertical Space switch should animate on in
+    /// `controller`'s window: the floating panel while it is up (the docked
+    /// sidebar is collapsed then, so its band is zero-sized and snapshots
+    /// would come back nil), the docked sidebar otherwise. Same
+    /// pointer-vs-presenting reasoning as `activeStripRowView`.
+    private func spaceSwitchSurface(of controller: MainBrowserWindowController) -> any SpaceSwitchBandSurface {
+        let webContent = controller.mainSplitViewController.webContentContainerViewController
+        if let panel = webContent.floatingSidebarContainerView, panel.isHidden == false,
+           let floating = webContent.floatingSidebarViewController {
+            return floating
+        }
+        return controller.mainSplitViewController.sidebarViewController
     }
 
     /// Clears `isStripRowHovered` once the pointer actually leaves the row,
@@ -2373,7 +2402,7 @@ final class SpaceWindowSlot: ObservableObject {
         let isVerticalSwitch = spaceId != activeSpaceId
             && !PhiPreferences.GeneralSettings.loadLayoutMode().isTraditional
         let verticalLeavingBand: NSImage? = isVerticalSwitch
-            ? visibleController?.mainSplitViewController.sidebarViewController.snapshotSpaceSwitchBand()
+            ? visibleController.flatMap { spaceSwitchSurface(of: $0).snapshotSpaceSwitchBand() }
             : nil
         let sourceColorHex = manager.spaces.first(where: { $0.spaceId == previousSpaceId })?.colorHex
         let targetColorHex = manager.spaces.first(where: { $0.spaceId == spaceId })?.colorHex
@@ -2428,6 +2457,24 @@ final class SpaceWindowSlot: ObservableObject {
                         width: previousWidth > 0 ? previousWidth : nil,
                         collapsed: previous.browserState.sidebarCollapsed
                     )
+                    // The floating sidebar panel is per-window: when the
+                    // switch is driven from the leaving window's open panel
+                    // (a pip click in its Spaces strip), the target would
+                    // surface with its own panel hidden and the sidebar
+                    // would vanish from under the pointer. Present the
+                    // target's panel before it fronts — same "reads as one
+                    // window" continuity as the sidebar sync above — at the
+                    // leaving panel's width, so the panel doesn't jump to the
+                    // target window's own cached width mid-switch. Must run
+                    // after syncSidebar: showFloatingSidebar() is gated on
+                    // the target's sidebarCollapsed, which that sync just set.
+                    let previousWebContent = previous.mainSplitViewController.webContentContainerViewController
+                    if previousWebContent.floatingSidebarContainerView?.isHidden == false {
+                        let targetWebContent = target.mainSplitViewController.webContentContainerViewController
+                        targetWebContent.lastKnownSidebarWidth = previousWebContent.currentFloatingWidth
+                        targetWebContent.updateFloatingSidebarWidth()
+                        targetWebContent.showFloatingSidebar()
+                    }
                 }
                 // Switching into a tab-less Space (its window outlived a
                 // last-tab close in placeholder mode) should greet the user
@@ -2868,7 +2915,11 @@ final class SpaceWindowSlot: ObservableObject {
             onSwapSettled?()
         }
 
-        let targetSidebar = target.mainSplitViewController.sidebarViewController
+        // Animate on whichever sidebar surface each window is presenting —
+        // the docked sidebar, or the floating panel while the sidebar is
+        // collapsed (a pip click there has `activate` present the target's
+        // panel before this runs, so both sides resolve to the same kind).
+        let targetSurface = spaceSwitchSurface(of: target)
         let duration = Self.swapAnimationDuration
         guard duration > 0,
               let previousWindow,
@@ -2878,7 +2929,7 @@ final class SpaceWindowSlot: ObservableObject {
             presentInstantly()
             return
         }
-        let prevSidebar = previous.mainSplitViewController.sidebarViewController
+        let prevSurface = spaceSwitchSurface(of: previous)
 
         // The whole-window background color is theme-driven and per-Space, so
         // it would otherwise jump when the window swaps at the end. Transition
@@ -2894,7 +2945,7 @@ final class SpaceWindowSlot: ObservableObject {
         // completion (the sidebar width was already synced by `activate`).
         targetWindow.setFrame(previousWindow.frame, display: false)
 
-        let bandFrame = prevSidebar.spaceSwitchBandFrame
+        let bandFrame = prevSurface.spaceSwitchBandFrame
         guard bandFrame.width > 0, bandFrame.height > 0 else {
             presentInstantly()
             return
@@ -2905,7 +2956,7 @@ final class SpaceWindowSlot: ObservableObject {
         // would bleed through the translucent sidebar as a ghost row. Hide it now
         // (the band snapshot above excludes the header, so this is snapshot-safe);
         // `orderOutIfNotTabbedWithTarget` reveals it once the target is fronted.
-        targetSidebar.setSpacesStripHidden(true)
+        targetSurface.setSpacesStripHidden(true)
 
         verticalSwapToken += 1
         let token = verticalSwapToken
@@ -2915,16 +2966,16 @@ final class SpaceWindowSlot: ObservableObject {
         // so nothing visibly changes while we wait one runloop for the target's
         // SwiftUI to commit. The tint gradient lives behind the stack, so it
         // stays visible and ramps underneath.
-        prevSidebar.setSwitchBandContentHidden(true)
+        prevSurface.setSwitchBandContentHidden(true)
         let placeholder = NSImageView(frame: bandFrame)
         placeholder.image = leavingImage
         placeholder.imageScaling = .scaleAxesIndependently
         placeholder.imageAlignment = .alignTopLeft
         placeholder.autoresizingMask = []
-        prevSidebar.view.addSubview(placeholder, positioned: .above, relativeTo: nil)
+        prevSurface.view.addSubview(placeholder, positioned: .above, relativeTo: nil)
 
         var didFinish = false
-        let finalize: () -> Void = { [weak self, weak prevSidebar, weak placeholder] in
+        let finalize: () -> Void = { [weak self, weak prevSurface, weak placeholder] in
             guard !didFinish else { return }
             didFinish = true
             if let self {
@@ -2946,7 +2997,7 @@ final class SpaceWindowSlot: ObservableObject {
             self?.orderOutIfNotTabbedWithTarget(previousWindow, targetWindow: targetWindow)
             placeholder?.removeFromSuperview()
             self?.activeSidebarOverlay?.cancel()
-            prevSidebar?.setSwitchBandContentHidden(false)
+            prevSurface?.setSwitchBandContentHidden(false)
             // Restore the leaving window's own theme now that it's hidden, so
             // it shows the source Space's colors when next activated.
             self?.themeRampTimer?.invalidate()
@@ -2964,11 +3015,11 @@ final class SpaceWindowSlot: ObservableObject {
 
         // Defer the entering snapshot + slide one runloop so the target
         // sidebar's strip shows the new Space name (bail if superseded).
-        DispatchQueue.main.async { [weak self, weak prevSidebar] in
+        DispatchQueue.main.async { [weak self, weak prevSurface] in
             guard let self, self.verticalSwapToken == token, !didFinish,
-                  let prevSidebar else { return }
-            targetSidebar.view.layoutSubtreeIfNeeded()
-            guard let enteringImage = targetSidebar.snapshotSpaceSwitchBand() else {
+                  let prevSurface else { return }
+            targetSurface.view.layoutSubtreeIfNeeded()
+            guard let enteringImage = targetSurface.snapshotSpaceSwitchBand() else {
                 finalize()
                 return
             }
@@ -2980,7 +3031,7 @@ final class SpaceWindowSlot: ObservableObject {
             )
             // Above the content band only — the header (address bar) and bottom
             // toolbar sit outside `bandFrame` and stay exposed/static.
-            prevSidebar.view.addSubview(overlay, positioned: .above, relativeTo: nil)
+            prevSurface.view.addSubview(overlay, positioned: .above, relativeTo: nil)
             self.activeSidebarOverlay = overlay
             // The overlay's leaving half sits at rest (x=0) exactly where the
             // placeholder was, so removing the placeholder is seamless.
@@ -2989,7 +3040,7 @@ final class SpaceWindowSlot: ObservableObject {
             // the slide so the background transitions source -> target across
             // the same window, landing on the target's colors at the swap.
             self.rampWindowTheme(prevThemeContext, from: sourceTheme, to: targetTheme, duration: duration)
-            prevSidebar.rampSpaceTint(fromHex: sourceColorHex, toHex: targetColorHex, duration: duration)
+            prevSurface.rampSpaceTint(fromHex: sourceColorHex, toHex: targetColorHex, duration: duration)
             overlay.runAnimation(duration: duration) { finalize() }
         }
     }
@@ -3840,6 +3891,12 @@ final class SpaceWindowSlot: ObservableObject {
         for controller in windowsBySpaceId.values {
             let isFront = frontWindow != nil && controller.window === frontWindow
             controller.mainSplitViewController.sidebarViewController.setSpacesStripHidden(!isFront)
+            // The floating panel hosts its own copy of the strip and can be
+            // open on a non-front window (a switch driven from the panel
+            // leaves the leaving window's panel up) — guard it the same way,
+            // and restore it when its window fronts.
+            controller.mainSplitViewController.webContentContainerViewController
+                .floatingSidebarViewController?.setSpacesStripHidden(!isFront)
         }
     }
 

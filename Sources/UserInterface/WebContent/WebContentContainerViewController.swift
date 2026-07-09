@@ -203,6 +203,11 @@ class WebContentContainerViewController: NSViewController {
     var floatingSidebarEnableWorkItem: DispatchWorkItem?
     var floatingSidebarLastShownAt: Date?
     var floatingSidebarShownFromRightToLeft = false
+    /// Hides the panel when its window leaves the screen (a Space switch
+    /// orders the leaving window out with its panel still up) — without
+    /// this the stale panel would greet the user when that window next
+    /// surfaces. See `ensureFloatingSidebarOcclusionObserver`.
+    var floatingSidebarOcclusionObserver: NSObjectProtocol?
     var isPointerInsideFloatingSidebar = false
     var isPointerInsideFloatingSidebarTrigger = false
     /// Tracks the last non-zero sidebar width so the floating panel can match it after collapse.
@@ -222,6 +227,9 @@ class WebContentContainerViewController: NSViewController {
     deinit {
         if let hostController = sharedBookmarkBarHostController {
             hostController.detachBookmarkBarIfAttached()
+        }
+        if let observer = floatingSidebarOcclusionObserver {
+            NotificationCenter.default.removeObserver(observer)
         }
     }
     

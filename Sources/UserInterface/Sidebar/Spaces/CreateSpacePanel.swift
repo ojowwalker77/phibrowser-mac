@@ -504,15 +504,35 @@ extension CreateSpacePanel {
 
     /// Single entry point for "New Space" from the menu or the Spaces picker.
     /// Vertical layouts (Performance / Balanced) show the form inline in the
-    /// sidebar; the horizontal layout (Comfortable) — or any window without a
-    /// usable sidebar — falls back to the floating window.
+    /// sidebar surface — the docked sidebar, or the floating panel while the
+    /// sidebar is collapsed and the panel is up. The horizontal layout
+    /// (Comfortable) — or any window without a usable sidebar surface —
+    /// falls back to the standalone window.
     static func requestCreation(initialProfileId: String?) {
         if let wc = MainBrowserWindowControllersManager.shared.activeWindowController,
            !wc.browserState.layoutMode.isTraditional {
-            let sidebar = wc.mainSplitViewController.sidebarViewController
-            if sidebar.isViewLoaded, sidebar.view.window != nil, sidebar.view.bounds.width > 120 {
-                sidebar.showCreateSpaceOverlay(initialProfileId: initialProfileId)
-                return
+            if !wc.browserState.sidebarCollapsed {
+                let sidebar = wc.mainSplitViewController.sidebarViewController
+                if sidebar.isViewLoaded, sidebar.view.window != nil, sidebar.view.bounds.width > 120 {
+                    sidebar.showCreateSpaceOverlay(initialProfileId: initialProfileId)
+                    return
+                }
+            } else {
+                // Collapsed sidebar: the docked sidebar still passes
+                // window/width checks (the split item keeps the view parked
+                // at its last width), but it's invisible — the form must not
+                // mount there. The floating panel is the sidebar surface
+                // then: host the form inline in the open panel (which pins
+                // itself open while the form is up). No open panel — e.g.
+                // the menu's "New Space" without hovering — falls through
+                // to the standalone window.
+                let webContent = wc.mainSplitViewController.webContentContainerViewController
+                if let floating = webContent.floatingSidebarViewController,
+                   webContent.floatingSidebarContainerView?.isHidden == false,
+                   floating.isViewLoaded, floating.view.bounds.width > 120 {
+                    floating.showCreateSpaceOverlay(initialProfileId: initialProfileId)
+                    return
+                }
             }
         }
         present(manager: .shared, initialProfileId: initialProfileId)

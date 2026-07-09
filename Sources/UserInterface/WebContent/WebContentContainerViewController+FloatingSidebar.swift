@@ -126,6 +126,24 @@ extension WebContentContainerViewController {
         floatingSidebarContainerView = interactionContainerView
     }
 
+    /// A Space switch driven from this panel orders the window out with the
+    /// panel still up (it hosts the push-in slide until the swap lands).
+    /// Hide it once the window is actually off screen — the pointer-driven
+    /// hide can't fire on a hidden window — so the window doesn't re-surface
+    /// later with a stale panel. Idempotent; re-attempted on every show in
+    /// case the view wasn't in a window at panel-creation time.
+    private func ensureFloatingSidebarOcclusionObserver() {
+        guard floatingSidebarOcclusionObserver == nil, let window = view.window else { return }
+        floatingSidebarOcclusionObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.didChangeOcclusionStateNotification,
+            object: window,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self, self.view.window?.isVisible == false else { return }
+            self.hideFloatingSidebar(animated: false)
+        }
+    }
+
     func updateFloatingSidebarWidth() {
         floatingSidebarWidthConstraint?.update(offset: currentFloatingWidth + Self.floatingSidebarInset)
     }
@@ -158,6 +176,7 @@ extension WebContentContainerViewController {
     func showFloatingSidebar() {
         guard shouldEnableFloatingSidebar() else { return }
         ensureFloatingSidebarIfNeeded()
+        ensureFloatingSidebarOcclusionObserver()
         cancelFloatingSidebarHide()
 
         guard let panel = floatingSidebarContainerView else { return }
@@ -189,6 +208,12 @@ extension WebContentContainerViewController {
         cancelFloatingSidebarHide()
         guard let panel = floatingSidebarContainerView else { return }
         guard panel.isHidden == false else { return }
+        // A forced hide (sidebar expanding, window ordering out) takes the
+        // create-Space form down with the panel; without this the form's
+        // `isCreatingSpace` pin on the slot would outlive the visible form.
+        // Pointer-driven hides are already blocked while the form is up
+        // (see scheduleFloatingSidebarHide), so this only fires on forced paths.
+        floatingSidebarViewController?.dismissCreateSpaceOverlay()
         floatingSidebarLeadingConstraint?.update(offset: floatingSidebarHiddenLeading)
 
         if animated {
@@ -214,6 +239,11 @@ extension WebContentContainerViewController {
         cancelFloatingSidebarHide()
         let workItem = DispatchWorkItem { [weak self] in
             guard let self else { return }
+            // The inline create-Space form pins the panel open: a pointer
+            // excursion outside the panel must not tear the form down
+            // mid-input. The pin lifts when the form closes (its dismiss
+            // re-runs this scheduling).
+            guard floatingSidebarViewController?.hasCreateSpaceOverlay != true else { return }
             refreshFloatingSidebarPointerState()
             guard isPointerInsideFloatingSidebar == false else { return }
             guard isPointerInsideFloatingSidebarTrigger == false else { return }

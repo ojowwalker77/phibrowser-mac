@@ -320,6 +320,7 @@
 		CC5025FC2E702603004223DC /* NSImage+Extension.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC5025FB2E702603004223DC /* NSImage+Extension.swift */; };
 		CC59CE000001000000000001 /* SpaceManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC59CE000001000000000002 /* SpaceManager.swift */; };
 		CC59CE000002000000000001 /* SpacesStripView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC59CE000002000000000002 /* SpacesStripView.swift */; };
+		CC59CE0000020000000000A1 /* SpaceSwitchBandSurface.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC59CE0000020000000000A2 /* SpaceSwitchBandSurface.swift */; };
 		CC59CE000003000000000001 /* ProfileManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC59CE000003000000000002 /* ProfileManager.swift */; };
 		CC5C51F62FB5C5560044D255 /* credits.html in Resources */ = {isa = PBXBuildFile; fileRef = CC5C51F52FB5C5560044D255 /* credits.html */; };
 		CC6335F72E4B29E000A176DA /* Logging.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC6335F62E4B29E000A176DA /* Logging.swift */; };
@@ -812,6 +813,7 @@
 		CC50262C2E716982004223DC /* OmniBoxViewController+Suggestion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "OmniBoxViewController+Suggestion.swift"; sourceTree = "<group>"; };
 		CC59CE000001000000000002 /* SpaceManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpaceManager.swift; sourceTree = "<group>"; };
 		CC59CE000002000000000002 /* SpacesStripView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpacesStripView.swift; sourceTree = "<group>"; };
+		CC59CE0000020000000000A2 /* SpaceSwitchBandSurface.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpaceSwitchBandSurface.swift; sourceTree = "<group>"; };
 		CC59CE000003000000000002 /* ProfileManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileManager.swift; sourceTree = "<group>"; };
 		CC5C51F52FB5C5560044D255 /* credits.html */ = {isa = PBXFileReference; lastKnownFileType = text.html; path = credits.html; sourceTree = "<group>"; };
 		CC6335F62E4B29E000A176DA /* Logging.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Logging.swift; sourceTree = "<group>"; };
@@ -1836,6 +1838,7 @@
 			isa = PBXGroup;
 			children = (
 				CC59CE000002000000000002 /* SpacesStripView.swift */,
+				CC59CE0000020000000000A2 /* SpaceSwitchBandSurface.swift */,
 				CC4F00030000000000000002 /* SpaceURLRulesEditor.swift */,
 				CC4F00040000000000000002 /* CreateSpacePanel.swift */,
 				CC4F00050000000000000002 /* SpaceChooserView.swift */,
@@ -2653,6 +2656,7 @@
 				CCBF8FA52E69915200B9A99E /* ApplicationState.swift in Sources */,
 				CC59CE000001000000000001 /* SpaceManager.swift in Sources */,
 				CC59CE000002000000000001 /* SpacesStripView.swift in Sources */,
+				CC59CE0000020000000000A1 /* SpaceSwitchBandSurface.swift in Sources */,
 				CC59CE000003000000000001 /* ProfileManager.swift in Sources */,
 				37C1B2F72EE2882400DD4496 /* OverlayToastViewModel.swift in Sources */,
 				8E5D8B012FDFFAD30039CBE3 /* WebContentSnapshotter.swift in Sources */,

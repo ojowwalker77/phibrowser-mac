@@ -269,36 +269,8 @@ class SidebarViewController: NSViewController {
         case .consumed:
             break
         case .trigger(let step):
-            activateAdjacentSpace(by: step)
+            activateAdjacentSpace(by: step, state: state)
         }
-    }
-
-    /// Switches THIS window's active Space, clamped at the first/last Space
-    /// (no wrap-around) so the push-in animation direction always matches the
-    /// swipe. At a clamp edge the switch can't proceed, so a rubber-band end
-    /// effect plays instead of the swipe being swallowed. Vertical layouts only.
-    ///
-    /// Incognito windows are excluded: they expose no Spaces (the strip is
-    /// suppressed and the window never joins a slot), and without the guard
-    /// the `keySlot` fallback below would switch the Space of a DIFFERENT
-    /// (normal) window from a swipe in the incognito sidebar.
-    private func activateAdjacentSpace(by step: Int) {
-        guard !PhiPreferences.GeneralSettings.loadLayoutMode().isTraditional,
-              PhiPreferences.GeneralSettings.spacesFeatureEnabled.loadValue(),
-              state.participatesInSpaces else { return }
-        let spaces = SpaceManager.shared.spaces
-        guard let slot = state.windowController?.slot ?? SpaceManager.shared.keySlot,
-              let currentId = slot.activeSpaceId,
-              let currentIdx = spaces.firstIndex(where: { $0.spaceId == currentId }) else { return }
-        let targetIdx = currentIdx + step
-        guard spaces.indices.contains(targetIdx) else {
-            // Already at the first/last Space (or only one exists) — there's
-            // nowhere to switch, so play the rubber-band end effect instead of
-            // silently swallowing the swipe.
-            bounceSpaceSwitchBand(forward: step > 0)
-            return
-        }
-        slot.activate(spaceId: spaces[targetIdx].spaceId, userInitiated: true)
     }
 
     /// Update chat button visibility based on configuration and current tab's aiChatEnabled
@@ -725,93 +697,6 @@ class SidebarViewController: NSViewController {
         )
     }
 
-    /// The contiguous per-Space content band — pinned tabs, the Spaces strip
-    /// (name + switcher), and the tab list (which also hosts bookmarks) — in
-    /// this view's coordinate space. `SpaceManager` snapshots this region from
-    /// the entering window's sidebar and slides it in over the leaving
-    /// window's matching region during a vertical Space switch. The header
-    /// (address bar) above and the bottom toolbar below are deliberately
-    /// excluded so they stay put through the push.
-    var spaceSwitchBandFrame: NSRect {
-        // The Spaces switch now lives in the header (with its own scroll
-        // animation), so the push-in band is just the pinned strip and the
-        // tab list.
-        let bandViews: [NSView] = [
-            pinnedTabContainerView,
-            tabList.view
-        ]
-        let rects = bandViews.compactMap { v -> NSRect? in
-            guard v.superview != nil else { return nil }
-            return view.convert(v.bounds, from: v)
-        }
-        guard let first = rects.first else { return .zero }
-        return rects.dropFirst().reduce(first) { $0.union($1) }
-    }
-
-    /// Content-only snapshot of `spaceSwitchBandFrame`. The tint gradient
-    /// lives in a sibling layer behind `mainStackView`, so it is NOT captured
-    /// here — the band image carries a transparent background and the ramping
-    /// gradient shows through during the slide. Renders even while the host
-    /// window is off-screen, since AppKit layout/`cacheDisplay` is independent
-    /// of window visibility.
-    func snapshotSpaceSwitchBand() -> NSImage? {
-        view.layoutSubtreeIfNeeded()
-        let bandInStack = mainStackView.convert(spaceSwitchBandFrame, from: view)
-        guard bandInStack.width > 0, bandInStack.height > 0,
-              let rep = mainStackView.bitmapImageRepForCachingDisplay(in: bandInStack) else {
-            return nil
-        }
-        withStaticNewTabSnapshotIcons {
-            mainStackView.cacheDisplay(in: bandInStack, to: rep)
-        }
-        let image = NSImage(size: bandInStack.size)
-        image.addRepresentation(rep)
-        return image
-    }
-
-    private func withStaticNewTabSnapshotIcons(_ body: () -> Void) {
-        let cells = newTabButtonCells(in: tabList.view)
-        guard !cells.isEmpty else {
-            body()
-            return
-        }
-
-        func apply(at index: Int) {
-            guard index < cells.count else {
-                body()
-                return
-            }
-            cells[index].withStaticSnapshotIcon {
-                apply(at: index + 1)
-            }
-        }
-
-        apply(at: 0)
-    }
-
-    private func newTabButtonCells(in view: NSView) -> [NewTabButtonCellView] {
-        var cells: [NewTabButtonCellView] = []
-        if let cell = view as? NewTabButtonCellView {
-            cells.append(cell)
-        }
-        for subview in view.subviews {
-            cells.append(contentsOf: newTabButtonCells(in: subview))
-        }
-        return cells
-    }
-
-    /// Hides/reveals the live band content while the push-in overlay (which
-    /// carries the same content as a transparent snapshot) plays on top.
-    /// Without this the static live content shows through the snapshot's
-    /// transparent areas and reads as a doubled, non-moving copy. Uses alpha
-    /// rather than `isHidden` so the stack layout — and the tint gradient
-    /// painted behind it — is unaffected.
-    func setSwitchBandContentHidden(_ hidden: Bool) {
-        let alpha: CGFloat = hidden ? 0 : 1
-        pinnedTabContainerView.alphaValue = alpha
-        tabList.view.alphaValue = alpha
-    }
-
     /// Hides/reveals just the header Spaces strip. The strip sits outside the
     /// push-in band and is never `orderOut`-swept as a window, so on a slot
     /// window that stays on screen while NOT the front one — a tabbed sibling
@@ -823,45 +708,6 @@ class SidebarViewController: NSViewController {
     func setSpacesStripHidden(_ hidden: Bool) {
         guard state.participatesInSpaces else { return }
         spacesStripHostingController.view.alphaValue = hidden ? 0 : 1
-    }
-
-    /// Rubber-band nudge on the per-Space content band, played when a
-    /// swipe-to-switch can't proceed because the active Space is already the
-    /// first or last one. The band (pinned strip + tab list) shifts a short
-    /// distance in the swipe's push direction and springs back — the same
-    /// horizontal motion as the push-in swap, minus the Space change — so the
-    /// gesture still resolves with feedback the user can feel. `forward`
-    /// follows the swap convention: next-Space swipes push the band left,
-    /// previous-Space swipes push it right.
-    func bounceSpaceSwitchBand(forward: Bool) {
-        let bandViews: [NSView] = [pinnedTabContainerView, tabList.view]
-        let offset: CGFloat = forward ? -22 : 22
-
-        // Clip the nudge to the sidebar so the shifted band reveals the
-        // background on the trailing edge instead of poking over the web
-        // content; restored once the bounce settles.
-        mainStackView.wantsLayer = true
-        let priorMasksToBounds = mainStackView.layer?.masksToBounds ?? false
-        mainStackView.layer?.masksToBounds = true
-
-        CATransaction.begin()
-        CATransaction.setCompletionBlock { [weak self] in
-            self?.mainStackView.layer?.masksToBounds = priorMasksToBounds
-        }
-        for bandView in bandViews {
-            bandView.wantsLayer = true
-            guard let layer = bandView.layer else { continue }
-            let bounce = CAKeyframeAnimation(keyPath: "transform.translation.x")
-            bounce.values = [0, offset, 0]
-            bounce.keyTimes = [0, 0.4, 1]
-            bounce.timingFunctions = [
-                CAMediaTimingFunction(name: .easeInEaseOut),
-                CAMediaTimingFunction(name: .easeInEaseOut)
-            ]
-            bounce.duration = 0.3
-            layer.add(bounce, forKey: "spaceSwitchEdgeBounce")
-        }
-        CATransaction.commit()
     }
 
     private func shouldActivateSidebarContent() -> Bool { state.layoutMode != .comfortable }
@@ -1185,4 +1031,13 @@ class SidebarViewController: NSViewController {
             backdrop?.removeFromSuperview()
         }
     }
+}
+
+// MARK: - SpaceSwitchBandSurface
+
+extension SidebarViewController: SpaceSwitchBandSurface {
+    // The Spaces switch lives in the header (with its own scroll animation),
+    // so the push-in band is just the pinned strip and the tab list.
+    var spaceSwitchBandViews: [NSView] { [pinnedTabContainerView, tabList.view] }
+    var spaceSwitchBandContainer: NSView { mainStackView }
 }
