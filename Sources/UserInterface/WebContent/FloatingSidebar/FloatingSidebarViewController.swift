@@ -47,11 +47,11 @@ class FloatingSidebarViewController: NSViewController {
         ?? SpaceManager.shared.keySlot
         ?? SpaceManager.shared.createSlot(initialSpaceId: nil)
 
-    /// Hosting controller for the Spaces strip, mounted into the header —
-    /// below the nav row, above the address bar — mirroring the docked
-    /// sidebar so the floating panel offers the same Space switching.
-    private lazy var spacesStripHostingController: ThemedHostingController<SpacesStripView> = {
-        let hostingController = ThemedHostingController(
+    /// Hosting view for the Spaces strip, mounted into the header — below the
+    /// nav row, above the address bar — mirroring the docked sidebar so the
+    /// floating panel offers the same Space switching.
+    private lazy var spacesStripHostingView: SpacesStripHostingView = {
+        let hostingView = SpacesStripHostingView(
             rootView: SpacesStripView(
                 manager: SpaceManager.shared,
                 slot: spacesStripSlot,
@@ -61,10 +61,10 @@ class FloatingSidebarViewController: NSViewController {
             themeSource: state.themeContext
         )
         if #available(macOS 13.0, *) {
-            hostingController.sizingOptions = [.intrinsicContentSize]
+            hostingView.sizingOptions = []
         }
-        hostingController.view.translatesAutoresizingMaskIntoConstraints = false
-        return hostingController
+        hostingView.translatesAutoresizingMaskIntoConstraints = false
+        return hostingView
     }()
 
     /// The floating strip row's AppKit view, consulted by the slot's
@@ -235,14 +235,12 @@ class FloatingSidebarViewController: NSViewController {
 
         // The Spaces switch mounts INSIDE the header — below the nav row,
         // above the address bar — matching the docked sidebar (see
-        // SidebarViewController.setupStackView); only its hosting view lives
-        // in the header, the hosting controller stays a child of this VC for
-        // theming. Standalone incognito windows have no Spaces, so skip
-        // mounting entirely — same gating as the docked sidebar.
+        // SidebarViewController.setupStackView). Standalone incognito windows
+        // have no Spaces, so skip mounting entirely — same gating as the docked
+        // sidebar.
         if state.participatesInSpaces {
-            addChild(spacesStripHostingController)
-            headerView.mountSpaceSwitch(spacesStripHostingController.view)
-            spacesStripRowView = spacesStripHostingController.view
+            headerView.mountSpaceSwitch(spacesStripHostingView)
+            spacesStripRowView = spacesStripHostingView
         }
 
         // 2. Header spacer
@@ -676,7 +674,7 @@ extension FloatingSidebarViewController: SpaceSwitchBandSurface {
 
     func setSpacesStripHidden(_ hidden: Bool) {
         guard state.participatesInSpaces else { return }
-        spacesStripHostingController.view.alphaValue = hidden ? 0 : 1
+        spacesStripHostingView.alphaValue = hidden ? 0 : 1
     }
 
     func rampSpaceTint(fromHex: String?, toHex: String?, duration: TimeInterval) {

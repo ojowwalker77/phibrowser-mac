@@ -8,7 +8,7 @@ import SnapKit
 import SwiftUI
 import Combine
 
-private final class SidebarSpacesStripHostingView: ThemedHostingView {
+final class SpacesStripHostingView: ThemedHostingView {
     // Native AppKit tab groups can temporarily adjust titlebar/safe-area metrics
     // while their NSTabView/NSTabBar accessory is created or hidden. The Space
     // row is already positioned by SidebarHeaderView's fixed constraints, so its
@@ -140,8 +140,8 @@ class SidebarViewController: NSViewController {
         ?? SpaceManager.shared.keySlot
         ?? SpaceManager.shared.createSlot(initialSpaceId: nil)
 
-    private lazy var spacesStripHostingView: SidebarSpacesStripHostingView = {
-        let hostingView = SidebarSpacesStripHostingView(
+    private lazy var spacesStripHostingView: SpacesStripHostingView = {
+        let hostingView = SpacesStripHostingView(
             rootView: SpacesStripView(
                 manager: SpaceManager.shared,
                 slot: spacesStripSlot,
