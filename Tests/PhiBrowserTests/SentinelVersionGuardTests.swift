@@ -131,6 +131,135 @@ final class SentinelVersionGuardTests: XCTestCase {
         XCTAssertEqual(launchCount, 1)
     }
 
+    /// What the sentinelInfoProvider reports on one sampling call. Index 0 is consumed
+    /// by evaluateCurrentState; the confirmation loop starts at index 1. The last
+    /// sample repeats for any further calls.
+    private enum SentinelSample {
+        /// Process not running (runningInfo returns nil).
+        case gone
+        /// Process alive but runtime-info file not (re)written yet (version == nil).
+        case noVersion
+        case version(String)
+    }
+
+    func testConvergenceStopsOnceSentinelAdoptsExpectedVersion() async {
+        // Sentinel reports the old version at evaluation, then the expected version on
+        // the first confirmation read: only the initial request should be posted.
+        let guarder = makeConvergenceGuard(
+            browserVersion: "1.2.1",
+            samples: [.version("1.2.0"), .version("1.2.1")],
+            maxRetries: 3
+        )
+
+        await guarder.runStartupCheck(delaySeconds: 0)
+
+        XCTAssertEqual(postedSnapshots.count, 1)
+        XCTAssertEqual(launchCount, 0)
+    }
+
+    func testConvergenceRepostsUntilRetriesExhausted() async {
+        // Sentinel never adopts the expected version: initial post + one re-post per retry.
+        let guarder = makeConvergenceGuard(
+            browserVersion: "1.2.1",
+            samples: [.version("1.2.0")],
+            maxRetries: 2
+        )
+
+        await guarder.runStartupCheck(delaySeconds: 0)
+
+        XCTAssertEqual(postedSnapshots.count, 3)
+        XCTAssertEqual(launchCount, 0)
+    }
+
+    func testConvergenceLaunchesSentinelWhenProcessGone() async {
+        // Sentinel's process disappears during confirmation (relaunch failed or it
+        // exited): the guard must launch it, or nothing brings Sentinel back until
+        // the next browser cold launch.
+        let guarder = makeConvergenceGuard(
+            browserVersion: "1.2.1",
+            samples: [.version("1.2.0"), .gone],
+            maxRetries: 3
+        )
+
+        await guarder.runStartupCheck(delaySeconds: 0)
+
+        XCTAssertEqual(postedSnapshots.count, 1)
+        XCTAssertEqual(launchCount, 1)
+    }
+
+    func testConvergenceWaitsThroughMissingVersionThenConverges() async {
+        // Mid-relaunch the process is up but the runtime-info file is not rewritten
+        // yet (version == nil): the loop must keep waiting through the transient,
+        // not bail out, and then observe convergence.
+        let guarder = makeConvergenceGuard(
+            browserVersion: "1.2.1",
+            samples: [.version("1.2.0"), .noVersion, .version("1.2.1")],
+            maxRetries: 3
+        )
+
+        await guarder.runStartupCheck(delaySeconds: 0)
+
+        XCTAssertEqual(postedSnapshots.count, 1)
+        XCTAssertEqual(launchCount, 0)
+    }
+
+    func testConvergenceSucceedsOnLastRetry() async {
+        // Convergence lands exactly on the final allowed check — pins the loop bound.
+        let guarder = makeConvergenceGuard(
+            browserVersion: "1.2.1",
+            samples: [.version("1.2.0"), .version("1.2.0"), .version("1.2.0"), .version("1.2.1")],
+            maxRetries: 3
+        )
+
+        await guarder.runStartupCheck(delaySeconds: 0)
+
+        // Initial post + re-posts on the two unconverged checks; converged on the third.
+        XCTAssertEqual(postedSnapshots.count, 3)
+        XCTAssertEqual(launchCount, 0)
+    }
+
+    private func makeConvergenceGuard(
+        browserVersion: String,
+        samples: [SentinelSample],
+        maxRetries: Int
+    ) -> SentinelVersionGuard {
+        var callIndex = 0
+        return SentinelVersionGuard(
+            userDefaults: defaults,
+            now: { self.now },
+            browserBundleIDProvider: { "com.phibrowser.Mac" },
+            browserVersionProvider: { browserVersion },
+            sentinelInfoProvider: { sentinelBundleID in
+                let sample = samples[min(callIndex, samples.count - 1)]
+                callIndex += 1
+                switch sample {
+                case .gone:
+                    return nil
+                case .noVersion:
+                    return SentinelVersionGuard.RunningSentinelInfo(
+                        bundleID: sentinelBundleID,
+                        version: nil
+                    )
+                case .version(let version):
+                    return SentinelVersionGuard.RunningSentinelInfo(
+                        bundleID: sentinelBundleID,
+                        version: version
+                    )
+                }
+            },
+            restartRequestPoster: { snapshot, _ in
+                self.postedSnapshots.append(snapshot)
+            },
+            sentinelLauncher: {
+                self.launchCount += 1
+            },
+            logger: { _ in },
+            sleep: { _ in },
+            confirmInterval: 0,
+            maxConfirmationRetries: maxRetries
+        )
+    }
+
     private func makeGuard(
         browserBundleID: String,
         browserVersion: String,
