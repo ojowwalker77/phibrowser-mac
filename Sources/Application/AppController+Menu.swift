@@ -1092,7 +1092,7 @@ extension AppController {
     }
 
     /// Inline title for a switcher row: the Space name in the label color followed
-    /// by its bound profile in a muted color (`name  —  profile`), so the row shows
+    /// by its bound profile in a muted color (`name  ·  profile`), so the row shows
     /// both on one line with the ⌃-number shortcut trailing. An attributed title
     /// (rather than `NSMenuItem.subtitle`, which is macOS 14.4+ and stacks below)
     /// keeps it on one line and renders on every supported OS.
@@ -1107,7 +1107,7 @@ extension AppController {
         if let profileName = ProfileManager.shared.profile(for: profileId)?.displayName,
            !profileName.isEmpty {
             title.append(NSAttributedString(
-                string: "  —  \(profileName)",
+                string: "  ·  \(profileName)",
                 attributes: [
                     .font: NSFont.menuFont(ofSize: 0),
                     .foregroundColor: NSColor.secondaryLabelColor
