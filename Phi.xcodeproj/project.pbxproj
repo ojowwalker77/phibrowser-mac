@@ -7,6 +7,9 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		C70000000000000000000011 /* CustomTooltipController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C70000000000000000000001 /* CustomTooltipController.swift */; };
+		C70000000000000000000012 /* CustomTooltip+Hosting.swift in Sources */ = {isa = PBXBuildFile; fileRef = C70000000000000000000002 /* CustomTooltip+Hosting.swift */; };
+		CDA11ED500000000000000B1 /* claude-skill in Resources */ = {isa = PBXBuildFile; fileRef = CDA11ED500000000000000A1 /* claude-skill */; };
 		04FE4637EFE3A1396687DD63 /* AISettingsConnectorViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8FCAEAE328C802016D87943 /* AISettingsConnectorViewModel.swift */; };
 		15B618E574463D94C98AEA5F /* AISettingHostingViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1B584F695BF7833FAA99558 /* AISettingHostingViewController.swift */; };
 		2ABF91DB68C2445BAA58C9BA /* GroupTabsTableView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 457F461C0F164136A46FF641 /* GroupTabsTableView.swift */; };
@@ -502,6 +505,9 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		C70000000000000000000001 /* CustomTooltipController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CustomTooltipController.swift; sourceTree = "<group>"; };
+		C70000000000000000000002 /* CustomTooltip+Hosting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "CustomTooltip+Hosting.swift"; sourceTree = "<group>"; };
+		CDA11ED500000000000000A1 /* claude-skill */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "claude-skill"; path = tools/claude-skill; sourceTree = SOURCE_ROOT; };
 		3703C88B2F68F78500E7CF6D /* AISettingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AISettingView.swift; sourceTree = "<group>"; };
 		3703C9812F69558C00E7CF6D /* BrowserState+ToggleAI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "BrowserState+ToggleAI.swift"; sourceTree = "<group>"; };
 		3703C9832F6956E600E7CF6D /* SentinelHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SentinelHelper.swift; sourceTree = "<group>"; };
@@ -2004,6 +2010,7 @@
 		CCBF8F362E653A4200B9A99E /* Common */ = {
 			isa = PBXGroup;
 			children = (
+				C70000000000000000000020 /* Tooltip */,
 				CD1100050000000000000001 /* IconPicker */,
 				8EF36C022F4E9E7000FCC91E /* Tabs */,
 				374BCE982F7157FD0043C656 /* TabAreaContextMenuHelper.swift */,
@@ -2025,6 +2032,15 @@
 				37289F4C2EFE8A9B0003624E /* EditPinnedTabView.swift */,
 			);
 			path = Common;
+			sourceTree = "<group>";
+		};
+		C70000000000000000000020 /* Tooltip */ = {
+			isa = PBXGroup;
+			children = (
+				C70000000000000000000001 /* CustomTooltipController.swift */,
+				C70000000000000000000002 /* CustomTooltip+Hosting.swift */,
+			);
+			path = Tooltip;
 			sourceTree = "<group>";
 		};
 		CCBF8F372E653A4900B9A99E /* MainBrowserWindow */ = {
@@ -2364,6 +2380,8 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				C70000000000000000000011 /* CustomTooltipController.swift in Sources */,
+				C70000000000000000000012 /* CustomTooltip+Hosting.swift in Sources */,
 				CCEF2D222E584F1700FDDEB2 /* URLProcessor.swift in Sources */,
 				4D454D4F5259000000000001 /* MemoryUsageModels.swift in Sources */,
 				4D454D4F5259000000000004 /* MemoryUsageMonitor.swift in Sources */,
