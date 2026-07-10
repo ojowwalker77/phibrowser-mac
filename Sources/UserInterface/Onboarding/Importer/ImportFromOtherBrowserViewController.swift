@@ -42,6 +42,8 @@ class ImportFromOtherBrowserViewController: OnboardingBaseViewController {
     private var optionHeight: CGFloat { displayMode == .login ? 68 : 56 }
     /// Height of an inline data-type toggle row (mirrors the old page-2 metric).
     private var toggleRowHeight: CGFloat { displayMode == .login ? 44 : 36 }
+    /// Font size of the small reminder caption under Safari's toggles.
+    private var hintFontSize: CGFloat { displayMode == .login ? 13 : 12 }
     private let optionIconSize: CGFloat = 32
     private var optionFontSize: CGFloat { displayMode == .login ? 18 : 15 }
     private var buttonBottomOffset: CGFloat { displayMode == .login ? -96 : -56 }
@@ -565,6 +567,18 @@ class ImportFromOtherBrowserViewController: OnboardingBaseViewController {
                 rows.append(row)
             }
         }
+
+        // Safari keeps its history/bookmarks databases locked while it is running,
+        // so remind the user to quit Safari first. Sits just under the toggles,
+        // inside the collapsible body so it shows/hides with the accordion.
+        if browser == .safari {
+            let hint = makeSafariImportHint()
+            toggleContainer.addArrangedSubview(hint)
+            hint.snp.makeConstraints { make in
+                make.width.equalTo(optionWidth)
+            }
+        }
+
         toggleRowsPerBrowser[browser] = rows
         toggleContainersPerBrowser[browser] = toggleContainer
 
@@ -588,6 +602,33 @@ class ImportFromOtherBrowserViewController: OnboardingBaseViewController {
             make.width.equalTo(optionWidth)
         }
         return wrapper
+    }
+
+    /// Builds the small reminder caption shown under Safari's toggle rows: Safari
+    /// keeps its history/bookmarks databases locked while running, so the user
+    /// should quit it before importing. Inset on both sides to match the toggle
+    /// rows, muted, and wraps when the localized string is long.
+    private func makeSafariImportHint() -> NSView {
+        // Matches the toggle rows' 18pt horizontal inset (DataTypeToggleRow /
+        // BrowserOptionView express the same value as their own horizontalPadding).
+        let horizontalPadding: CGFloat = 18
+        let container = NSView()
+
+        let label = NSTextField(wrappingLabelWithString: NSLocalizedString(
+            "Please quit Safari before importing its data.",
+            comment: "Import browser data page - Reminder to quit Safari before importing so its data can be read"
+        ))
+        label.font = NSFont.systemFont(ofSize: hintFontSize)
+        label.textColor = NSColor.white.withAlphaComponent(0.5)
+        label.isSelectable = false
+
+        container.addSubview(label)
+        label.snp.makeConstraints { make in
+            make.left.equalToSuperview().offset(horizontalPadding)
+            make.right.equalToSuperview().offset(-horizontalPadding)
+            make.top.bottom.equalToSuperview()
+        }
+        return container
     }
 
     /// Builds the file row's collapsible body: a filename label + a "Choose File…"
