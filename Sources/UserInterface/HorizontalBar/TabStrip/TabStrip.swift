@@ -3582,7 +3582,8 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
         }
         container.showSplitDropHints(
             draggedTabId: context.draggingTab.guid,
-            draggedTabCount: context.draggingTabIds.count
+            draggedTabCount: context.draggingTabIds.count,
+            at: screenPoint
         )
         splitHintTargetContainer = container
     }

@@ -46,7 +46,7 @@ final class SplitTabDropContainer: NSView {
     /// Floor so the padding doesn't collapse on a narrow window.
     private static let dropHintHorizontalInsetMinimum: CGFloat = 24
     private static let dropHintVerticalInsetMinimum: CGFloat = 24
-    private static let dropHintCornerRadius: CGFloat = 20
+    private static let dropHintCornerRadius: CGFloat = 32
     private static let dropHintLineWidth: CGFloat = 2
     private static let dropHintLineDashPattern: [NSNumber] = [8, 6]
     /// Overall opacity of the frosted-glass card. Kept at 1.0 so the
@@ -91,6 +91,8 @@ final class SplitTabDropContainer: NSView {
     private let rightGlassView: NSView = SplitTabDropContainer.makeGlassView()
     private let leftGlassHighlight = SplitTabDropContainer.makeHighlightGradient()
     private let rightGlassHighlight = SplitTabDropContainer.makeHighlightGradient()
+    private let leftActiveMaskLayer = SplitTabDropContainer.makeActiveMaskLayer()
+    private let rightActiveMaskLayer = SplitTabDropContainer.makeActiveMaskLayer()
     private let leftBorderLayer = SplitTabDropContainer.makeBorderLayer()
     private let rightBorderLayer = SplitTabDropContainer.makeBorderLayer()
     private let leftDropLabel = SplitTabDropContainer.makeDropLabel()
@@ -164,6 +166,32 @@ final class SplitTabDropContainer: NSView {
         return gradient
     }
 
+    /// Darkening scrim layered over whichever card the cursor is currently
+    /// resolving to as the drop target, so the user can tell the two hint
+    /// cards apart at a glance (Figma shows the active card tinted grey
+    /// against the sibling's plain glass). A flat black alpha reads
+    /// consistently on both the light glass fill and arbitrary page content
+    /// behind it, unlike a literal light-grey fill which would wash out in
+    /// dark mode — same reasoning as `applyThemeColors`' stroke color.
+    ///
+    /// A `CAShapeLayer` sibling of the border layer (added to the
+    /// container's own layer, not the glass view's) rather than a sublayer
+    /// of the glass: `NSGlassEffectView` composites its Liquid Glass content
+    /// over its own layer's sublayers on macOS 26+, so anything added there
+    /// (like the highlight gradient above) sits invisibly underneath it.
+    /// Reuses the border's exact rounded-rect path so the mask's shape never
+    /// drifts from the card it covers.
+    private static func makeActiveMaskLayer() -> CAShapeLayer {
+        let layer = CAShapeLayer()
+        layer.fillColor = NSColor.black.withAlphaComponent(0.06).cgColor
+        layer.strokeColor = nil
+        layer.isHidden = true
+        // Sits above the glass view (9_999) and below the dashed border
+        // (10_000) so the scrim darkens the card without dulling the stroke.
+        layer.zPosition = 9_999.5
+        return layer
+    }
+
     private static func makeBorderLayer() -> CAShapeLayer {
         let layer = CAShapeLayer()
         layer.fillColor = nil
@@ -202,6 +230,12 @@ final class SplitTabDropContainer: NSView {
     /// match the create/replace decision. Read by `updateDropHintFrames`.
     private var activeMode: Mode = .create
 
+    /// Which hint card, if any, the cursor is currently resolving to as the
+    /// drop target — nil while hovering the dead middle band in create mode.
+    /// Drives the darkening mask that marks the card that would receive the
+    /// drop right now.
+    private var activeDropZone: DropZone?
+
     private var themeObservation: AnyObject?
 
     override init(frame frameRect: NSRect) {
@@ -215,6 +249,8 @@ final class SplitTabDropContainer: NSView {
         addSubview(rightGlassView)
         leftGlassView.layer?.addSublayer(leftGlassHighlight)
         rightGlassView.layer?.addSublayer(rightGlassHighlight)
+        layer?.addSublayer(leftActiveMaskLayer)
+        layer?.addSublayer(rightActiveMaskLayer)
         layer?.addSublayer(leftBorderLayer)
         layer?.addSublayer(rightBorderLayer)
         addSubview(leftDropLabel)
@@ -304,8 +340,10 @@ final class SplitTabDropContainer: NSView {
     }
 
     /// Shows both split-drop hint cards laid out for the drag's mode. Hides
-    /// any existing hint if the drag isn't a valid split candidate.
-    func showSplitDropHints(draggedTabId: Int, draggedTabCount: Int = 1) {
+    /// any existing hint if the drag isn't a valid split candidate. `at`
+    /// re-resolves the zone under the cursor on every call so the active
+    /// card's mask tracks the mouse as it moves between hint cards.
+    func showSplitDropHints(draggedTabId: Int, draggedTabCount: Int = 1, at screenPoint: CGPoint? = nil) {
         guard draggedTabCount == 1,
               let mode = resolveMode(draggedTabId: draggedTabId) else {
             hideHighlights()
@@ -314,6 +352,9 @@ final class SplitTabDropContainer: NSView {
         activeMode = mode
         applyHintLabels(for: mode)
         showHighlights()
+        if let screenPoint {
+            setActiveDropZone(splitZoneForScreenPoint(screenPoint, draggedTabId: draggedTabId, draggedTabCount: draggedTabCount))
+        }
     }
 
     /// Hides both split-drop hint cards.
@@ -677,8 +718,10 @@ final class SplitTabDropContainer: NSView {
         guard let zone = zone(forPoint: pointInSelf, mode: mode, area: area) else {
             // Create mode, cursor in the dead middle band — hints stay visible
             // but no drop will land here. (Replace mode always returns a zone.)
+            setActiveDropZone(nil)
             return Evaluation(operation: [], zone: nil)
         }
+        setActiveDropZone(zone)
         return Evaluation(operation: .move, zone: zone)
     }
 
@@ -796,6 +839,7 @@ final class SplitTabDropContainer: NSView {
 
     private func hideHighlights() {
         hintsVisible = false
+        setActiveDropZone(nil)
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         leftBorderLayer.isHidden = true
@@ -805,6 +849,19 @@ final class SplitTabDropContainer: NSView {
         rightGlassView.isHidden = true
         leftDropLabel.isHidden = true
         rightDropLabel.isHidden = true
+    }
+
+    /// Updates which hint card shows the active-target mask. No-ops when the
+    /// zone hasn't changed so drag updates (which fire on every mouse move)
+    /// don't churn the layer tree.
+    private func setActiveDropZone(_ zone: DropZone?) {
+        guard zone != activeDropZone else { return }
+        activeDropZone = zone
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        leftActiveMaskLayer.isHidden = zone != .left
+        rightActiveMaskLayer.isHidden = zone != .right
+        CATransaction.commit()
     }
 
     private func applyHintLabels(for mode: Mode) {
@@ -838,6 +895,7 @@ final class SplitTabDropContainer: NSView {
         updateDropHintFrame(
             glass: leftGlassView,
             highlight: leftGlassHighlight,
+            mask: leftActiveMaskLayer,
             border: leftBorderLayer,
             label: leftDropLabel,
             zoneRect: rects.left
@@ -845,6 +903,7 @@ final class SplitTabDropContainer: NSView {
         updateDropHintFrame(
             glass: rightGlassView,
             highlight: rightGlassHighlight,
+            mask: rightActiveMaskLayer,
             border: rightBorderLayer,
             label: rightDropLabel,
             zoneRect: rects.right
@@ -877,6 +936,7 @@ final class SplitTabDropContainer: NSView {
 
     private func updateDropHintFrame(glass: NSView,
                                      highlight: CAGradientLayer,
+                                     mask: CAShapeLayer,
                                      border: CAShapeLayer,
                                      label: NSTextField,
                                      zoneRect: NSRect) {
@@ -918,6 +978,10 @@ final class SplitTabDropContainer: NSView {
         // size = hintRect.size). Disable implicit animations so it snaps
         // with the glass frame rather than tweening.
         highlight.frame = CGRect(origin: .zero, size: hintRect.size)
+        // Mask is a sibling of border on the container's own layer (see
+        // `makeActiveMaskLayer`), so it shares the border's absolute path
+        // rather than a glass-local frame.
+        mask.path = path
         border.path = path
         CATransaction.commit()
 
