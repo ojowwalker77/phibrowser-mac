@@ -35,6 +35,10 @@ enum ImportDataType: String, CaseIterable {
             return [.bookmarks, .history]
         case .chrome, .arc:
             return [.bookmarks, .history, .cookies, .extensions]
+        case .file:
+            // File import exposes no per-type toggles; the file row uses a picker
+            // body instead. Chromium decides what the file contains.
+            return []
         default:
             return [.bookmarks, .history]
         }

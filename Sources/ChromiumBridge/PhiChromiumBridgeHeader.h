@@ -38,7 +38,10 @@ typedef NS_ENUM(NSUInteger, ChromiumBrowserType) {
 typedef NS_ENUM(NSUInteger, BrowserType) {
     BrowserTypeSafari = 0,
     BrowserTypeChrome,
-    BrowserTypeArc
+    BrowserTypeArc,
+    // Not a browser: import from a user-picked file (e.g. a bookmarks HTML file).
+    // The downward call carries a file path; Chromium sniffs the type and parses.
+    BrowserTypeFile
 };
 
 /// Loading state mapped from Chromium TabNetworkState.
@@ -785,6 +788,13 @@ typedef NS_ENUM(NSUInteger, PhiOmniboxSuggestionDisposition) {
 
 // Import management
 - (void)importBrowserDataFromBrowserType:(BrowserType)browserType profile:(NSString *)profile dataTypes:(nullable NSArray<NSString *> *)dataTypes windowId:(int64_t)windowId;
+
+/// Import data from a user-picked file (e.g. a bookmarks HTML file). The Mac side
+/// does no parsing: Chromium sniffs the file type, parses it, and stages the result
+/// into its BookmarkModel; completion is reported through the existing
+/// importCompleted:success: delegate with BrowserTypeFile. `filePath` is absolute.
+- (void)importDataFromFilePath:(NSString *)filePath windowId:(int64_t)windowId
+    NS_SWIFT_NAME(importData(fromFilePath:windowId:));
 
 // Download management
 /// Get all download items with full metadata

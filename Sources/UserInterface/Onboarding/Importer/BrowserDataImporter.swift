@@ -12,6 +12,7 @@ class BrowserDataImporter {
         case importingChromeData
         case importingSafariData
         case importingArcData
+        case importingFile
         case done
     }
 
@@ -88,7 +89,8 @@ class BrowserDataImporter {
         _ options: [BrowserType],
         chromeProfileDirectory: String? = nil,
         arcSpace: ArcSpace? = nil,
-        dataTypesPerBrowser: [BrowserType: [String]]? = nil
+        dataTypesPerBrowser: [BrowserType: [String]]? = nil,
+        importFilePath: String? = nil
     ) async -> Bool {
         // Prefer the caller-provided window so Chromium import state follows the initiating window/profile.
         guard let windowId = targetWindowId ?? MainBrowserWindowControllersManager.shared.getFirstAvailableWindowId() else {
@@ -110,6 +112,23 @@ class BrowserDataImporter {
         let lockedSpaceId = targetSpaceId
         ImportTargetLock.shared.begin(into: lockedSpaceId)
         failedImports.removeAll()
+
+        // Validate the file source before any destructive work: if its path is
+        // missing/unreadable (the file was moved or deleted after picking, or a nil
+        // path reached us from a programmatic caller), drop `.file` so we neither
+        // clear the Chromium bookmark staging below nor start an import that can't
+        // succeed. Surface it as a failed import so the skip isn't silent.
+        var options = options
+        if options.contains(.file) {
+            let readable = importFilePath.map {
+                !$0.isEmpty && FileManager.default.isReadableFile(atPath: $0)
+            } ?? false
+            if !readable {
+                AppLogWarn("File import skipped: no readable file at \(importFilePath ?? "nil")")
+                options.removeAll { $0 == .file }
+                failedImports.append(.file)
+            }
+        }
 
         // Only clear bookmarks if at least one browser is importing bookmarks
         let importingBookmarks = options.contains { option in
@@ -140,7 +159,8 @@ class BrowserDataImporter {
             let arcDataImportable = option != .arc || sourceProfileDirectory != nil
             if (option != .arc || !(bridgeDataTypes?.isEmpty ?? true)), arcDataImportable {
                 let success = await importData(option, windowId: windowId,
-                    sourceProfileDirectory: sourceProfileDirectory, dataTypes: bridgeDataTypes)
+                    sourceProfileDirectory: sourceProfileDirectory, dataTypes: bridgeDataTypes,
+                    importFilePath: importFilePath)
                 if !success { failedImports.append(option) }
                 AppLogInfo("Import from \(option) completed with success: \(success)")
             } else if option == .arc, !arcDataImportable, !(bridgeDataTypes?.isEmpty ?? true) {
@@ -198,7 +218,8 @@ class BrowserDataImporter {
         _ option: BrowserType,
         windowId: Int,
         sourceProfileDirectory: String?,
-        dataTypes: [String]?
+        dataTypes: [String]?,
+        importFilePath: String? = nil
     ) async -> Bool {
         return await withCheckedContinuation { continuation in
             continuationQueue.async { [weak self] in
@@ -210,13 +231,23 @@ class BrowserDataImporter {
                 self.importContinuations[option] = continuation
 
                 DispatchQueue.main.async {
-                    let profile = sourceProfileDirectory ?? ""
-                    ChromiumLauncher.sharedInstance().bridge?.importBrowserData(
-                        from: option,
-                        profile: profile,
-                        dataTypes: dataTypes,
-                        windowId: Int64(windowId)
-                    )
+                    if option == .file {
+                        // File import: Chromium sniffs the file type + parses it, staging
+                        // the result into its BookmarkModel to be pulled back like the
+                        // browser sources. Completion arrives via importCompleted(.file).
+                        ChromiumLauncher.sharedInstance().bridge?.importData(
+                            fromFilePath: importFilePath ?? "",
+                            windowId: Int64(windowId)
+                        )
+                    } else {
+                        let profile = sourceProfileDirectory ?? ""
+                        ChromiumLauncher.sharedInstance().bridge?.importBrowserData(
+                            from: option,
+                            profile: profile,
+                            dataTypes: dataTypes,
+                            windowId: Int64(windowId)
+                        )
+                    }
                 }
             }
         }
@@ -255,6 +286,9 @@ class BrowserDataImporter {
         case .safari:
             phase = .importingSafariData
             status = NSLocalizedString("Importing Safari data...", comment: "Browser data importer - Status message while importing Safari browser data")
+        case .file:
+            phase = .importingFile
+            status = NSLocalizedString("Importing data from file...", comment: "Browser data importer - Status message while importing data from a file")
         @unknown default:
             phase = .waiting
             status = ""
@@ -281,6 +315,8 @@ class BrowserDataImporter {
             return "Safari"
         case .arc:
             return "Arc"
+        case .file:
+            return "File"
         @unknown default:
             return "Unknown"
         }

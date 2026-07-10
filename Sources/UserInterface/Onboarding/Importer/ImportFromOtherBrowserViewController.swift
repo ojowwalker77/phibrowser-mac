@@ -7,6 +7,7 @@ import Cocoa
 import Combine
 import AVFoundation
 import SwiftUI
+import UniformTypeIdentifiers
 
 class ImportFromOtherBrowserViewController: OnboardingBaseViewController {
     enum Phase {
@@ -97,6 +98,7 @@ class ImportFromOtherBrowserViewController: OnboardingBaseViewController {
         showSelectionView()
         selectedTypesPerBrowser.removeAll()
         configuredBrowsers.removeAll()
+        resetImportFileSelection()
         toggleRowsPerBrowser.values.forEach { $0.forEach { $0.setOn(false) } }
         collapseAll()
         updateImportStatus("")
@@ -151,6 +153,8 @@ class ImportFromOtherBrowserViewController: OnboardingBaseViewController {
         guard let i = selectedArcSpaceIndex, arcSpaces.indices.contains(i) else { return nil }
         return arcSpaces[i]
     }
+    /// The file chosen for file-based import (v1: a bookmarks HTML file), or nil.
+    private var selectedImportFileURL: URL?
     
     private lazy var permisionImageView: NSImageView = {
         let imageView = NSImageView()
@@ -253,7 +257,65 @@ class ImportFromOtherBrowserViewController: OnboardingBaseViewController {
         }
         return view
     }()
-    
+
+    /// Header for the file-import accordion row. Unlike the browser rows it has no
+    /// profile selector and no per-type toggles; its body is a file picker. The row
+    /// is always shown (the user may have a file to import regardless of installed
+    /// browsers). The title stays generic ("From a file"); the picker accepts the
+    /// supported sources: Bookmarks HTML, Safari History JSON, and Safari Export
+    /// Archive (ZIP).
+    private lazy var fileOptionView: BrowserOptionView = {
+        let view = BrowserOptionView(
+            icon: Self.fileRowIcon(),
+            title: NSLocalizedString("From a file", comment: "Import browser data page - Option label to import data from a file"),
+            isSelected: false
+        )
+        view.wantsLayer = true
+        view.onTap = { [weak self] in
+            self?.toggleExpansion(.file)
+        }
+        return view
+    }()
+
+    /// Shows the chosen import file's name, or a placeholder before one is picked.
+    private lazy var fileNameLabel: NSTextField = {
+        let label = NSTextField(labelWithString: Self.noFileSelectedText)
+        label.font = NSFont.systemFont(ofSize: optionFontSize, weight: .regular)
+        label.textColor = NSColor.white.withAlphaComponent(0.7)
+        label.lineBreakMode = .byTruncatingMiddle
+        label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        return label
+    }()
+
+    private static var noFileSelectedText: String {
+        NSLocalizedString("No file selected", comment: "Import browser data page - Placeholder when no file has been chosen for import yet")
+    }
+
+    /// A colored, app-icon-style tile for the file-import row so it sits next to the
+    /// full-color browser icons (Chrome/Safari/Arc) as a peer instead of a flat
+    /// monochrome glyph: a white document symbol on a rounded blue gradient tile.
+    private static func fileRowIcon() -> NSImage {
+        let side: CGFloat = 32
+        return NSImage(size: NSSize(width: side, height: side), flipped: false) { rect in
+            let tile = NSBezierPath(roundedRect: rect, xRadius: 7, yRadius: 7)
+            let base = NSColor.systemBlue
+            let top = base.blended(withFraction: 0.3, of: .white) ?? base
+            NSGradient(starting: top, ending: base)?.draw(in: tile, angle: -90)
+
+            let glyphConfig = NSImage.SymbolConfiguration(pointSize: 17, weight: .semibold)
+                .applying(NSImage.SymbolConfiguration(paletteColors: [.white]))
+            if let glyph = NSImage(systemSymbolName: "doc.text.fill", accessibilityDescription: nil)?
+                .withSymbolConfiguration(glyphConfig) {
+                let g = glyph.size
+                glyph.draw(in: NSRect(x: rect.midX - g.width / 2,
+                                      y: rect.midY - g.height / 2,
+                                      width: g.width,
+                                      height: g.height))
+            }
+            return true
+        }
+    }
+
     private lazy var importStatusLabel: NSTextField = {
         let label = NSTextField(labelWithString: "")
         label.textColor = NSColor.white
@@ -323,6 +385,7 @@ class ImportFromOtherBrowserViewController: OnboardingBaseViewController {
         applyOptionViewStyle(chromeOptionView)
         applyOptionViewStyle(safariOptionView)
         applyOptionViewStyle(arcOptionView)
+        applyOptionViewStyle(fileOptionView)
 
         let hasChrome = hasChromeData()
         let hasArc = hasArcData()
@@ -337,6 +400,10 @@ class ImportFromOtherBrowserViewController: OnboardingBaseViewController {
         }
 
         browserOptionsStackView.addArrangedSubview(makeAccordionWrapper(header: safariOptionView, browser: .safari))
+
+        // File import is always available: the user may have a bookmarks HTML file
+        // regardless of which browsers are installed. Added last, after the browsers.
+        browserOptionsStackView.addArrangedSubview(makeAccordionWrapper(header: fileOptionView, browser: .file))
 
         optionsContainer.snp.makeConstraints { make in
             make.left.equalToSuperview().offset(containerLeftOffset)
@@ -418,6 +485,7 @@ class ImportFromOtherBrowserViewController: OnboardingBaseViewController {
         switch browser {
         case .chrome: return chromeOptionView
         case .arc: return arcOptionView
+        case .file: return fileOptionView
         default: return safariOptionView
         }
     }
@@ -475,17 +543,27 @@ class ImportFromOtherBrowserViewController: OnboardingBaseViewController {
         toggleContainer.isHidden = true
 
         var rows: [DataTypeToggleRow] = []
-        for dataType in ImportDataType.availableTypes(for: browser) {
-            let row = DataTypeToggleRow(title: dataType.displayName, isOn: false)
-            row.onToggle = { [weak self] isOn in
-                self?.handleToggle(browser: browser, dataType: dataType, isOn: isOn)
-            }
-            toggleContainer.addArrangedSubview(row)
-            row.snp.makeConstraints { make in
+        if browser == .file {
+            // The file row has no per-type toggles; its body is a file picker.
+            let pickerBody = makeFilePickerBody()
+            toggleContainer.addArrangedSubview(pickerBody)
+            pickerBody.snp.makeConstraints { make in
                 make.width.equalTo(optionWidth)
                 make.height.equalTo(toggleRowHeight)
             }
-            rows.append(row)
+        } else {
+            for dataType in ImportDataType.availableTypes(for: browser) {
+                let row = DataTypeToggleRow(title: dataType.displayName, isOn: false)
+                row.onToggle = { [weak self] isOn in
+                    self?.handleToggle(browser: browser, dataType: dataType, isOn: isOn)
+                }
+                toggleContainer.addArrangedSubview(row)
+                row.snp.makeConstraints { make in
+                    make.width.equalTo(optionWidth)
+                    make.height.equalTo(toggleRowHeight)
+                }
+                rows.append(row)
+            }
         }
         toggleRowsPerBrowser[browser] = rows
         toggleContainersPerBrowser[browser] = toggleContainer
@@ -512,6 +590,74 @@ class ImportFromOtherBrowserViewController: OnboardingBaseViewController {
         return wrapper
     }
 
+    /// Builds the file row's collapsible body: a filename label + a "Choose File…"
+    /// button. Picking a file marks `.file` configured; there are no per-type toggles.
+    private func makeFilePickerBody() -> NSView {
+        // Matches the toggle rows' 18pt horizontal inset, which DataTypeToggleRow /
+        // BrowserOptionView express as a named `horizontalPadding`. The button's own
+        // sizes mirror ProfileSelectionButton, whose values are inline — kept inline.
+        let horizontalPadding: CGFloat = 18
+        let row = NSView()
+
+        let chooseButton = NSButton(
+            title: NSLocalizedString("Choose File…", comment: "Import browser data page - Button to pick a file to import"),
+            target: self,
+            action: #selector(chooseImportFile(_:))
+        )
+        chooseButton.isBordered = false
+        chooseButton.wantsLayer = true
+        chooseButton.contentTintColor = .white
+        chooseButton.font = NSFont.systemFont(ofSize: 13, weight: .medium)
+        chooseButton.layer?.backgroundColor = NSColor(white: 0.2, alpha: 0.6).cgColor
+        chooseButton.layer?.cornerRadius = 8
+
+        row.addSubview(fileNameLabel)
+        row.addSubview(chooseButton)
+
+        fileNameLabel.snp.makeConstraints { make in
+            make.left.equalToSuperview().offset(horizontalPadding)
+            make.centerY.equalToSuperview()
+        }
+        chooseButton.snp.makeConstraints { make in
+            make.right.equalToSuperview().offset(-horizontalPadding)
+            make.centerY.equalToSuperview()
+            make.left.greaterThanOrEqualTo(fileNameLabel.snp.right).offset(12)
+            make.width.equalTo(110)
+            make.height.equalTo(28)
+        }
+        return row
+    }
+
+    /// Opens a file picker limited to the supported import sources — Bookmarks HTML
+    /// (UTType `.html` also matches `.htm`), Safari History JSON, and Safari Export
+    /// Archive (ZIP) — and records the chosen file. Selecting a file marks `.file`
+    /// configured. The Mac side does no parsing — the path is handed to Chromium at
+    /// import time, which classifies it by extension.
+    @objc private func chooseImportFile(_ sender: NSButton) {
+        guard let window = view.window else { return }
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = [.html, .json, .zip]
+        panel.beginSheetModal(for: window) { [weak self] response in
+            guard let self, response == .OK, let url = panel.url else { return }
+            self.selectedImportFileURL = url
+            self.fileNameLabel.stringValue = url.lastPathComponent
+            self.fileNameLabel.textColor = .white
+            self.markBrowserConfigured(.file)
+        }
+    }
+
+    /// Resets the file-import selection to its "nothing chosen" state (clears the
+    /// picked URL and restores the placeholder label). Shared by the label's initial
+    /// state and `resetForReuse`.
+    private func resetImportFileSelection() {
+        selectedImportFileURL = nil
+        fileNameLabel.stringValue = Self.noFileSelectedText
+        fileNameLabel.textColor = NSColor.white.withAlphaComponent(0.7)
+    }
+
     /// Marks a browser configured; called by handleToggle when its inline selection becomes non-empty.
     private func markBrowserConfigured(_ browser: BrowserType) {
         configuredBrowsers.insert(browser)
@@ -530,6 +676,7 @@ class ImportFromOtherBrowserViewController: OnboardingBaseViewController {
         chromeOptionView.setConfigured(configuredBrowsers.contains(.chrome))
         safariOptionView.setConfigured(configuredBrowsers.contains(.safari))
         arcOptionView.setConfigured(configuredBrowsers.contains(.arc))
+        fileOptionView.setConfigured(configuredBrowsers.contains(.file))
     }
 
     private func updateNextButtonState() {
@@ -753,7 +900,8 @@ class ImportFromOtherBrowserViewController: OnboardingBaseViewController {
                     Array(configuredBrowsers),
                     chromeProfileDirectory: selectedChromeProfile?.directory,
                     arcSpace: configuredBrowsers.contains(.arc) ? selectedArcSpace : nil,
-                    dataTypesPerBrowser: dataTypesPerBrowser
+                    dataTypesPerBrowser: dataTypesPerBrowser,
+                    importFilePath: selectedImportFileURL?.path
                 )
                 guard didStart else { return }
                 await MainActor.run {

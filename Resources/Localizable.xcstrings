@@ -943,6 +943,9 @@
     "Importing Chrome data..." : {
       "comment" : "Browser data importer - Status message while importing Chrome browser data"
     },
+    "Importing data from file..." : {
+      "comment" : "Browser data importer - Status message while importing data from a file"
+    },
     "Importing Safari data..." : {
       "comment" : "Browser data importer - Status message while importing Safari browser data"
     },
