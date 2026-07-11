@@ -1110,6 +1110,22 @@ extension PinnedTabViewController {
     func collectionView(_ collectionView: NSCollectionView, draggingSession session: NSDraggingSession, endedAt screenPoint: NSPoint, dragOperation operation: NSDragOperation) {
         isDragging = false
         if session.draggingPasteboard.string(forType: .phiPinnedExtensionReorder) != nil {
+            // NSCollectionView selects the dragged item when its session
+            // starts, and the preview's snapshot moves then drop that
+            // selection from the collection view's bookkeeping WITHOUT ever
+            // pushing isSelected = false back to the item — the cell's accent
+            // ring outlives the drag with no owner. Clear surviving
+            // bookkeeping first, then resync the item instances directly.
+            let selectedExtensions = collectionView.selectionIndexPaths.filter {
+                $0.section == Section.extensions.rawValue
+            }
+            if !selectedExtensions.isEmpty {
+                collectionView.deselectItems(at: selectedExtensions)
+            }
+            for case let item as PinnedExtensionItem in collectionView.visibleItems()
+            where item.isSelected {
+                item.isSelected = false
+            }
             // A successful drop already advanced the engine to Pending Reorder
             // Confirmation, making this cancel a no-op; every other outcome —
             // Escape, a drop outside the shelf, a rejected drop — abandons the

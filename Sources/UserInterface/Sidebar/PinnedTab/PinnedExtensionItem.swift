@@ -52,6 +52,10 @@ class PinnedExtensionItem: NSCollectionViewItem {
         model = nil
         // Reorder source hiding must not survive into a reused cell.
         view.alphaValue = 1
+        // Neither may a stale selection ring: the drag-start selection can be
+        // dropped by the preview's snapshot moves without isSelected ever
+        // being reset on this instance.
+        isSelected = false
     }
 
     /// `icon` is the resolved display icon (dynamic setIcon/declarative override
