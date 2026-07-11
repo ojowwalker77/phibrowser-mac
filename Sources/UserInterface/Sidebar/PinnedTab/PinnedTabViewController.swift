@@ -910,17 +910,21 @@ extension PinnedTabViewController {
     /// whose vertical center is nearest the pointer resolves first, then the
     /// nearest action midpoint within that row picks the target and the
     /// pointer's side of it picks the placement (the sidebar address bar's
-    /// one-dimensional rule applied per row). Pointers outside the rows'
-    /// vertical band resolve to nothing: there the drag is over the
-    /// pinned-tab grid or another sidebar region, not this surface.
+    /// one-dimensional rule applied per row). Pointers above the first row
+    /// resolve to nothing (the address bar sits right there). Below the rows,
+    /// the strip down to `trailingLimit` still anchors — end placement would
+    /// otherwise demand pixel precision under a sparse last row — and only
+    /// past it is the drag over the pinned-tab grid, not this surface.
     static func extensionReorderAnchor(
         at point: CGPoint,
-        slots: [ExtensionReorderSlot]
+        slots: [ExtensionReorderSlot],
+        trailingLimit: CGFloat? = nil
     ) -> (targetId: String, placement: PinnedExtensionAnchorPlacement)? {
         guard let firstRowTop = slots.map(\.frame.minY).min(),
               let lastRowBottom = slots.map(\.frame.maxY).max(),
               point.y >= firstRowTop - extensionReorderBandSlop,
-              point.y <= lastRowBottom + extensionReorderBandSlop,
+              point.y <= max(lastRowBottom + extensionReorderBandSlop,
+                             trailingLimit ?? lastRowBottom),
               let nearestRowSlot = slots.min(by: {
                   abs($0.frame.midY - point.y) < abs($1.frame.midY - point.y)
               }) else {
@@ -953,10 +957,29 @@ extension PinnedTabViewController {
             }
     }
 
+    /// The y below which a dragged extension is genuinely over the pinned-tab
+    /// grid rather than "after the shelf": the first tab row's midline (the
+    /// nearest-midpoint rule applied to the neighboring foreign row), or the
+    /// view's bottom when no pinned tabs follow.
+    private func extensionReorderTrailingLimit() -> CGFloat {
+        let snapshot = dataSource.snapshot()
+        if snapshot.sectionIdentifiers.contains(.tabs),
+           !snapshot.itemIdentifiers(inSection: .tabs).isEmpty,
+           let firstTab = collectionView.collectionViewLayout?.layoutAttributesForItem(
+               at: IndexPath(item: 0, section: Section.tabs.rawValue)) {
+            return firstTab.frame.midY
+        }
+        return collectionView.bounds.maxY
+    }
+
     private func extensionReorderDragOperation(_ draggingInfo: NSDraggingInfo) -> NSDragOperation {
         guard let manager = browserState?.extensionManager else { return [] }
         let point = collectionView.convert(draggingInfo.draggingLocation, from: nil)
-        guard let anchor = Self.extensionReorderAnchor(at: point, slots: extensionReorderSlots()) else {
+        guard let anchor = Self.extensionReorderAnchor(
+            at: point,
+            slots: extensionReorderSlots(),
+            trailingLimit: extensionReorderTrailingLimit()
+        ) else {
             // Over the pinned-tab grid or a boundary gap: not this surface.
             manager.leavePinnedExtensionReorder(surface: .sidebarExtensionShelf)
             return []
@@ -1171,14 +1194,10 @@ extension PinnedTabViewController {
     }
 
     func collectionView(_ collectionView: NSCollectionView, validateDrop draggingInfo: NSDraggingInfo, proposedIndexPath proposedDropIndexPath: AutoreleasingUnsafeMutablePointer<NSIndexPath>, dropOperation proposedDropOperation: UnsafeMutablePointer<NSCollectionView.DropOperation>) -> NSDragOperation {
-        // Pinned-extension reorder: resolved from shelf geometry against the
-        // shared engine on every pointer update (midpoint crossings don't
-        // change the hovered index path); never enters the tab-drop handling
-        // or the tabs-section index-path redirection below.
-        if draggingInfo.draggingPasteboard.string(forType: .phiPinnedExtensionReorder) != nil {
-            proposedDropOperation.pointee = .on
-            return extensionReorderDragOperation(draggingInfo)
-        }
+        // Pinned-extension reorders never reach this method: the collection
+        // view routes them straight to extensionReorderDragOperation
+        // (ReorderingCollectionView bypasses the dropping machinery whose
+        // drop-target inference dead-ends on the shelf's empty strips).
         updateDraggingSession(from: draggingInfo)
         let initialDropIndexPath = proposedDropIndexPath.pointee as IndexPath
         // When the system proposes a target outside the tabs section (e.g.
@@ -1229,9 +1248,6 @@ extension PinnedTabViewController {
     }
 
     func collectionView(_ collectionView: NSCollectionView, acceptDrop draggingInfo: NSDraggingInfo, indexPath: IndexPath, dropOperation: NSCollectionView.DropOperation) -> Bool {
-        if draggingInfo.draggingPasteboard.string(forType: .phiPinnedExtensionReorder) != nil {
-            return acceptExtensionReorderDrop(draggingInfo)
-        }
         updateDraggingSession(from: draggingInfo)
         guard indexPath.section == Section.tabs.rawValue else {
             return false
@@ -1394,13 +1410,15 @@ extension PinnedTabViewController: ReorderingCollectionViewDelegate {
         }
     }
 
+    func collectionView(_ collectionView: NSCollectionView, extensionReorderOperationFor draggingInfo: NSDraggingInfo) -> NSDragOperation {
+        extensionReorderDragOperation(draggingInfo)
+    }
+
+    func collectionView(_ collectionView: NSCollectionView, acceptExtensionReorderDrop draggingInfo: NSDraggingInfo) -> Bool {
+        acceptExtensionReorderDrop(draggingInfo)
+    }
+
     func collectionView(_ collectionView: NSCollectionView, draggingInfo: NSDraggingInfo, movedTo indexPath: IndexPath) {
-        // Pinned-extension reorders preview via validateDrop (index-path
-        // changes are too coarse for midpoint crossings) and stay out of the
-        // tab dragging session.
-        guard draggingInfo.draggingPasteboard.string(forType: .phiPinnedExtensionReorder) == nil else {
-            return
-        }
         updateDraggingSession(from: draggingInfo)
         guard let targetSection = Section(rawValue: indexPath.section), targetSection == .tabs else { return }
         let pasteboard = draggingInfo.draggingPasteboard

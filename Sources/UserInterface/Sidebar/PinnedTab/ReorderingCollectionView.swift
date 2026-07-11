@@ -17,13 +17,49 @@ import AppKit
 protocol ReorderingCollectionViewDelegate: AnyObject {
     func collectionView(_ collectionView: NSCollectionView, draggingInfo: NSDraggingInfo, movedTo indexPath: IndexPath)
     func collectionView(_ collectionView: NSCollectionView, draggingExited info: NSDraggingInfo?)
+    func collectionView(_ collectionView: NSCollectionView, extensionReorderOperationFor draggingInfo: NSDraggingInfo) -> NSDragOperation
+    func collectionView(_ collectionView: NSCollectionView, acceptExtensionReorderDrop draggingInfo: NSDraggingInfo) -> Bool
 }
 
 class ReorderingCollectionView: NSCollectionView {
     weak var reorderDelegate: ReorderingCollectionViewDelegate?
     private var lastDragTargetIndexPath: IndexPath?
 
+    // Pinned-extension reorders bypass NSCollectionView's dropping machinery
+    // entirely: its internal drop-target inference reports "no destination"
+    // over the shelf's empty strips (right of a sparse last row, the row
+    // gaps), returning .none and firing draggingExited while the pointer is
+    // still inside the view — the drop delegate is never consulted there.
+    // The shelf's geometry belongs to the controller, so route this drag
+    // type straight to it, the same shape as the sidebar address bar's
+    // ExtensionReorderStackView. Every other type keeps the stock path.
+    private func isExtensionReorder(_ info: NSDraggingInfo) -> Bool {
+        info.draggingPasteboard.string(forType: .phiPinnedExtensionReorder) != nil
+    }
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        guard !isExtensionReorder(sender) else {
+            return reorderDelegate?.collectionView(self, extensionReorderOperationFor: sender) ?? []
+        }
+        return super.draggingEntered(sender)
+    }
+
+    override func prepareForDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        guard !isExtensionReorder(sender) else { return true }
+        return super.prepareForDragOperation(sender)
+    }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        guard !isExtensionReorder(sender) else {
+            return reorderDelegate?.collectionView(self, acceptExtensionReorderDrop: sender) ?? false
+        }
+        return super.performDragOperation(sender)
+    }
+
     override func draggingUpdated(_ session: NSDraggingInfo) -> NSDragOperation {
+        guard !isExtensionReorder(session) else {
+            return reorderDelegate?.collectionView(self, extensionReorderOperationFor: session) ?? []
+        }
         let point = self.convert(session.draggingLocation, from: nil)
 
         let targetIndexPath = indexPathForItem(at: point) ?? inferredTargetIndexPath(at: point)

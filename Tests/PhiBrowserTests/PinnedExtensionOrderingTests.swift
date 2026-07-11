@@ -683,6 +683,45 @@ final class PinnedExtensionOrderingTests: XCTestCase {
             at: CGPoint(x: 20, y: 22), slots: []))
     }
 
+    func test_shelfAnchorResolution_extendsEndPlacementDownToTheTrailingLimit() {
+        // Same grid as above: row 1 (y 44–72) holds d (x 8–38) and e (x 46–76).
+        // The strip below the last row, down to the first pinned tab's midline
+        // (here 86), still anchors to the last row so end placement does not
+        // demand pixel precision; past the limit the drag is over the tab grid.
+        func slot(_ id: String, column: Int, row: Int) -> PinnedTabViewController.ExtensionReorderSlot {
+            PinnedTabViewController.ExtensionReorderSlot(
+                id: id,
+                frame: CGRect(x: 8 + column * 38, y: 8 + row * 36, width: 30, height: 28)
+            )
+        }
+        let slots = [
+            slot("a", column: 0, row: 0),
+            slot("b", column: 1, row: 0),
+            slot("c", column: 2, row: 0),
+            slot("d", column: 0, row: 1),
+            slot("e", column: 1, row: 1),
+        ]
+
+        // The reported miss: aiming right of and a little below the last
+        // row's final action resolves to overall-end instead of rejecting.
+        let overallEnd = PinnedTabViewController.extensionReorderAnchor(
+            at: CGPoint(x: 140, y: 80), slots: slots, trailingLimit: 86)
+        XCTAssertEqual(overallEnd?.targetId, "e")
+        XCTAssertEqual(overallEnd?.placement, .after)
+
+        let belowFirstColumn = PinnedTabViewController.extensionReorderAnchor(
+            at: CGPoint(x: 20, y: 84), slots: slots, trailingLimit: 86)
+        XCTAssertEqual(belowFirstColumn?.targetId, "d")
+        XCTAssertEqual(belowFirstColumn?.placement, .before)
+
+        // Past the limit is the pinned-tab grid; above the first row stays
+        // strict regardless of the limit.
+        XCTAssertNil(PinnedTabViewController.extensionReorderAnchor(
+            at: CGPoint(x: 20, y: 90), slots: slots, trailingLimit: 86))
+        XCTAssertNil(PinnedTabViewController.extensionReorderAnchor(
+            at: CGPoint(x: 20, y: 1), slots: slots, trailingLimit: 86))
+    }
+
     func test_interleavedForcePinnedAuthoritativeDisablesDragEntirely() {
         // Policy force-pinned an action the user had already pinned: it stays
         // at its pref position instead of joining the trailing suffix. No
