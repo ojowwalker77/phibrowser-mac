@@ -127,12 +127,24 @@ final class WebContentHeaderExtensionsModel {
                 self?.recomputeVisiblePinned()
             }
             .store(in: &cancellables)
+
+        manager.pinnedExtensionOrdering.$presentationOrder
+            .removeDuplicates()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.recomputeVisiblePinned()
+            }
+            .store(in: &cancellables)
     }
 
     private func recomputeVisiblePinned() {
-        let badges = browserState?.extensionManager.badges
-        visiblePinnedExtensions = pinnedExtensions.filter {
-            badges?[$0.id]?.visible != false
+        guard let manager = browserState?.extensionManager else {
+            visiblePinnedExtensions = pinnedExtensions
+            return
+        }
+        let ordered = manager.presentedPinnedOrder(of: pinnedExtensions)
+        visiblePinnedExtensions = ordered.filter {
+            manager.badges[$0.id]?.visible != false
         }
     }
 
@@ -277,22 +289,42 @@ struct HeaderExtensionContainer: View {
     @State private var isHovering = false
 
     var body: some View {
+        let visibleProjection = pinnedExtensions.map(\.id)
         HStack(spacing: HeaderExtensionLayout.itemSpacing) {
-            ForEach(pinnedExtensions) { ext in
-                if let manager = extensionManager {
-                    PinnedExtensionButton(
-                        ext: ext,
-                        windowId: browserState?.windowId.int64Value ?? 0,
-                        manager: manager
-                    )
+            HStack(spacing: HeaderExtensionLayout.itemSpacing) {
+                ForEach(pinnedExtensions) { ext in
+                    if let manager = extensionManager {
+                        PinnedExtensionButton(
+                            ext: ext,
+                            windowId: browserState?.windowId.int64Value ?? 0,
+                            manager: manager,
+                            orderingEngine: manager.pinnedExtensionOrdering
+                        )
+                    }
                 }
             }
+            // AppKit reorder surface over the icon row. SwiftUI's onDrag pair
+            // is unusable here: it cannot veto the main window's
+            // isMovableByWindowBackground heuristic (the gesture moves the
+            // window, not the icon) and never reports the session's end, which
+            // leaked an aborted drag's `.dragging` state. The overlay claims
+            // left-mouse on reorderable icons only; hover, right-clicks, and
+            // accessibility stay on the SwiftUI buttons underneath.
+            .overlay(
+                HeaderExtensionReorderSurface(
+                    pinnedExtensions: pinnedExtensions,
+                    extensionManager: extensionManager,
+                    windowId: browserState?.windowId.int64Value ?? 0,
+                    allowsReordering: browserState?.isIncognito == false
+                )
+            )
             HeaderExtensionMenuButton(
                 extensionManager: extensionManager,
                 isPopoverShown: $isPopoverShown
             )
         }
         .frame(height: HeaderTrailingLayout.rowHeight)
+        .animation(.easeInOut(duration: 0.12), value: visibleProjection)
         .background(
             Capsule()
                 .themedStroke(.border)
@@ -310,6 +342,7 @@ private struct PinnedExtensionButton: View {
     let ext: Extension
     let windowId: Int64
     @ObservedObject var manager: ExtensionManager
+    @ObservedObject var orderingEngine: PinnedExtensionOrderingEngine
 
     @State private var anchorView: NSView?
 
@@ -329,23 +362,15 @@ private struct PinnedExtensionButton: View {
                 image: image,
                 accessibilityLabel: ext.name,
                 action: {
-                    let point = anchorView.flatMap(ExtensionPopupAnchor.pointBelowView)
-                        ?? ExtensionPopupAnchor.mouseFallback()
-                    // A disabled action doesn't run; fall back to the context
-                    // menu like Chrome (ExecuteUserAction). Read live state —
-                    // the closure may outlive this render.
-                    if manager.badges[ext.id]?.enabled == false {
-                        ChromiumLauncher.sharedInstance().bridge?.triggerExtensionContextMenu(
-                            withId: ext.id,
-                            pointInScreen: point,
-                            windowId: windowId
-                        )
-                        return
-                    }
-                    ChromiumLauncher.sharedInstance().bridge?.triggerExtension(
-                        withId: ext.id,
-                        pointInScreen: point,
-                        windowId: windowId
+                    // Reorderable icons get their left-clicks forwarded by
+                    // the reorder surface; this SwiftUI action still fires
+                    // for accessibility activation and for icons the surface
+                    // declines (force-pinned, incognito).
+                    executePinnedExtensionAction(
+                        ext,
+                        manager: manager,
+                        windowId: windowId,
+                        anchorPoint: anchorView.flatMap(ExtensionPopupAnchor.pointBelowView)
                     )
                 },
                 secondaryAction: {
@@ -372,6 +397,316 @@ private struct PinnedExtensionButton: View {
                 }
                 .allowsHitTesting(false)
             )
+            // Hide the source while its reorder drag is active: the drag
+            // image is the only visible copy, and the empty slot the row
+            // keeps open marks the landing spot (upstream Chrome hides the
+            // source the same way). A force-pinned action can never become
+            // the dragged id, so the modifier is unconditional.
+            .opacity(orderingEngine.draggedExtensionId == ext.id ? 0 : 1)
         }
+    }
+}
+
+/// Runs a pinned action's primary activation. A disabled action doesn't run;
+/// fall back to the context menu like Chrome (ExecuteUserAction). Shared by
+/// the SwiftUI button (accessibility, non-reorderable icons) and the AppKit
+/// reorder surface's forwarded clicks. Reads live badge state — callers may
+/// invoke this from closures that outlive their render.
+@MainActor
+private func executePinnedExtensionAction(
+    _ ext: Extension,
+    manager: ExtensionManager,
+    windowId: Int64,
+    anchorPoint: NSPoint?
+) {
+    let point = anchorPoint ?? ExtensionPopupAnchor.mouseFallback()
+    if manager.badges[ext.id]?.enabled == false {
+        ChromiumLauncher.sharedInstance().bridge?.triggerExtensionContextMenu(
+            withId: ext.id,
+            pointInScreen: point,
+            windowId: windowId
+        )
+        return
+    }
+    ChromiumLauncher.sharedInstance().bridge?.triggerExtension(
+        withId: ext.id,
+        pointInScreen: point,
+        windowId: windowId
+    )
+}
+
+/// The drag image content: the action's current dynamic icon with its badge,
+/// matching the in-row appearance minus hover chrome.
+private struct PinnedExtensionDragPreview: View {
+    let image: NSImage
+    let badge: ExtensionManager.BadgeState?
+
+    var body: some View {
+        Image(nsImage: image)
+            .resizable()
+            .aspectRatio(contentMode: .fit)
+            .frame(width: HeaderExtensionLayout.iconSize,
+                   height: HeaderExtensionLayout.iconSize)
+            .extensionBadgeOverlay(badge)
+            .frame(width: HeaderExtensionLayout.buttonSize,
+                   height: HeaderExtensionLayout.buttonSize)
+    }
+}
+
+private struct HeaderExtensionReorderSurface: NSViewRepresentable {
+    let pinnedExtensions: [Extension]
+    let extensionManager: ExtensionManager?
+    let windowId: Int64
+    let allowsReordering: Bool
+
+    func makeNSView(context: Context) -> HeaderExtensionReorderView {
+        HeaderExtensionReorderView()
+    }
+
+    func updateNSView(_ nsView: HeaderExtensionReorderView, context: Context) {
+        nsView.pinnedExtensions = pinnedExtensions
+        nsView.extensionManager = extensionManager
+        nsView.windowId = windowId
+        nsView.allowsReordering = allowsReordering
+    }
+}
+
+/// AppKit drag surface for the content header (Pinned Extension Surface:
+/// content header). Overlays the pinned icon row and owns click-vs-drag for
+/// reorderable icons, the dragging session, and the drop destination — the
+/// same division of labor as DraggableExtensionButton +
+/// ExtensionReorderStackView in the sidebar address bar. The icon row is
+/// SwiftUI, so slots are derived from HeaderExtensionLayout's fixed grid
+/// instead of live subview frames.
+final class HeaderExtensionReorderView: NSView {
+    var pinnedExtensions: [Extension] = []
+    weak var extensionManager: ExtensionManager?
+    var windowId: Int64 = 0
+    var allowsReordering = false
+
+    private var mouseDownPoint: CGPoint?
+    private var pressedSlotIndex: Int?
+    private var hasCrossedHysteresis = false
+    private let dragThreshold: CGFloat = 5
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        registerForDraggedTypes([.phiPinnedExtensionReorder])
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    // MARK: - Slot geometry (buttonSize-wide columns on an itemSpacing grid)
+
+    private static let slotStride =
+        HeaderExtensionLayout.buttonSize + HeaderExtensionLayout.itemSpacing
+
+    /// The icon column containing x, or nil for the spacing gaps and the
+    /// area past the last icon — there the row behaves as before this
+    /// feature existed.
+    static func slotIndex(atX x: CGFloat, slotCount: Int) -> Int? {
+        guard x >= 0 else { return nil }
+        let index = Int(x / slotStride)
+        guard index < slotCount,
+              x - CGFloat(index) * slotStride <= HeaderExtensionLayout.buttonSize else {
+            return nil
+        }
+        return index
+    }
+
+    /// Maps a pointer x to the Anchored Reorder intent: the slot whose
+    /// column contains the pointer (clamped to the ends) is the target, and
+    /// the pointer's side of its midpoint picks the placement — the sidebar
+    /// address bar's rule on the header's fixed grid.
+    static func reorderAnchor(
+        atX x: CGFloat,
+        orderedIds: [String]
+    ) -> (targetId: String, placement: PinnedExtensionAnchorPlacement)? {
+        guard !orderedIds.isEmpty else { return nil }
+        let index = min(max(Int(x / slotStride), 0), orderedIds.count - 1)
+        let midpoint = CGFloat(index) * slotStride + HeaderExtensionLayout.buttonSize / 2
+        return (orderedIds[index], x < midpoint ? .before : .after)
+    }
+
+    private func slotButtonRect(at index: Int) -> NSRect {
+        NSRect(
+            x: CGFloat(index) * Self.slotStride,
+            y: (bounds.height - HeaderExtensionLayout.buttonSize) / 2,
+            width: HeaderExtensionLayout.buttonSize,
+            height: HeaderExtensionLayout.buttonSize
+        )
+    }
+
+    // MARK: - Click-vs-drag ownership
+
+    /// The main window sets isMovableByWindowBackground; its drag heuristic
+    /// honors these two overrides (TabItemView precedent). Without them a
+    /// drag on the icon moves the window instead of reordering.
+    override var mouseDownCanMoveWindow: Bool { false }
+    override var acceptsFirstResponder: Bool { true }
+
+    /// Claim left-mouse events over reorderable icons only. Everything else
+    /// — hover, right-clicks, force-pinned icons, incognito windows, the
+    /// spacing gaps — falls through to the SwiftUI buttons underneath.
+    /// Drop-destination discovery does not consult hitTest, so returning
+    /// nil never blocks an in-flight reorder drop.
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        guard super.hitTest(point) != nil else { return nil }
+        switch NSApp.currentEvent?.type {
+        case .leftMouseDown, .leftMouseUp, .leftMouseDragged:
+            let x = convert(point, from: superview).x
+            guard allowsReordering,
+                  let index = Self.slotIndex(atX: x, slotCount: pinnedExtensions.count),
+                  !pinnedExtensions[index].isForcePinned else {
+                return nil
+            }
+            return self
+        default:
+            return nil
+        }
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        let local = convert(event.locationInWindow, from: nil)
+        mouseDownPoint = local
+        pressedSlotIndex = Self.slotIndex(atX: local.x, slotCount: pinnedExtensions.count)
+        hasCrossedHysteresis = false
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard let startPoint = mouseDownPoint, !hasCrossedHysteresis else { return }
+        let currentPoint = convert(event.locationInWindow, from: nil)
+        guard abs(currentPoint.x - startPoint.x) > dragThreshold
+                || abs(currentPoint.y - startPoint.y) > dragThreshold else { return }
+        // Crossing hysteresis consumes the gesture whether or not a session
+        // starts (DraggableExtensionButton rule): a rejected reorder attempt
+        // must not fall back to a click.
+        hasCrossedHysteresis = true
+        if let index = pressedSlotIndex, pinnedExtensions.indices.contains(index) {
+            beginReorderDrag(for: pinnedExtensions[index], at: index, with: event)
+        }
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        if !hasCrossedHysteresis,
+           let index = pressedSlotIndex,
+           pinnedExtensions.indices.contains(index),
+           slotButtonRect(at: index).contains(convert(event.locationInWindow, from: nil)),
+           let manager = extensionManager {
+            executePinnedExtensionAction(
+                pinnedExtensions[index],
+                manager: manager,
+                windowId: windowId,
+                anchorPoint: ExtensionPopupAnchor.pointBelowRect(
+                    slotButtonRect(at: index), in: self)
+            )
+        }
+        mouseDownPoint = nil
+        pressedSlotIndex = nil
+        hasCrossedHysteresis = false
+    }
+
+    private func beginReorderDrag(for ext: Extension, at index: Int, with event: NSEvent) {
+        guard let manager = extensionManager,
+              manager.beginPinnedExtensionReorder(
+                  extensionId: ext.id,
+                  visibleProjection: pinnedExtensions.map(\.id),
+                  surface: .contentHeader
+              ) else {
+            return
+        }
+        let pasteboardItem = NSPasteboardItem()
+        pasteboardItem.setString(ext.id, forType: .phiPinnedExtensionReorder)
+        let draggingItem = NSDraggingItem(pasteboardWriter: pasteboardItem)
+        draggingItem.setDraggingFrame(
+            slotButtonRect(at: index),
+            contents: dragImage(for: ext, manager: manager)
+        )
+        beginDraggingSession(with: [draggingItem], event: event, source: self)
+    }
+
+    /// Renders the drag image offscreen so it carries the current dynamic
+    /// icon and badge without capturing hover chrome from the live row.
+    private func dragImage(for ext: Extension, manager: ExtensionManager) -> NSImage {
+        let icon = manager.iconImage(extensionId: ext.id, staticIcon: ext.icon)
+        let hosting = NSHostingView(rootView: PinnedExtensionDragPreview(
+            image: icon, badge: manager.badges[ext.id]))
+        hosting.frame = NSRect(
+            x: 0, y: 0,
+            width: HeaderExtensionLayout.buttonSize,
+            height: HeaderExtensionLayout.buttonSize)
+        hosting.layoutSubtreeIfNeeded()
+        guard let bitmap = hosting.bitmapImageRepForCachingDisplay(in: hosting.bounds) else {
+            return icon
+        }
+        hosting.cacheDisplay(in: hosting.bounds, to: bitmap)
+        let image = NSImage(size: hosting.bounds.size)
+        image.addRepresentation(bitmap)
+        return image
+    }
+
+    // MARK: - Drop destination (mirrors ExtensionReorderStackView)
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        reorderOperation(for: sender)
+    }
+
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        reorderOperation(for: sender)
+    }
+
+    override func draggingExited(_ sender: NSDraggingInfo?) {
+        extensionManager?.leavePinnedExtensionReorder(surface: .contentHeader)
+    }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        guard let manager = extensionManager,
+              updatePreview(atX: convert(sender.draggingLocation, from: nil).x),
+              manager.commitPinnedExtensionReorder(surface: .contentHeader) else {
+            extensionManager?.cancelPinnedExtensionReorder(surface: .contentHeader)
+            return false
+        }
+        return true
+    }
+
+    private func reorderOperation(for sender: NSDraggingInfo) -> NSDragOperation {
+        updatePreview(atX: convert(sender.draggingLocation, from: nil).x) ? .move : []
+    }
+
+    private func updatePreview(atX x: CGFloat) -> Bool {
+        guard let manager = extensionManager,
+              let anchor = Self.reorderAnchor(atX: x, orderedIds: pinnedExtensions.map(\.id)) else {
+            return false
+        }
+        return manager.updatePinnedExtensionReorder(
+            targetExtensionId: anchor.targetId,
+            placement: anchor.placement,
+            surface: .contentHeader
+        )
+    }
+}
+
+extension HeaderExtensionReorderView: NSDraggingSource {
+    func draggingSession(
+        _ session: NSDraggingSession,
+        sourceOperationMaskFor context: NSDraggingContext
+    ) -> NSDragOperation {
+        // Surface-Local Reorder: the payload never leaves the application.
+        context == .withinApplication ? .move : []
+    }
+
+    func draggingSession(
+        _ session: NSDraggingSession,
+        endedAt screenPoint: NSPoint,
+        operation: NSDragOperation
+    ) {
+        // The session-end signal SwiftUI's onDrag never provided. A
+        // successful drop already advanced the engine to Pending Reorder
+        // Confirmation, which makes this cancel a no-op; Escape, a drop
+        // outside the row, and a rejected drop abandon the drag here instead
+        // of leaking `.dragging` state and its hidden source icon.
+        extensionManager?.cancelPinnedExtensionReorder(surface: .contentHeader)
     }
 }

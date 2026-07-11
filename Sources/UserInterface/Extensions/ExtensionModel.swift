@@ -14,6 +14,7 @@ class Extension: ObservableObject, Identifiable {
     let version: String
     @Published var isPinned: Bool
     let pinnedIndex: Int
+    let isForcePinned: Bool
     
     init(from dict: [String: Any]) {
         self.id = dict["id"] as? String ?? ""
@@ -21,6 +22,7 @@ class Extension: ObservableObject, Identifiable {
         self.version = dict["version"] as? String ?? ""
         self.isPinned = dict["isPinned"] as? Bool ?? false
         self.pinnedIndex = dict["pinnedIndex"] as? Int ?? -1
+        self.isForcePinned = dict["isForcePinned"] as? Bool ?? false
         
         if let iconBase64 = dict["icon"] as? String,
            let image = Self.imageFromBase64(iconBase64) {
@@ -112,6 +114,7 @@ extension Extension: Equatable {
         return lhs.name == rhs.name &&
         lhs.id == rhs.id &&
         lhs.pinnedIndex == rhs.pinnedIndex &&
-        lhs.isPinned == rhs.isPinned
+        lhs.isPinned == rhs.isPinned &&
+        lhs.isForcePinned == rhs.isForcePinned
     }
 }

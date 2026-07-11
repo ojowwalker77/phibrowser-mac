@@ -8,6 +8,281 @@ import Combine
 import AppKit
 import CoreImage
 
+struct PinnedExtensionOrderItem: Equatable {
+    let id: String
+    let isForcePinned: Bool
+}
+
+enum PinnedExtensionAnchorPlacement: Equatable {
+    case before
+    case after
+}
+
+enum PinnedExtensionSurface: Equatable {
+    case contentHeader
+    case sidebarAddressBar
+    case sidebarExtensionShelf
+}
+
+/// Drag payload type shared by every Pinned Extension Surface. One identifier
+/// lets a drag that strays over a foreign surface or window be recognized and
+/// rejected through the engine's surface gate instead of silently ignored.
+enum PinnedExtensionReorderPasteboard {
+    static let identifier = "com.phinomenon.phi.pinned-extension-reorder"
+}
+
+extension NSPasteboard.PasteboardType {
+    static let phiPinnedExtensionReorder = NSPasteboard.PasteboardType(
+        PinnedExtensionReorderPasteboard.identifier
+    )
+}
+
+struct PinnedExtensionMoveIntent: Equatable {
+    let extensionId: String
+    let destinationIndex: Int
+}
+
+struct PinnedExtensionResolution: Equatable {
+    let items: [PinnedExtensionOrderItem]
+    let destinationIndex: Int
+}
+
+/// Window-scoped presentation state for a reorder gesture. Chromium's complete
+/// pinned snapshot remains authoritative; this engine only holds a transient
+/// preview and the one move awaiting Chromium confirmation.
+final class PinnedExtensionOrderingEngine: ObservableObject {
+    private enum Phase: Equatable {
+        case idle
+        case dragging(extensionId: String, surface: PinnedExtensionSurface)
+        case pending(PinnedExtensionMoveIntent)
+    }
+
+    @Published private(set) var presentationOrder: [String]?
+    @Published private var phase: Phase = .idle
+    /// Invoked after Pending Reorder Confirmation times out and the
+    /// native-only preview has been abandoned; the owner refreshes the
+    /// complete extension snapshot from Chromium.
+    var onConfirmationTimeout: (() -> Void)?
+    private let confirmationTimeout: TimeInterval
+    private var authoritative: [PinnedExtensionOrderItem] = []
+    private var visibleProjection: [String] = []
+    private var proposedMove: PinnedExtensionMoveIntent?
+    private var confirmationWatchdog: DispatchWorkItem?
+
+    init(confirmationTimeout: TimeInterval = 2.0) {
+        self.confirmationTimeout = confirmationTimeout
+    }
+
+    var pendingMove: PinnedExtensionMoveIntent? {
+        guard case .pending(let move) = phase else { return nil }
+        return move
+    }
+
+    var draggedExtensionId: String? {
+        guard case .dragging(let extensionId, _) = phase else { return nil }
+        return extensionId
+    }
+
+    var visiblePresentationOrder: [String] {
+        guard let presentationOrder else { return [] }
+        let visible = Set(visibleProjection)
+        return presentationOrder.filter(visible.contains)
+    }
+
+    static func resolve(
+        canonical: [PinnedExtensionOrderItem],
+        draggedExtensionId: String,
+        targetExtensionId: String,
+        placement: PinnedExtensionAnchorPlacement
+    ) -> PinnedExtensionResolution? {
+        guard draggedExtensionId != targetExtensionId,
+              Set(canonical.map(\.id)).count == canonical.count,
+              let dragged = canonical.first(where: { $0.id == draggedExtensionId }),
+              !dragged.isForcePinned,
+              let target = canonical.first(where: { $0.id == targetExtensionId }),
+              !target.isForcePinned else {
+            return nil
+        }
+
+        var reordered = canonical
+        guard let sourceIndex = reordered.firstIndex(where: { $0.id == draggedExtensionId }) else {
+            return nil
+        }
+        reordered.remove(at: sourceIndex)
+        guard let targetIndex = reordered.firstIndex(where: { $0.id == targetExtensionId }) else {
+            return nil
+        }
+        let insertionIndex = placement == .before ? targetIndex : targetIndex + 1
+        reordered.insert(dragged, at: insertionIndex)
+
+        // Force-Pinned Extensions form a protected suffix. Reject malformed
+        // input or any result that would put an ordinary action after it.
+        guard Self.isForcePinnedSuffix(reordered),
+              let destinationIndex = reordered.firstIndex(where: { $0.id == draggedExtensionId }) else {
+            return nil
+        }
+        return PinnedExtensionResolution(items: reordered, destinationIndex: destinationIndex)
+    }
+
+    /// Whether every Force-Pinned Extension sits in one trailing block. This
+    /// is how Chromium composes the pinned list except in one policy corner:
+    /// force-pinning an action the user had already pinned leaves it at its
+    /// pref position, interleaved among ordinary actions. No anchored move
+    /// can resolve against that shape, so it also gates `beginDrag` — the
+    /// gesture stays a plain click instead of starting a session whose every
+    /// preview would be rejected. See
+    /// .scratch/pinned-extension-reordering/issues/02.
+    static func isForcePinnedSuffix(_ items: [PinnedExtensionOrderItem]) -> Bool {
+        guard let firstForcePinned = items.firstIndex(where: \.isForcePinned) else {
+            return true
+        }
+        return !items[firstForcePinned...].contains { !$0.isForcePinned }
+    }
+
+    func reconcile(authoritative snapshot: [PinnedExtensionOrderItem]) {
+        let changed = authoritative != snapshot
+        authoritative = snapshot
+        switch phase {
+        case .idle:
+            break
+        case .dragging where !changed:
+            return
+        case .dragging, .pending:
+            reset()
+        }
+    }
+
+    @discardableResult
+    func beginDrag(
+        extensionId: String,
+        visibleProjection: [String],
+        surface: PinnedExtensionSurface,
+        allowsReordering: Bool
+    ) -> Bool {
+        reset()
+        guard allowsReordering,
+              Self.isForcePinnedSuffix(authoritative),
+              Set(visibleProjection).count == visibleProjection.count,
+              visibleProjection.contains(extensionId),
+              let source = authoritative.first(where: { $0.id == extensionId }),
+              !source.isForcePinned else {
+            return false
+        }
+        self.visibleProjection = visibleProjection
+        phase = .dragging(extensionId: extensionId, surface: surface)
+        presentationOrder = authoritative.map(\.id)
+        return true
+    }
+
+    @discardableResult
+    func updatePreview(
+        targetExtensionId: String,
+        placement: PinnedExtensionAnchorPlacement,
+        surface: PinnedExtensionSurface
+    ) -> Bool {
+        guard case .dragging(let draggedId, let originSurface) = phase,
+              originSurface == surface,
+              visibleProjection.contains(targetExtensionId) else {
+            return false
+        }
+
+        if targetExtensionId == draggedId {
+            // Once the preview moves the source into the pointer's slot, the
+            // next hit-test naturally targets the source itself. Preserve the
+            // existing proposal until the pointer crosses another midpoint.
+            return true
+        }
+        guard let resolution = Self.resolve(
+            canonical: authoritative,
+            draggedExtensionId: draggedId,
+            targetExtensionId: targetExtensionId,
+            placement: placement
+        ) else {
+            return false
+        }
+        let order = resolution.items.map(\.id)
+        if presentationOrder != order {
+            presentationOrder = order
+        }
+        if resolution.items == authoritative {
+            if proposedMove != nil {
+                proposedMove = nil
+            }
+        } else {
+            let move = PinnedExtensionMoveIntent(
+                extensionId: draggedId,
+                destinationIndex: resolution.destinationIndex
+            )
+            if proposedMove != move {
+                proposedMove = move
+            }
+        }
+        return true
+    }
+
+    func leave(surface: PinnedExtensionSurface) {
+        guard case .dragging(_, let originSurface) = phase,
+              originSurface == surface else { return }
+        if presentationOrder != nil {
+            presentationOrder = nil
+        }
+        if proposedMove != nil {
+            proposedMove = nil
+        }
+    }
+
+    func cancel(surface: PinnedExtensionSurface) {
+        guard activeSurface == surface else { return }
+        reset()
+    }
+
+    func commit(surface: PinnedExtensionSurface) -> PinnedExtensionMoveIntent? {
+        guard case .dragging(_, let originSurface) = phase,
+              originSurface == surface,
+              let proposedMove else {
+            return nil
+        }
+        phase = .pending(proposedMove)
+        armConfirmationWatchdog()
+        return proposedMove
+    }
+
+    /// Pending Reorder Confirmation must not become a second source of
+    /// truth: if Chromium's complete snapshot does not arrive in time, drop
+    /// the preview and ask the owner to pull a fresh snapshot instead.
+    private func armConfirmationWatchdog() {
+        confirmationWatchdog?.cancel()
+        let watchdog = DispatchWorkItem { [weak self] in
+            guard let self, case .pending = self.phase else { return }
+            self.reset()
+            self.onConfirmationTimeout?()
+        }
+        confirmationWatchdog = watchdog
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + confirmationTimeout, execute: watchdog)
+    }
+
+    private var activeSurface: PinnedExtensionSurface? {
+        switch phase {
+        case .dragging(_, let surface): return surface
+        case .idle, .pending: return nil
+        }
+    }
+
+    private func reset() {
+        confirmationWatchdog?.cancel()
+        confirmationWatchdog = nil
+        if phase != .idle {
+            phase = .idle
+        }
+        if presentationOrder != nil {
+            presentationOrder = nil
+        }
+        visibleProjection = []
+        proposedMove = nil
+    }
+}
+
 class ExtensionManager: ObservableObject {
     struct BadgeState: Equatable {
         var text: String
@@ -25,9 +300,13 @@ class ExtensionManager: ObservableObject {
     // Per-extension action state for this window (the manager is per-window).
     @Published var badges: [String: BadgeState] = [:]
     @Published var dynamicIcons: [String: NSImage] = [:]
+    let pinnedExtensionOrdering = PinnedExtensionOrderingEngine()
     private weak var browserState: BrowserState?
     init(browserState: BrowserState) {
         self.browserState = browserState
+        pinnedExtensionOrdering.onConfirmationTimeout = { [weak self] in
+            self?.refreshExtensions()
+        }
     }
     static let phiExtensionIds = ["pjlnhbfabokjejbhmgghmjiaknfhnima",
                                   "pjgdkljlcbjgedgeppodjijjphfcplno",
@@ -57,6 +336,11 @@ class ExtensionManager: ObservableObject {
                 return $0.name < $1.name
             }
         pinedExtensions = extensions.filter { $0.isPinned }.sorted { $0.pinnedIndex < $1.pinnedIndex }
+        let authoritativePinned = mapped
+            .filter(\.isPinned)
+            .sorted { $0.pinnedIndex < $1.pinnedIndex }
+            .map { PinnedExtensionOrderItem(id: $0.id, isForcePinned: $0.isForcePinned) }
+        pinnedExtensionOrdering.reconcile(authoritative: authoritativePinned)
 
         // Reconcile per-extension action state with the current list: drop
         // badges / dynamic icons for ids Chromium no longer reports (unloaded,
@@ -166,6 +450,69 @@ class ExtensionManager: ObservableObject {
             ChromiumLauncher.sharedInstance().bridge?.unpinExtension(withId: model.id, windowId: Int64(browserState?.windowId ?? 0))
         }
     }
+
+    /// The pinned list projected through the engine's transient Reorder
+    /// Preview order while a reorder is in flight; the authoritative order
+    /// otherwise. Shared by every Pinned Extension Surface of this window.
+    func presentedPinnedOrder(of pinnedExtensions: [Extension]) -> [Extension] {
+        guard let previewOrder = pinnedExtensionOrdering.presentationOrder else {
+            return pinnedExtensions
+        }
+        let byId = Dictionary(uniqueKeysWithValues: pinnedExtensions.map { ($0.id, $0) })
+        return previewOrder.compactMap { byId[$0] }
+    }
+
+    @discardableResult
+    func beginPinnedExtensionReorder(
+        extensionId: String,
+        visibleProjection: [String],
+        surface: PinnedExtensionSurface
+    ) -> Bool {
+        pinnedExtensionOrdering.beginDrag(
+            extensionId: extensionId,
+            visibleProjection: visibleProjection,
+            surface: surface,
+            allowsReordering: browserState?.isIncognito == false
+        )
+    }
+
+    @discardableResult
+    func updatePinnedExtensionReorder(
+        targetExtensionId: String,
+        placement: PinnedExtensionAnchorPlacement,
+        surface: PinnedExtensionSurface
+    ) -> Bool {
+        pinnedExtensionOrdering.updatePreview(
+            targetExtensionId: targetExtensionId,
+            placement: placement,
+            surface: surface
+        )
+    }
+
+    func leavePinnedExtensionReorder(surface: PinnedExtensionSurface) {
+        pinnedExtensionOrdering.leave(surface: surface)
+    }
+
+    func cancelPinnedExtensionReorder(surface: PinnedExtensionSurface) {
+        pinnedExtensionOrdering.cancel(surface: surface)
+    }
+
+    @discardableResult
+    func commitPinnedExtensionReorder(surface: PinnedExtensionSurface) -> Bool {
+        guard let bridge = ChromiumLauncher.sharedInstance().bridge else {
+            cancelPinnedExtensionReorder(surface: surface)
+            return false
+        }
+        guard let move = pinnedExtensionOrdering.commit(surface: surface) else {
+            return false
+        }
+        bridge.movePinnedExtension(
+            withId: move.extensionId,
+            to: Int32(move.destinationIndex),
+            windowId: browserState?.windowId.int64Value ?? 0
+        )
+        return true
+    }
     
     #if DEBUG
     func loadTestData(itemCount: Int) {
@@ -252,4 +599,3 @@ extension NSImage {
         }
     }
 }
-

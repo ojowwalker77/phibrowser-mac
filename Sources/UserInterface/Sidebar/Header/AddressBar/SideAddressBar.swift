@@ -52,7 +52,7 @@ class SideAddressBar: NSView {
     
     private var textField: NSTextField!
     private var rightStackView: CustomStackView!
-    private var extensionIconsStackView: CustomStackView!
+    private var extensionIconsStackView: ExtensionReorderStackView!
     @Published var currentTab: Tab?
     
     private var cancellables = Set<AnyCancellable>()
@@ -212,6 +212,18 @@ class SideAddressBar: NSView {
                 self.updateExtensionIcons(self.lastPinnedExtensions)
             }
             .store(in: &cancellables)
+
+        // Rebuild when the engine's transient Reorder Preview order changes so
+        // the icon row follows the drag live (and snaps back when it resets).
+        browserState.extensionManager.pinnedExtensionOrdering.$presentationOrder
+            .removeDuplicates()
+            .dropFirst()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                guard let self, !self.extensionIconsStackView.isHidden else { return }
+                self.updateExtensionIcons(self.lastPinnedExtensions)
+            }
+            .store(in: &cancellables)
     }
 
     private func updateExtensionIcons(_ pinnedExtensions: [Extension]) {
@@ -220,7 +232,8 @@ class SideAddressBar: NSView {
         // mirroring the header (spec §4.3). The badge pill self-updates via the
         // hosted overlay; whole-icon show/hide needs this rebuild.
         let manager = unsafeBrowserState?.extensionManager
-        let visibleExtensions = pinnedExtensions.filter {
+        let ordered = manager?.presentedPinnedOrder(of: pinnedExtensions) ?? pinnedExtensions
+        let visibleExtensions = ordered.filter {
             manager?.badges[$0.id]?.visible != false
         }
         extensionIconsStackView.arrangedSubviews.forEach { view in
@@ -232,6 +245,7 @@ class SideAddressBar: NSView {
             let button = createExtensionButton(for: ext)
             extensionIconsStackView.addArrangedSubview(button)
         }
+        refreshReorderSourceVisibility()
     }
 
     private func updateDisplayedURL(_ url: String?) {
@@ -277,7 +291,27 @@ class SideAddressBar: NSView {
                                            displayMode: .imageOnly,
                                            hoverBackgroundColor: .hover,
                                            cornerRadius: 4)
-        let button = HoverableButtonNSView(config: config, target: self, selector: #selector(extensionButtonClicked(_:)))
+        // The engine re-validates at beginDrag; this gate only decides whether
+        // the button owns its left-mouse events for click-vs-drag tracking.
+        // The hosted SwiftUI action stays wired in both branches so
+        // accessibility activation keeps working.
+        let button: HoverableButtonNSView
+        if unsafeBrowserState?.isIncognito == false && !ext.isForcePinned {
+            let draggable = DraggableExtensionButton(
+                config: config, target: self, selector: #selector(extensionButtonClicked(_:)))
+            draggable.onPrimaryClick = { [weak self, weak draggable] in
+                guard let self, let draggable else { return }
+                self.extensionButtonClicked(draggable)
+            }
+            draggable.onDragPastHysteresis = { [weak self, weak draggable] event in
+                guard let self, let draggable else { return }
+                self.beginExtensionReorderDrag(for: ext.id, from: draggable, with: event)
+            }
+            button = draggable
+        } else {
+            button = HoverableButtonNSView(
+                config: config, target: self, selector: #selector(extensionButtonClicked(_:)))
+        }
         button.toolTip = ext.name
 
         button.identifier = NSUserInterfaceItemIdentifier(ext.id)
@@ -403,10 +437,21 @@ class SideAddressBar: NSView {
         rightStackView.alignment = .centerY
         rightStackView.distribution = .gravityAreas
         
-        extensionIconsStackView = CustomStackView()
+        extensionIconsStackView = ExtensionReorderStackView()
         extensionIconsStackView.orientation = .horizontal
         extensionIconsStackView.spacing = 2
         extensionIconsStackView.alignment = .centerY
+        extensionIconsStackView.registerForDraggedTypes([.phiPinnedExtensionReorder])
+        extensionIconsStackView.onReorderUpdate = { [weak self] x in
+            self?.updateExtensionReorderPreview(atX: x) ?? false
+        }
+        extensionIconsStackView.onReorderExited = { [weak self] in
+            self?.unsafeBrowserState?.extensionManager
+                .leavePinnedExtensionReorder(surface: .sidebarAddressBar)
+        }
+        extensionIconsStackView.onReorderDrop = { [weak self] x in
+            self?.commitExtensionReorderDrop(atX: x) ?? false
+        }
         
         rightStackView.addArrangedSubview(extensionIconsStackView)
         rightStackView.addArrangedSubview(copyURLButton)
@@ -540,5 +585,219 @@ extension SideAddressBar {
     class CustomStackView: NSStackView {
         override func mouseDown(with event: NSEvent) {
         }
+    }
+}
+
+// MARK: - Pinned extension reordering (Pinned Extension Surface: sidebar address bar)
+
+extension SideAddressBar {
+    struct ExtensionReorderSlot: Equatable {
+        let id: String
+        let midX: CGFloat
+    }
+
+    /// Maps a pointer x (in the icon row's coordinates) to the Anchored Reorder
+    /// intent for the shared ordering engine: the nearest visible action is the
+    /// target, and the pointer's side of its midpoint picks the placement.
+    /// Pointers ahead of the first or past the last action clamp to the ends.
+    static func extensionReorderAnchor(
+        atX x: CGFloat,
+        slots: [ExtensionReorderSlot]
+    ) -> (targetId: String, placement: PinnedExtensionAnchorPlacement)? {
+        guard let nearest = slots.min(by: { abs($0.midX - x) < abs($1.midX - x) }) else {
+            return nil
+        }
+        return (nearest.id, x < nearest.midX ? .before : .after)
+    }
+
+    private func beginExtensionReorderDrag(
+        for extensionId: String,
+        from button: NSView,
+        with event: NSEvent
+    ) {
+        guard let manager = unsafeBrowserState?.extensionManager else { return }
+        let visibleProjection = extensionIconsStackView.arrangedSubviews.compactMap {
+            $0.identifier?.rawValue
+        }
+        guard manager.beginPinnedExtensionReorder(
+            extensionId: extensionId,
+            visibleProjection: visibleProjection,
+            surface: .sidebarAddressBar
+        ) else {
+            return
+        }
+
+        let pasteboardItem = NSPasteboardItem()
+        pasteboardItem.setString(extensionId, forType: .phiPinnedExtensionReorder)
+        let draggingItem = NSDraggingItem(pasteboardWriter: pasteboardItem)
+        // Snapshot the live button so the drag image keeps the current dynamic
+        // icon and badge state.
+        let frameInRow = extensionIconsStackView.convert(button.bounds, from: button)
+        if let bitmap = button.bitmapImageRepForCachingDisplay(in: button.bounds) {
+            button.cacheDisplay(in: button.bounds, to: bitmap)
+            let image = NSImage(size: button.bounds.size)
+            image.addRepresentation(bitmap)
+            draggingItem.setDraggingFrame(frameInRow, contents: image)
+        } else {
+            draggingItem.setDraggingFrame(frameInRow, contents: nil)
+        }
+        // The session starts from the icon row, not the button: preview
+        // rebuilds replace the buttons mid-drag and the session must
+        // outlive them.
+        extensionIconsStackView.beginDraggingSession(
+            with: [draggingItem], event: event, source: self)
+        refreshReorderSourceVisibility()
+    }
+
+    private func updateExtensionReorderPreview(atX x: CGFloat) -> Bool {
+        guard let manager = unsafeBrowserState?.extensionManager else { return false }
+        // A preview rebuild may still be pending layout when the next drag
+        // update arrives; settle frames before hit-testing them.
+        extensionIconsStackView.layoutSubtreeIfNeeded()
+        let slots = extensionIconsStackView.arrangedSubviews.compactMap { view -> ExtensionReorderSlot? in
+            guard let id = view.identifier?.rawValue else { return nil }
+            return ExtensionReorderSlot(id: id, midX: view.frame.midX)
+        }
+        guard let anchor = Self.extensionReorderAnchor(atX: x, slots: slots) else {
+            return false
+        }
+        return manager.updatePinnedExtensionReorder(
+            targetExtensionId: anchor.targetId,
+            placement: anchor.placement,
+            surface: .sidebarAddressBar
+        )
+    }
+
+    private func commitExtensionReorderDrop(atX x: CGFloat) -> Bool {
+        guard let manager = unsafeBrowserState?.extensionManager,
+              updateExtensionReorderPreview(atX: x),
+              manager.commitPinnedExtensionReorder(surface: .sidebarAddressBar) else {
+            unsafeBrowserState?.extensionManager
+                .cancelPinnedExtensionReorder(surface: .sidebarAddressBar)
+            return false
+        }
+        return true
+    }
+
+    /// Hides the drag's source icon (alpha 0, still arranged) so the drag
+    /// image is the only visible copy; the empty slot the row keeps open
+    /// marks the landing spot. Recomputed from the engine so drag end (or a
+    /// reset) restores every icon.
+    private func refreshReorderSourceVisibility() {
+        let draggedId = unsafeBrowserState?.extensionManager
+            .pinnedExtensionOrdering.draggedExtensionId
+        for view in extensionIconsStackView.arrangedSubviews {
+            view.alphaValue = (draggedId != nil && view.identifier?.rawValue == draggedId)
+                ? 0 : 1
+        }
+    }
+}
+
+extension SideAddressBar: NSDraggingSource {
+    func draggingSession(
+        _ session: NSDraggingSession,
+        sourceOperationMaskFor context: NSDraggingContext
+    ) -> NSDragOperation {
+        // Surface-Local Reorder: the payload never leaves the application.
+        context == .withinApplication ? .move : []
+    }
+
+    func draggingSession(
+        _ session: NSDraggingSession,
+        endedAt screenPoint: NSPoint,
+        operation: NSDragOperation
+    ) {
+        // A successful drop already advanced the engine to Pending Reorder
+        // Confirmation, which makes this cancel a no-op; every other outcome
+        // (Escape, drop outside the row, rejected drop) abandons the drag.
+        unsafeBrowserState?.extensionManager
+            .cancelPinnedExtensionReorder(surface: .sidebarAddressBar)
+        refreshReorderSourceVisibility()
+    }
+}
+
+/// Extension icon button that arms an AppKit reorder drag. The hosted SwiftUI
+/// button consumes left-mouse events, so this subclass claims them at
+/// hit-test time (right-clicks, hover tracking, and accessibility activation
+/// are untouched) and re-implements click-vs-drag: a release inside the
+/// bounds is the click, movement past standard hysteresis asks the surface to
+/// begin a dragging session.
+private final class DraggableExtensionButton: HoverableButtonNSView {
+    var onPrimaryClick: (() -> Void)?
+    /// Invoked once per gesture when the pointer crosses drag hysteresis; the
+    /// surface decides whether a dragging session starts.
+    var onDragPastHysteresis: ((NSEvent) -> Void)?
+
+    private var mouseDownPoint: CGPoint?
+    private var hasCrossedHysteresis = false
+    private let dragThreshold: CGFloat = 5
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        guard let result = super.hitTest(point) else { return nil }
+        switch NSApp.currentEvent?.type {
+        case .leftMouseDown, .leftMouseUp, .leftMouseDragged:
+            return self
+        default:
+            return result
+        }
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        // No super: NSView would forward up the responder chain and
+        // SideAddressBar.mouseDown opens the location bar.
+        mouseDownPoint = convert(event.locationInWindow, from: nil)
+        hasCrossedHysteresis = false
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard let startPoint = mouseDownPoint, !hasCrossedHysteresis else { return }
+        let currentPoint = convert(event.locationInWindow, from: nil)
+        guard abs(currentPoint.x - startPoint.x) > dragThreshold
+                || abs(currentPoint.y - startPoint.y) > dragThreshold else { return }
+        // Crossing hysteresis consumes the gesture whether or not a session
+        // starts: a rejected reorder attempt must not fall back to a click,
+        // because extension actions stay suppressed once a reorder begins.
+        hasCrossedHysteresis = true
+        onDragPastHysteresis?(event)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        if !hasCrossedHysteresis,
+           bounds.contains(convert(event.locationInWindow, from: nil)) {
+            onPrimaryClick?()
+        }
+        mouseDownPoint = nil
+        hasCrossedHysteresis = false
+    }
+}
+
+/// The pinned extension icon row: the drop side of the sidebar address bar's
+/// Surface-Local Reorder. Drops anywhere else in the address bar or sidebar
+/// never reach a registered destination and cancel through the source's
+/// session-ended callback.
+private final class ExtensionReorderStackView: SideAddressBar.CustomStackView {
+    var onReorderUpdate: ((CGFloat) -> Bool)?
+    var onReorderExited: (() -> Void)?
+    var onReorderDrop: ((CGFloat) -> Bool)?
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        reorderOperation(for: sender)
+    }
+
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        reorderOperation(for: sender)
+    }
+
+    override func draggingExited(_ sender: NSDraggingInfo?) {
+        onReorderExited?()
+    }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        onReorderDrop?(convert(sender.draggingLocation, from: nil).x) ?? false
+    }
+
+    private func reorderOperation(for sender: NSDraggingInfo) -> NSDragOperation {
+        (onReorderUpdate?(convert(sender.draggingLocation, from: nil).x) ?? false)
+            ? .move : []
     }
 }

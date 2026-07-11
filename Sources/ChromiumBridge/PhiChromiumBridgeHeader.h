@@ -694,6 +694,8 @@ typedef NS_ENUM(NSUInteger, PhiOmniboxSuggestionDisposition) {
     continueUserActivity:(NSUserActivity*)userActivity 
       restorationHandler:(void (^)(NSArray<id<NSUserActivityRestoring>>*))restorationHandler;
 
+/// Each dictionary includes id, name, icon, version, isPinned, pinnedIndex,
+/// and isForcePinned. Chromium's complete snapshot is authoritative.
 - (void)getAllExtensionsWithCompletion:(void (^)(NSArray<NSDictionary *> *))completion windowId:(int64_t)windowId;
 - (void)triggerExtensionWithId:(NSString *)extensionId pointInScreen:(NSPoint)pointInScreen windowId:(int64_t)windowId;
 - (void)triggerExtensionContextMenuWithId:(NSString *)extensionId pointInScreen:(NSPoint)pointInScreen windowId:(int64_t)windowId;

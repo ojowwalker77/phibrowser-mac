@@ -18,8 +18,15 @@ enum ExtensionPopupAnchor {
     /// coordinates (top-left origin). Returns `nil` if `view` is not
     /// attached to a window.
     static func pointBelowView(_ view: NSView) -> NSPoint? {
+        pointBelowRect(view.bounds, in: view)
+    }
+
+    /// Same as `pointBelowView`, for a sub-rect of `view` — serves surfaces
+    /// whose buttons are drawn by SwiftUI and have no NSView of their own
+    /// (the content header's reorder surface).
+    static func pointBelowRect(_ rect: NSRect, in view: NSView) -> NSPoint? {
         guard let window = view.window else { return nil }
-        let rectInWindow = view.convert(view.bounds, to: nil)
+        let rectInWindow = view.convert(rect, to: nil)
         let rectInScreen = window.convertToScreen(rectInWindow)
         // `rectInScreen` is in AppKit's bottom-left-origin screen space, so
         // `minY` is the visual bottom edge.

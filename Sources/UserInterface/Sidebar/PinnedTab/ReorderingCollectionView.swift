@@ -57,11 +57,15 @@ class ReorderingCollectionView: NSCollectionView {
     }
 
     override func draggingSession(_ session: NSDraggingSession, movedTo screenPoint: NSPoint) {
-        // Source-side tracking for pinned tabs: drive drag-image updates using cursor position.
-        unsafeBrowserState?.tabDraggingSession.attachNativeSession(session)
-        unsafeBrowserState?.tabDraggingSession.update(
-            screenLocation: CGPoint(x: screenPoint.x, y: screenPoint.y)
-        )
+        // Source-side tracking for pinned tabs: drive drag-image updates using
+        // cursor position. Pinned-extension reorders are surface-local and
+        // never engage the tab dragging session.
+        if session.draggingPasteboard.string(forType: .phiPinnedExtensionReorder) == nil {
+            unsafeBrowserState?.tabDraggingSession.attachNativeSession(session)
+            unsafeBrowserState?.tabDraggingSession.update(
+                screenLocation: CGPoint(x: screenPoint.x, y: screenPoint.y)
+            )
+        }
         super.draggingSession(session, movedTo: screenPoint)
     }
     

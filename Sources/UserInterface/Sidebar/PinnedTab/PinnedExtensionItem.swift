@@ -50,6 +50,8 @@ class PinnedExtensionItem: NSCollectionViewItem {
         iconImageView.image = nil
         view.toolTip = nil
         model = nil
+        // Reorder source hiding must not survive into a reused cell.
+        view.alphaValue = 1
     }
 
     /// `icon` is the resolved display icon (dynamic setIcon/declarative override
