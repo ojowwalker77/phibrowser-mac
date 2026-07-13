@@ -91,7 +91,7 @@ struct CreateSpacePanel: View {
             GeometryReader { geo in
                 ScrollView {
                     formStack
-                        .padding(.horizontal, 16)
+                        .padding(.horizontal, 10)
                         .padding(.vertical, 20)
                         .frame(width: geo.size.width)
                         .frame(minHeight: geo.size.height)
@@ -115,12 +115,13 @@ struct CreateSpacePanel: View {
     }
 
     /// Bounded column width. The floating popup uses a comfortable dialog width;
-    /// the sidebar overlay stays narrow so it fits a slim sidebar.
+    /// the sidebar overlay fills the sidebar (minus its slim padding) up to the
+    /// same width, so only an unusually wide sidebar leaves margins.
     private var formMaxWidth: CGFloat {
         style == .window ? Self.windowContentWidth : Self.sidebarContentWidth
     }
 
-    private static let sidebarContentWidth: CGFloat = 200
+    private static let sidebarContentWidth: CGFloat = 320
     private static let windowContentWidth: CGFloat = 280
 
     // MARK: - Sections
