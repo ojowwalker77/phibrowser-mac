@@ -3419,13 +3419,6 @@ final class SpaceWindowSlot: ObservableObject {
             return
         }
 
-        // The target sits directly behind the still-front leaving window for the
-        // whole slide; its header Spaces strip is outside the band overlay, so it
-        // would bleed through the translucent sidebar as a ghost row. Hide it now
-        // (the band snapshot above excludes the header, so this is snapshot-safe);
-        // `orderOutIfNotTabbedWithTarget` reveals it once the target is fronted.
-        targetSurface.setSpacesStripHidden(true)
-
         verticalSwapToken += 1
         let token = verticalSwapToken
 
@@ -3443,7 +3436,7 @@ final class SpaceWindowSlot: ObservableObject {
         prevSurface.view.addSubview(placeholder, positioned: .above, relativeTo: nil)
 
         var didFinish = false
-        let finalize: () -> Void = { [weak self, weak prevSurface, weak targetSurface, weak placeholder] in
+        let finalize: () -> Void = { [weak self, weak prevSurface, weak placeholder] in
             guard !didFinish else { return }
             didFinish = true
             if let self {
@@ -3466,13 +3459,6 @@ final class SpaceWindowSlot: ObservableObject {
             placeholder?.removeFromSuperview()
             self?.activeSidebarOverlay?.cancel()
             prevSurface?.setSwitchBandContentHidden(false)
-            // Reveal the exact surface hidden at push-in start, not only via
-            // the bleed guard `orderOutIfNotTabbedWithTarget` applied: the
-            // guard reaches controllers still registered in `windowsBySpaceId`
-            // and resolves their CURRENT surface, so a target dropped from the
-            // slot mid-slide — or one now presenting the other surface (docked
-            // vs floating) — would keep this strip at alpha 0 indefinitely.
-            targetSurface?.setSpacesStripHidden(false)
             // Restore the leaving window's own theme now that it's hidden, so
             // it shows the source Space's colors when next activated.
             self?.themeRampTimer?.invalidate()
@@ -4319,8 +4305,7 @@ final class SpaceWindowSlot: ObservableObject {
             }
             // Tabbed siblings can't be ordered out in a shared fullscreen Space
             // (it flashes a blank workspace), so they stay stacked behind the
-            // target — hide their strips instead so none ghost through.
-            applySpacesStripBleedGuard(frontWindow: targetWindow)
+            // target.
             return
         }
 
@@ -4347,37 +4332,6 @@ final class SpaceWindowSlot: ObservableObject {
         // the still-front leaving window, so hiding it mid-animation would break
         // the slide).
         scheduleNonTargetSlotWindowSweep()
-
-        // The entering window's strip was hidden while it slid in behind the
-        // leaving one; reveal it now that it's front, and (defensively) keep any
-        // still-on-screen sibling's strip hidden until the sweep drops it.
-        applySpacesStripBleedGuard(frontWindow: targetWindow)
-    }
-
-    /// Keeps the sidebar Spaces strip visible only on the slot's front window.
-    /// A non-front slot window that stays on screen — a tabbed sibling in a
-    /// shared fullscreen Space (never `orderOut`-able without flashing a blank
-    /// workspace), or one Chromium re-surfaced behind the target before the
-    /// sweep drops it — otherwise bleeds its strip icons through the translucent
-    /// front sidebar as a ghost row. Hiding the strip (not the window) fixes the
-    /// bleed without the fullscreen workspace flash. Idempotent; the alpha
-    /// sticks across a window re-order, so a re-surfaced sibling stays clean.
-    private func applySpacesStripBleedGuard(frontWindow: NSWindow?) {
-        // Every caller means "this window is front now". A nil window means
-        // that switch failed — bail rather than treat it as "nothing is
-        // front", which would hide EVERY window's strip and strand whatever
-        // window ends up on screen with an invisible Spaces row.
-        guard let frontWindow else { return }
-        for controller in windowsBySpaceId.values {
-            let isFront = controller.window === frontWindow
-            controller.mainSplitViewController.sidebarViewController.setSpacesStripHidden(!isFront)
-            // The floating panel hosts its own copy of the strip and can be
-            // open on a non-front window (a switch driven from the panel
-            // leaves the leaving window's panel up) — guard it the same way,
-            // and restore it when its window fronts.
-            controller.mainSplitViewController.webContentContainerViewController
-                .floatingSidebarViewController?.setSpacesStripHidden(!isFront)
-        }
     }
 
     /// Orders out every window in this slot except `keepWindow` (the target that
@@ -4460,11 +4414,6 @@ final class SpaceWindowSlot: ObservableObject {
             makeKeyAndOrderFrontHidingSlotTabBar(activeWindow)
         }
         visibleController = activeController
-        // Heal the Spaces-strip bleed guard alongside the window invariant:
-        // this ladder runs several times after every switch, so any fronting
-        // path that missed the reveal (leaving the active sidebar with an
-        // invisible strip row) is corrected here within a couple of seconds.
-        applySpacesStripBleedGuard(frontWindow: activeWindow)
     }
 
     /// Removes any `SidebarSwapOverlay` in a window's view tree except the one
@@ -4567,12 +4516,6 @@ final class SpaceWindowSlot: ObservableObject {
         if hidCount > 0 || activeWindow.tabGroup?.selectedWindow !== activeWindow {
             makeKeyAndOrderFrontHidingSlotTabBar(activeWindow)
         }
-        // Unconditional (not just in shared fullscreen, where the tabbed
-        // siblings this pass leaves on screen make it load-bearing): the
-        // active window being asserted here may have spent time as a
-        // background sibling with its strip hidden by an earlier guard pass,
-        // and nothing else on the restore/reopen path would reveal it.
-        applySpacesStripBleedGuard(frontWindow: activeWindow)
         updateWindowsMenuExclusion()
         // The active window is now surfaced; re-enter fullscreen on it if this
         // slot was fullscreen last session (no-op otherwise / after the first
@@ -5414,9 +5357,6 @@ final class SpaceWindowSlot: ObservableObject {
         }
         let previousSpaceId = activeSpaceId
         let previous = visibleController
-        // Whether a switch path below runs — those re-apply the Spaces-strip
-        // bleed guard themselves (on settle for the animated ones).
-        var switchPathRevealsStrip = false
 
         // External (non-`activate`) trigger — Chromium routing a navigation
         // into a sibling Space's window via the URL rule throttle made that
@@ -5461,7 +5401,6 @@ final class SpaceWindowSlot: ObservableObject {
             // routing (Chromium doesn't close it), so the per-style snapshot
             // paths produce real pixels.
             if isExternalSwitch, let previous, let previousSpaceId {
-                switchPathRevealsStrip = true
                 // Chromium surfaced the target window itself for the URL-rule
                 // route, so the clicked path's swap-time frame pin never ran —
                 // yet Chromium still re-applies the target's stale creation
@@ -5505,12 +5444,8 @@ final class SpaceWindowSlot: ObservableObject {
                     )
                     // The band slide draws on the already-front target and
                     // swaps no windows, so unlike every other switch path
-                    // nothing here would sweep the leaving window or re-apply
-                    // the strip bleed guard — the target's Spaces strip, kept
-                    // at alpha 0 while it was a background sibling, would stay
-                    // invisible (seen when Search Tabs or the NTP tab switcher
-                    // surfaces a sibling Space's window). Mirror the spawn
-                    // path: slide, then order out + reveal.
+                    // nothing here would sweep the leaving window. Mirror the
+                    // spawn path: slide, then order out.
                     orderOutIfNotTabbedWithTarget(previous.window, targetWindow: controller.window)
                 } else {
                     performSwap(
@@ -5523,15 +5458,6 @@ final class SpaceWindowSlot: ObservableObject {
                     )
                 }
             }
-        }
-        if !switchPathRevealsStrip {
-            // A key adoption with no swap — Mission Control, the Window menu,
-            // app re-activation, Chromium re-surfacing a window of the active
-            // Space — fronts a window the switch paths never see. If it spent
-            // time as a background sibling, its strip is still hidden by an
-            // earlier bleed-guard pass and nothing else would reveal it. Safe
-            // against animations: in-flight switches returned early above.
-            applySpacesStripBleedGuard(frontWindow: controller.window)
         }
         manager?.notifySlotBecameKey(self)
     }

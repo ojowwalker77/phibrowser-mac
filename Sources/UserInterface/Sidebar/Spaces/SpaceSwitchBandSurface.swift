@@ -10,8 +10,8 @@ import AppKit
 /// hover floating panel (`FloatingSidebarViewController`) — and
 /// `SpaceWindowSlot` drives whichever one is presenting when the switch
 /// fires (see `SpaceWindowSlot.spaceSwitchSurface(of:)`): band snapshots,
-/// the push-in slide overlay, the strip bleed guard, and the swipe edge
-/// bounce all address the surface, not a concrete controller.
+/// the push-in slide overlay, and the swipe edge bounce all address the
+/// surface, not a concrete controller.
 ///
 /// Deliberately NOT annotated `@MainActor`: the nonisolated `SpaceWindowSlot`
 /// drives these members synchronously (always on the main thread in
@@ -34,14 +34,6 @@ protocol SpaceSwitchBandSurface: NSViewController {
     /// backdrop painted behind it is NOT captured and shows through the
     /// slide — and the edge bounce clips to it.
     var spaceSwitchBandContainer: NSView { get }
-
-    /// Hides/reveals just the Spaces strip row. A non-front slot window that
-    /// stays on screen otherwise bleeds its strip icons through the
-    /// translucent front sidebar as a ghost row — see
-    /// `SpaceWindowSlot.applySpacesStripBleedGuard`. Alpha (not `isHidden`)
-    /// so the header layout is untouched. No-op when the surface mounts no
-    /// strip (incognito).
-    func setSpacesStripHidden(_ hidden: Bool)
 
     /// Ramps the surface's per-Space tint in lockstep with the push-in
     /// slide. The floating panel has no dedicated tint layer (its themed
