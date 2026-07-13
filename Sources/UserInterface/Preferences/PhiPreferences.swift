@@ -123,10 +123,10 @@ extension PhiPreferences {
         }
 
         /// Cross-Space animation duration in the horizontal (Comfortable) layout.
-        static let horizontalSwitchSpaceAnimationDuration: TimeInterval = 0.4
+        static let horizontalSwitchSpaceAnimationDuration: TimeInterval = 0.2
         /// Cross-Space animation duration in the vertical (Performance /
         /// Balanced) layouts.
-        static let verticalSwitchSpaceAnimationDuration: TimeInterval = 0.3
+        static let verticalSwitchSpaceAnimationDuration: TimeInterval = 0.15
 
         /// Which window's traffic-light buttons the horizontal-layout
         /// cross-Space slide suppresses. `source` (the ship default) fades
