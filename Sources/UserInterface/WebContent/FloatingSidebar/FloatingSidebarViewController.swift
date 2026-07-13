@@ -218,7 +218,9 @@ class FloatingSidebarViewController: NSViewController {
     }
 
     private func setupStackView() {
-        addChild(pinnedTabViewController)
+        if !state.isIncognito {
+            addChild(pinnedTabViewController)
+        }
         addChild(tabList)
 
         view.addSubview(mainStackView)
@@ -246,19 +248,25 @@ class FloatingSidebarViewController: NSViewController {
         // 2. Header spacer
         mainStackView.addArrangedSubview(createSpacer(height: 5))
 
-        // 3. pinned tabs
-        pinnedTabsContainerView.addSubview(pinnedTabViewController.view)
-        pinnedTabViewController.view.snp.makeConstraints { make in
-            make.edges.equalToSuperview()
-        }
-        mainStackView.addArrangedSubview(pinnedTabsContainerView)
-        pinnedTabsContainerView.snp.makeConstraints { make in
-            make.leading.trailing.equalToSuperview()
-            pinnedHeightConstraint = make.height.equalTo(Self.defaultFavoriteHeight).constraint
-        }
+        // 3. Pinned tabs + their spacer. The pinned-tab (favorites) band is a
+        // per-profile feature with no meaning in an incognito session; mounting
+        // it here would expose the default profile's favorites as a drop target
+        // whose writes land in the default Space. Skip it entirely, matching
+        // the docked sidebar (see SidebarViewController.setupStackView).
+        if !state.isIncognito {
+            pinnedTabsContainerView.addSubview(pinnedTabViewController.view)
+            pinnedTabViewController.view.snp.makeConstraints { make in
+                make.edges.equalToSuperview()
+            }
+            mainStackView.addArrangedSubview(pinnedTabsContainerView)
+            pinnedTabsContainerView.snp.makeConstraints { make in
+                make.leading.trailing.equalToSuperview()
+                pinnedHeightConstraint = make.height.equalTo(Self.defaultFavoriteHeight).constraint
+            }
 
-        // 4. Favorites spacer
-        mainStackView.addArrangedSubview(createSpacer(height: 3))
+            // 4. Favorites spacer
+            mainStackView.addArrangedSubview(createSpacer(height: 3))
+        }
 
         // 5. Tab list
         mainStackView.addArrangedSubview(tabList.view)
@@ -512,8 +520,12 @@ class FloatingSidebarViewController: NSViewController {
         isContentActive = active
 
         contentCancellables.removeAll()
-        pinnedTabViewController.setActive(active)
         tabList.setActive(active)
+
+        // The pinned band is not mounted off-the-record (see setupStackView),
+        // so don't spin up its controller or height bindings either.
+        guard !state.isIncognito else { return }
+        pinnedTabViewController.setActive(active)
 
         guard active else { return }
 

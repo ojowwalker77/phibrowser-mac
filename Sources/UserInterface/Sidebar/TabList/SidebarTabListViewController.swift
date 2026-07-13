@@ -1050,6 +1050,17 @@ extension SidebarTabListViewController: NSOutlineViewDataSource {
             return []
         }
 
+        // Off-the-record windows have no bookmark writes: the section shown
+        // here belongs to the default profile, so anything dropped into it
+        // would surface in the default Space. Reject bookmark-targeted drops
+        // up front (folder-rule remapping below only ever starts from a
+        // bookmark proposal, so this single check covers every branch).
+        if browserState.isIncognito,
+           isBookmarkTargetedDrop(item: originalResolvedItem, childIndex: index, in: outlineView) {
+            clearDropFeedback()
+            return []
+        }
+
         // Whole-group drag: validate before falling into the per-tab
         // resolver. Same-window: root reorder (`moveNormalTabSlice`) or
         // bookmark folder (convert-to-bookmarks). Cross-window onto
@@ -1511,8 +1522,15 @@ extension SidebarTabListViewController: NSOutlineViewDataSource {
         guard pasteboard.pasteboardItems?.isEmpty == false else {
             return false
         }
-        
+
         browserState.tabDraggingSession.end()
+
+        // Mirror of the validateDrop off-the-record guard, for redirected
+        // drops that land here with a bookmark target anyway.
+        if browserState.isIncognito,
+           isBookmarkTargetedDrop(item: resolvedItem, childIndex: resolvedIndex, in: outlineView) {
+            return false
+        }
 
         // Whole-group drag: drop on a bookmark folder converts the group
         // into a bookmark folder; drop at root reorders the group block
@@ -2139,6 +2157,19 @@ extension SidebarTabListViewController: NSOutlineViewDataSource {
         let bookmarkSectionEnd = bookmarkSectionController.bookmarkItems.count
         let separatorOffset = (!bookmarkSectionController.bookmarkItems.isEmpty && !tabSectionController.tabItems.isEmpty) ? 1 : 0
         return row > bookmarkSectionEnd + separatorOffset
+    }
+
+    /// Whether a proposed drop targets the bookmark section — a bookmark
+    /// item/folder, or a root-level slot inside the section's rows. Used by
+    /// the off-the-record guard: the bookmarks shown here belong to the
+    /// default profile, so any drop-driven write from an incognito window
+    /// (tab→bookmark conversion, group conversion, reorder) would surface
+    /// in the default Space. Tab-section drops are unaffected.
+    private func isBookmarkTargetedDrop(item: Any?, childIndex: Int, in outlineView: NSOutlineView) -> Bool {
+        if item is Bookmark { return true }
+        guard item == nil else { return false }
+        let proposedRow = childIndex == NSOutlineViewDropOnItemIndex ? outlineView.numberOfRows : childIndex
+        return isRowInBookmarkSection(proposedRow)
     }
     
     /// A drop landed directly ON a tab row (`dropChildIndex ==
