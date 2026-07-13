@@ -160,9 +160,14 @@ export async function listProfiles() {
  * Reuses the agent space whose taskId equals `name`, or creates one. Selects
  * it and re-attaches to the tab the task last drove (its first tab on a
  * fresh space). Options: {profile} — profileId or display name (defaults to
- * the first profile).
+ * the first profile); {persistent: true} — a PERMANENT workspace: named
+ * `name` in the Space switcher, never expired by the keep-alive sweep,
+ * kept on complete(), surviving app relaunches, and re-bound to by a later
+ * call with the same name (see SKILL.md "Persistent Spaces"). Persistence
+ * is decided when the Space is first created; on a re-bind both options are
+ * ignored (the Space keeps its own profile).
  */
-export async function ensureAgentSpace(name, { profile = '' } = {}) {
+export async function ensureAgentSpace(name, { profile = '', persistent = false } = {}) {
   if (!name || typeof name !== 'string') {
     throw new Error('ensureAgentSpace(name): name is required')
   }
@@ -172,6 +177,7 @@ export async function ensureAgentSpace(name, { profile = '' } = {}) {
     const created = await phiSend('agentSpace.create', {
       taskId: name,
       profileId: profile,
+      ...(persistent ? { persistent: true } : {}),
     })
     task = {
       taskId: name,
@@ -179,6 +185,7 @@ export async function ensureAgentSpace(name, { profile = '' } = {}) {
       windowId: created.windowId,
       ownership: 'agent',
       status: 'running',
+      persistent: !!persistent,
     }
     // The window seeds its first tab ~0.6s after spawn.
     await wait(1.6)
@@ -213,6 +220,7 @@ export async function ensureAgentSpace(name, { profile = '' } = {}) {
   }
   return { taskId: task.taskId, spaceId: task.spaceId, windowId: task.windowId,
            ownership: task.ownership,
+           persistent: task.persistent ?? false,
            // The tab inventory was in hand anyway (listed above to pick the
            // attach target); returning it gives every round its Space
            // situational awareness for free. `current` is stamped after the
@@ -261,6 +269,7 @@ export async function spaceStatus({ shots = false } = {}) {
     ownership: t.ownership,
     status: t.status,
     caption: t.caption || '',
+    persistent: t.persistent ?? false,
     keepAliveRemainingSeconds: t.keepAliveRemainingSeconds ?? null,
     viewportOverride: (state.targetId &&
       state.viewportByTarget.get(state.targetId)?.request) || null,
@@ -2915,10 +2924,13 @@ export async function waitForAgentControl({ timeout = 600 } = {}) {
 }
 
 /**
- * Finishes the task and closes the agent Space (and its window). Agent Spaces
- * are ephemeral — completion always removes the Space. If the user needs a live
- * page left open, hand it to them with handOff() BEFORE completing. Run in its
- * own dedicated final heredoc.
+ * Finishes the task and closes the agent Space (and its window). Ephemeral
+ * Spaces (the default) are removed entirely; a PERSISTENT Space (created with
+ * ensureAgentSpace's {persistent: true}) keeps its Space in the switcher —
+ * only the task ends and its window closes, and a later
+ * ensureAgentSpace(name, {persistent: true}) re-binds to it. If the user
+ * needs a live page left open in an ephemeral Space, hand it to them with
+ * handOff() BEFORE completing. Run in its own dedicated final heredoc.
  */
 export async function complete({ success = true, message = undefined } = {}) {
   const task = requireTask()

@@ -1072,6 +1072,24 @@ final class SpaceManager: ObservableObject {
         // A queued profile-change reopen for this Space is moot once the
         // Space itself goes away.
         pendingProfileChangeReopens.removeValue(forKey: spaceId)
+        closeSpaceWindows(spaceId: spaceId)
+        // Cascade-delete the Space row, its tagged tabs/bookmarks, and its
+        // URL rules in a SINGLE write (LocalStore.deleteSpace intentionally
+        // leaves the cascade decision to the caller). Doing this as one
+        // transaction avoids a crash mid-delete leaving a content-less ghost
+        // Space or orphaned rows, and avoids publishing an inconsistent
+        // strip/bookmark state between separate saves. Without the rule
+        // cleanup they would linger as inert rows that keep being pushed to
+        // Chromium and dangle in the rules editor.
+        boundAccount?.localStorage.deleteSpaceCascade(spaceId: spaceId)
+    }
+
+    /// Closes every live window this Space has, across all slots — the
+    /// window-teardown half of `deleteSpace`, also used on its own when a
+    /// PERSISTENT agent task completes: the task's window must go, but the
+    /// Space row (and its tagged rows) stays in the switcher for the user,
+    /// and for a later task to re-bind to.
+    func closeSpaceWindows(spaceId: String) {
         // Any slot currently active on this Space retreats — back to the last
         // regular Space it surfaced (so a completed agent task lands the user
         // on the Space they came from, not the global default), falling back
@@ -1142,15 +1160,6 @@ final class SpaceManager: ObservableObject {
             slot.evictWindow(for: spaceId)
             slot.closeRetiredWindow(controller)
         }
-        // Cascade-delete the Space row, its tagged tabs/bookmarks, and its
-        // URL rules in a SINGLE write (LocalStore.deleteSpace intentionally
-        // leaves the cascade decision to the caller). Doing this as one
-        // transaction avoids a crash mid-delete leaving a content-less ghost
-        // Space or orphaned rows, and avoids publishing an inconsistent
-        // strip/bookmark state between separate saves. Without the rule
-        // cleanup they would linger as inert rows that keep being pushed to
-        // Chromium and dangle in the rules editor.
-        boundAccount?.localStorage.deleteSpaceCascade(spaceId: spaceId)
     }
 
     /// Removes agent Spaces that have no live task. Agent Spaces are ephemeral
@@ -1189,7 +1198,15 @@ final class SpaceManager: ObservableObject {
         // An agent Space is bound to the profile its task runs against;
         // re-profiling replaces its windows and would break the running agent.
         // Refuse regardless of ownership — even after the user takes control.
-        if let space = spaces.first(where: { $0.spaceId == spaceId }), space.isAgentSpace {
+        // Matched by signature (ephemeral) OR by live task: a PERSISTENT agent
+        // Space looks like a regular Space, but while a task drives it the
+        // same window-replacement hazard applies. Once its task ends it can be
+        // re-profiled like any Space.
+        let hostsLiveAgentTask = MainActor.assumeIsolated {
+            AgentSpaceManager.shared.isAgentSpace(spaceId)
+        }
+        if hostsLiveAgentTask
+            || spaces.first(where: { $0.spaceId == spaceId })?.isAgentSpace == true {
             AppLogWarn("[SpaceManager] refusing to change profile of agent Space \(spaceId)")
             return
         }

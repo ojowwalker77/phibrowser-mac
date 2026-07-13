@@ -63,6 +63,12 @@ struct AgentTask {
     /// the owning driver; `agentSpace.ping` sets it explicitly. Ignored while
     /// the user holds control.
     var keepAliveDeadline: Date = .distantFuture
+    /// A persistent task's Space is a permanent workspace: exempt from the
+    /// keep-alive sweep, kept on completion (window closed, Space row intact),
+    /// and recognizable on disk across relaunches
+    /// (`isPersistentAgentSpaceModel` + name == taskId) so a later task with
+    /// the same taskId re-binds to it instead of creating a duplicate.
+    var persistent: Bool = false
 }
 
 /// A transient visual mirror of one agent input action (a click, typing into
@@ -109,6 +115,12 @@ final class AgentSpaceManager: ObservableObject {
     // Robot emoji (🤖) from the emoji catalog — see Resources/Emoji/emoji-catalog.json.
     static let spaceIconName = "emoji:1F916"
     static let spaceColorHex = "#8E8E93"
+    /// Persistent agent Spaces wear the agent icon in this color and are
+    /// NAMED by their taskId (no R-ordinal), so they never match the
+    /// ephemeral signature: the orphan sweep spares them across relaunches,
+    /// the ephemeral-Space UI filters don't hide them, and the name doubles
+    /// as the durable taskId → Space mapping for re-binding.
+    static let persistentSpaceColorHex = "#5856D6"
 
     /// An agent Space's display name for its ordinal — "R1", "R2", …
     static func agentSpaceName(_ number: Int) -> String { "\(spaceNamePrefix)\(number)" }
@@ -123,8 +135,19 @@ final class AgentSpaceManager: ObservableObject {
 
     /// True if `space` looks like an agent Space (created by `createAgentSpace`).
     /// Pure/`nonisolated` so the Space-list sweep can call it off the main actor.
+    /// Matches EPHEMERAL agent Spaces only — persistent ones (see
+    /// `isPersistentAgentSpaceModel`) are deliberately excluded so every
+    /// ephemerality consumer (orphan sweep, snapshot rewrite, UI hiding)
+    /// leaves them alone.
     nonisolated static func isAgentSpaceModel(name: String, iconName: String, colorHex: String) -> Bool {
         isAgentSpaceName(name) && iconName == spaceIconName && colorHex == spaceColorHex
+    }
+
+    /// True if `space` looks like a persistent agent Space (created by
+    /// `createAgentSpace(persistent: true)`). The name is not part of the
+    /// match — it carries the taskId.
+    nonisolated static func isPersistentAgentSpaceModel(iconName: String, colorHex: String) -> Bool {
+        iconName == spaceIconName && colorHex == persistentSpaceColorHex
     }
 
     @Published private(set) var tasksBySpaceId: [String: AgentTask] = [:]
@@ -167,6 +190,9 @@ final class AgentSpaceManager: ObservableObject {
     func touchKeepAlive(taskId: String, ttlSeconds: TimeInterval? = nil) {
         guard let spaceId = spaceIdByTaskId[taskId],
               var task = tasksBySpaceId[spaceId] else { return }
+        // Persistent tasks never expire — even an explicit ping must not arm
+        // a deadline on one (its deadline stays .distantFuture for life).
+        guard !task.persistent else { return }
         if let ttl = ttlSeconds {
             let clamped = min(max(ttl, 1), Self.maxKeepAliveTTL)
             task.keepAliveDeadline = Date().addingTimeInterval(clamped)
@@ -199,7 +225,8 @@ final class AgentSpaceManager: ObservableObject {
     private func sweepExpiredTasks() {
         let now = Date()
         let expired = tasksBySpaceId.values.filter {
-            $0.origin == .cdp && $0.ownership == .agent && $0.keepAliveDeadline < now
+            $0.origin == .cdp && $0.ownership == .agent && !$0.persistent
+                && $0.keepAliveDeadline < now
         }
         for task in expired {
             AppLogInfo("[AgentSpace] task \(task.taskId) expired — no agent activity, auto-closing its Space")
@@ -242,10 +269,18 @@ final class AgentSpaceManager: ObservableObject {
     /// Resolves the profile (by id, then display name), creates a hidden Space
     /// bound to it, spawns its window without surfacing it, and records the
     /// task. `completion` receives `(spaceId, windowId)` or nil on failure.
+    ///
+    /// `persistent: true` makes the Space a PERMANENT workspace: named by its
+    /// taskId in the switcher, exempt from keep-alive expiry, kept on
+    /// completion, and — because its signature escapes the orphan sweep —
+    /// surviving relaunches. When a Space for this taskId already exists on
+    /// disk, the task re-binds to it instead of creating a duplicate (the
+    /// profile argument is then ignored: the Space keeps its bound profile).
     func createAgentSpace(
         taskId: String,
         profileName: String,
         origin: AgentTaskOrigin = .phiAgent,
+        persistent: Bool = false,
         completion: @escaping (_ spaceId: String?, _ windowId: Int?) -> Void
     ) {
         if let existingSpaceId = spaceIdByTaskId[taskId] {
@@ -270,6 +305,20 @@ final class AgentSpaceManager: ObservableObject {
             completion(existingSpaceId, existing.windowId)
             return
         }
+        // A persistent task re-binds to its surviving Space from an earlier
+        // run — or an earlier app launch — instead of creating a duplicate:
+        // matched by the persistent signature plus the name, which IS the
+        // taskId.
+        if persistent,
+           let survivor = SpaceManager.shared.spaces.first(where: {
+               Self.isPersistentAgentSpaceModel(iconName: $0.iconName, colorHex: $0.colorHex)
+                   && $0.name == taskId
+           }) {
+            rebindPersistentSpace(taskId: taskId, spaceId: survivor.spaceId,
+                                  profileId: survivor.profileId, origin: origin,
+                                  completion: completion)
+            return
+        }
         // The cached profile list is empty when ProfileManager's init ran
         // before the Chromium bridge was up and no profile UI has refreshed it
         // since; a headless CDP create can't rely on UI having run, so refresh
@@ -287,11 +336,12 @@ final class AgentSpaceManager: ObservableObject {
         }
 
         // Ordinal picked up front so the Space name (R1, R2, …) and the task's
-        // badge number are the same value.
+        // badge number are the same value. A persistent Space is named by its
+        // taskId instead — the durable half of the re-bind mapping.
         let number = nextAgentNumber()
         guard let spaceId = SpaceManager.shared.createSpace(
-            name: Self.agentSpaceName(number),
-            colorHex: Self.spaceColorHex,
+            name: persistent ? taskId : Self.agentSpaceName(number),
+            colorHex: persistent ? Self.persistentSpaceColorHex : Self.spaceColorHex,
             iconName: Self.spaceIconName,
             profileId: profile.profileId,
             makeDefaultActive: false
@@ -316,9 +366,10 @@ final class AgentSpaceManager: ObservableObject {
             cursor: nil,
             cursorTabId: nil,
             hasUnseenError: false,
-            keepAliveDeadline: origin == .cdp
+            keepAliveDeadline: (origin == .cdp && !persistent)
                 ? Date().addingTimeInterval(Self.defaultKeepAliveTTL)
-                : .distantFuture
+                : .distantFuture,
+            persistent: persistent
         )
         spaceIdByTaskId[taskId] = spaceId
         ensureKeepAliveSweep()
@@ -352,6 +403,87 @@ final class AgentSpaceManager: ObservableObject {
             // The task is running with a live window now — autoview may surface
             // it. Deferred a beat so the hidden spawn's window churn (key
             // suppression, re-hide) settles before the deliberate switch.
+            self.autoViewReevaluate(delay: 0.8)
+        }
+    }
+
+    /// Re-binds a persistent task to its surviving Space. Reuses a live
+    /// background window when one exists — typically restored at launch from
+    /// the window snapshot, adopted with its tabs by flipping it into agent
+    /// mode — and spawns a fresh hidden window otherwise. Refuses while a
+    /// slot has the Space ON SCREEN: the agent must not take over a window
+    /// the user is looking at.
+    private func rebindPersistentSpace(
+        taskId: String,
+        spaceId: String,
+        profileId: String,
+        origin: AgentTaskOrigin,
+        completion: @escaping (_ spaceId: String?, _ windowId: Int?) -> Void
+    ) {
+        func record(windowId: Int, status: AgentTaskStatus) {
+            tasksBySpaceId[spaceId] = AgentTask(
+                taskId: taskId,
+                spaceId: spaceId,
+                profileId: profileId,
+                origin: origin,
+                number: nextAgentNumber(),
+                windowId: windowId,
+                ownership: .agent,
+                status: status,
+                statusCaption: "",
+                cursor: nil,
+                cursorTabId: nil,
+                hasUnseenError: false,
+                keepAliveDeadline: .distantFuture,
+                persistent: true
+            )
+            spaceIdByTaskId[taskId] = spaceId
+            ensureKeepAliveSweep()
+        }
+
+        for slot in SpaceManager.shared.slots {
+            guard let controller = slot.windowController(for: spaceId) else { continue }
+            guard slot.activeSpaceId != spaceId,
+                  slot.visibleController !== controller else {
+                AppLogWarn("[AgentSpace] rebind \(taskId): Space is on screen — refusing to take it over")
+                completion(nil, nil)
+                return
+            }
+            let windowId = controller.windowId
+            AppLogInfo("[AgentSpace] rebind \(taskId): adopting live window \(windowId) of Space \(spaceId)")
+            ChromiumLauncher.sharedInstance().bridge?
+                .setAgentMode(true, windowId: Int64(windowId))
+            record(windowId: windowId, status: .running)
+            completion(spaceId, windowId)
+            autoViewReevaluate(delay: 0.8)
+            return
+        }
+
+        // No live window — spawn a hidden one, same flow as a fresh create
+        // but WITHOUT the delete-on-failure paths: the Space is permanent and
+        // must survive a failed spawn.
+        record(windowId: 0, status: .starting)
+        guard let slot = SpaceManager.shared.keySlot ?? SpaceManager.shared.slots.first else {
+            AppLogWarn("[AgentSpace] rebind \(taskId): no slot available to spawn into")
+            tasksBySpaceId[spaceId] = nil
+            spaceIdByTaskId[taskId] = nil
+            completion(nil, nil)
+            return
+        }
+        slot.spawnHiddenWindow(forSpaceId: spaceId) { [weak self] windowId in
+            guard let self else { completion(nil, nil); return }
+            guard let windowId else {
+                self.tasksBySpaceId[spaceId] = nil
+                self.spaceIdByTaskId[taskId] = nil
+                completion(nil, nil)
+                return
+            }
+            if var task = self.tasksBySpaceId[spaceId] {
+                task.windowId = windowId
+                task.status = .running
+                self.tasksBySpaceId[spaceId] = task
+            }
+            completion(spaceId, windowId)
             self.autoViewReevaluate(delay: 0.8)
         }
     }
@@ -625,12 +757,13 @@ final class AgentSpaceManager: ObservableObject {
             return
         case .starting, .running, .idle:
             task.status = running ? .running : .idle
-            if running && task.origin == .cdp {
+            if running && task.origin == .cdp && !task.persistent {
                 // A round is starting to drive: reset the deadline to the short
                 // driving window. Plain heartbeats only ever extend the deadline
                 // (`touchKeepAlive` maxes), so without this the between-rounds
                 // grace bought by a previous round's end would keep masking a
-                // driver that dies mid-round for up to 30 minutes.
+                // driver that dies mid-round for up to 30 minutes. Persistent
+                // tasks never expire — their deadline stays .distantFuture.
                 task.keepAliveDeadline = Date().addingTimeInterval(Self.defaultKeepAliveTTL)
             }
             tasksBySpaceId[spaceId] = task
@@ -661,16 +794,21 @@ final class AgentSpaceManager: ObservableObject {
         tasksBySpaceId[spaceId] = task
     }
 
-    /// Task finished. Agent Spaces are ephemeral — they exist only while their
-    /// task is running, so completion always flips agent mode off, drops the
-    /// task record, and deletes the Space (closing its window). The `keep` flag
-    /// is accepted for protocol compatibility but no longer leaves a lingering
-    /// Space; a finished agent Space is never kept in the switcher.
+    /// Task finished. EPHEMERAL agent Spaces exist only while their task is
+    /// running, so completion flips agent mode off, drops the task record,
+    /// and deletes the Space (closing its window); the `keep` flag is
+    /// accepted for protocol compatibility but never leaves an ephemeral
+    /// Space lingering. A PERSISTENT task's Space is a permanent workspace:
+    /// completion ends only the TASK — its window closes, the Space row (and
+    /// its tagged rows) stays in the switcher, and a later task with the same
+    /// taskId re-binds to it.
     func taskDidComplete(taskId: String, success: Bool, keep: Bool, message: String? = nil) {
         guard let spaceId = spaceIdByTaskId[taskId], let task = tasksBySpaceId[spaceId] else { return }
-        // The Space is removed either way; keep the driver-reported outcome
-        // observable in the log (there is no surviving UI to show it on).
+        // The task record is removed either way; keep the driver-reported
+        // outcome observable in the log (there is no surviving UI to show it
+        // on).
         AppLogInfo("[AgentSpace] task \(taskId) completed success=\(success)"
+            + " persistent=\(task.persistent)"
             + (message.map { " message=\($0)" } ?? ""))
         if let masked = task.maskedTabId {
             AgentAnimationManager.shared.setActive(false, for: masked)
@@ -680,7 +818,11 @@ final class AgentSpaceManager: ObservableObject {
         tasksBySpaceId[spaceId] = nil
         spaceIdByTaskId[taskId] = nil
         dismissHandoffPrompt(forSpaceId: spaceId)
-        SpaceManager.shared.deleteSpace(spaceId: spaceId)
+        if task.persistent {
+            SpaceManager.shared.closeSpaceWindows(spaceId: spaceId)
+        } else {
+            SpaceManager.shared.deleteSpace(spaceId: spaceId)
+        }
         stopKeepAliveSweepIfIdle()
         // The watched agent may just have finished — hand the view to the next
         // running one, after the deletion retreat's animation settles.

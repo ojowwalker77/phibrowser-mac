@@ -28,7 +28,7 @@ The heredoc body is a Node.js script; all helpers below are preloaded.
 
 ## Helpers
 
-- Agent spaces: `ensureAgentSpace(name, {profile})` (returns the Space's open `tabs` too), `listAgentSpaces()`, `listProfiles()`, `spaceStatus({shots})` (one-call digest of the current Space — see "Space status"), `complete({success, message})`, `ping(ttlSeconds?)` — keep-alive control, see "Task lifecycle"
+- Agent spaces: `ensureAgentSpace(name, {profile, persistent})` (returns the Space's open `tabs` too; `{persistent: true}` = permanent workspace — see "Persistent Spaces"), `listAgentSpaces()`, `listProfiles()`, `spaceStatus({shots})` (one-call digest of the current Space — see "Space status"), `complete({success, message})`, `ping(ttlSeconds?)` — keep-alive control, see "Task lifecycle"
 - Ownership: `ownership()`, `handOff(message)`, `takeOver()`, `waitForAgentControl({timeout})`
 - Tabs: `listTabs()`, `openTab(url)` (reuses the Space's blank seed tab in place when one exists; `{reuseBlank: false}` forces a separate tab), `switchTab(targetId)`, `closeTab(targetId?)`
 - Navigation: `goto(url, {timeout})`, `waitForLoad({timeout})`
@@ -265,10 +265,36 @@ goal.
 `{profile: 'Default'}` (profileId or display name) to choose —
 `listProfiles()` enumerates what's available.
 
+### Persistent Spaces
+
+Default agent Spaces are ephemeral: they auto-close on silence and are
+removed by `complete()`. `ensureAgentSpace(name, {persistent: true})`
+creates a PERMANENT workspace instead:
+
+- Shown in the Space switcher under `name` (agent icon, indigo) like any
+  Space — the user can browse it, keep it, or delete it there.
+- Never auto-closes: exempt from keep-alive expiry entirely (`ping()` is
+  unnecessary; `keepAliveRemainingSeconds` reads null), and it survives app
+  relaunches.
+- `complete()` ends only the TASK: the agent window closes, the Space stays.
+- A later `ensureAgentSpace(name, {persistent: true})` RE-BINDS to the same
+  Space — after a completion, a long silence, or an app relaunch (adopting
+  the Space's restored background window and its tabs when one exists). The
+  re-bind is refused while the user has the Space open on screen: don't
+  fight it — tell them and wait, or work in a different Space.
+- Persistence is decided when the Space is first created; on a re-bind the
+  `profile`/`persistent` options are ignored (the Space keeps its profile).
+
+Use a persistent Space when the user asks for a lasting workspace or a task
+that spans days/relaunches (a monitoring loop, a long campaign). Ephemeral
+Spaces remain the right default for one-shot tasks — do not create
+persistent Spaces unprompted: they accumulate in the user's switcher until
+the user deletes them.
+
 ### Space status
 
 `spaceStatus()` is the one-call "what does my Space look like right now":
-`{taskId, spaceId, windowId, ownership, status, caption,
+`{taskId, spaceId, windowId, ownership, status, caption, persistent,
 keepAliveRemainingSeconds, viewportOverride, tabs}` — each tab
 `{targetId, url, title, current}`. Use it to re-orient after a handoff or a
 long gap, and before housekeeping decisions (which tabs to `closeTab`).
@@ -288,7 +314,8 @@ with the tab inventory in hand — check it before opening more tabs.
   it near-full anyway — treat it as diagnostics, and use `ping(ttlSeconds)`
   when you actually need a longer window.
 
-**Keep-alive**: an agent Space auto-closes when its driver goes silent —
+**Keep-alive** (ephemeral Spaces only — persistent Spaces are exempt): an
+agent Space auto-closes when its driver goes silent —
 ~120s while driving (a live round heartbeats automatically, even through long
 waits, so it never expires; a killed round's Space closes on its own) and
 ~30 minutes between rounds (bought by the round-end heartbeat; the next
@@ -303,8 +330,9 @@ a page runs a long export while you work elsewhere.
 
 **`complete()` must be its own dedicated final heredoc**, run only after a
 prior round's output confirmed the task is done. It closes the agent Space and
-its window — agent Spaces are ephemeral, so completion always removes the
-Space. If the user needs a live page left open, hand it to them with
+its window — ephemeral Spaces are removed entirely; a persistent Space stays
+in the switcher with only its window closed (see "Persistent Spaces"). If the
+user needs a live page left open in an ephemeral Space, hand it to them with
 `handOff()` before completing.
 
 Keep the user informed while working: call `setStatus('Reading results…')`

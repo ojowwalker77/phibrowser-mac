@@ -78,10 +78,12 @@ enum AgentSpaceRouter {
                 (obj["profileId"] as? String)
                 ?? (obj["profileName"] as? String)
                 ?? ""
+            let persistent = obj["persistent"] as? Bool ?? false
             AgentSpaceManager.shared.createAgentSpace(
                 taskId: taskId,
                 profileName: profileName,
-                origin: taskOrigin
+                origin: taskOrigin,
+                persistent: persistent
             ) { spaceId, windowId in
                 var replyObject: [String: Any]?
                 if let spaceId, let windowId {
@@ -155,6 +157,7 @@ enum AgentSpaceRouter {
                     "status": status,
                     "caption": task.statusCaption,
                     "keepAliveRemainingSeconds": keepAliveRemaining,
+                    "persistent": task.persistent,
                 ]
             }
         }
