@@ -96,6 +96,8 @@ class BookmarkCellView: SidebarCellView {
     private var faviconLoadHandle: ProfileScopedFaviconLoadHandle?
     private var secondaryFaviconLoadHandle: ProfileScopedFaviconLoadHandle?
     private weak var configuredBookmark: Bookmark?
+    private weak var configuredPrimaryTab: Tab?
+    private weak var configuredSecondaryTab: Tab?
     private var isEditingActive = false
 
     weak var browserState: BrowserState?
@@ -118,6 +120,8 @@ class BookmarkCellView: SidebarCellView {
         secondaryFaviconLoadHandle?.cancel()
         secondaryFaviconLoadHandle = nil
         configuredBookmark = nil
+        configuredPrimaryTab = nil
+        configuredSecondaryTab = nil
         isEditingActive = false
         editField.stringValue = ""
         editField.isHidden = true
@@ -133,6 +137,12 @@ class BookmarkCellView: SidebarCellView {
             secondaryTabViewModel: secondaryTabViewModel,
             onClose: { [weak self] in
                 self?.closeButtonTapped()
+            },
+            onNavigatePrimaryToOriginalURL: { [weak self] separateCurrentPage in
+                self?.navigatePrimaryToOriginalURL(separateCurrentPage: separateCurrentPage)
+            },
+            onNavigateSecondaryToOriginalURL: { [weak self] separateCurrentPage in
+                self?.navigateSecondaryToOriginalURL(separateCurrentPage: separateCurrentPage)
             }
         ))
         addSubview(hostingView)
@@ -374,6 +384,8 @@ class BookmarkCellView: SidebarCellView {
 
     private func refreshLiveTabs(for bookmark: Bookmark) {
         let panes = liveTabs(for: bookmark)
+        configuredPrimaryTab = panes.primary
+        configuredSecondaryTab = panes.secondary
         configure(viewModel: primaryTabViewModel, with: panes.primary)
         configure(viewModel: secondaryTabViewModel, with: panes.secondary)
         viewState.primaryTabIsLive = panes.primary != nil
@@ -532,6 +544,43 @@ class BookmarkCellView: SidebarCellView {
         resolvedBrowserState?.closeBookmark(bookmark)
     }
 
+    private func navigatePrimaryToOriginalURL(separateCurrentPage: Bool) {
+        guard let bookmark = configuredBookmark ?? resolvedBookmark,
+              let tab = configuredPrimaryTab,
+              let browserState = resolvedBrowserState else {
+            return
+        }
+        selectBookmarkIfNeeded(bookmark, browserState: browserState)
+        if separateCurrentPage {
+            browserState.separateBookmarkTabFromCurrentURL(tab, bookmark: bookmark)
+        } else {
+            browserState.navigateBookmarkTabToOriginalURL(tab, bookmark: bookmark)
+        }
+    }
+
+    private func navigateSecondaryToOriginalURL(separateCurrentPage: Bool) {
+        guard let bookmark = configuredBookmark ?? resolvedBookmark,
+              let tab = configuredSecondaryTab,
+              let browserState = resolvedBrowserState else {
+            return
+        }
+        selectBookmarkIfNeeded(bookmark, browserState: browserState)
+        if separateCurrentPage {
+            browserState.separateBookmarkTabFromCurrentURL(tab, bookmark: bookmark)
+        } else {
+            browserState.navigateBookmarkTabToOriginalURL(tab, bookmark: bookmark)
+        }
+    }
+
+    private func selectBookmarkIfNeeded(_ bookmark: Bookmark, browserState: BrowserState) {
+        if browserState.multiSelection.isActive {
+            browserState.clearMultiSelection()
+        }
+        if !bookmark.isActive {
+            browserState.openBookmark(bookmark)
+        }
+    }
+
     private func updateEditingState(_ isEditing: Bool, bookmark: Bookmark) {
         viewState.isEditing = isEditing
         viewState.editText = bookmark.title
@@ -592,11 +641,36 @@ class BookmarkCellView: SidebarCellView {
     }
 }
 
+private enum BookmarkFaviconHoverAction {
+    case backToSavedURL
+    case separateFromBookmark
+
+    var hintText: String {
+        switch self {
+        case .backToSavedURL:
+            return NSLocalizedString(
+                "Back to Saved URL",
+                comment: "Bookmark favicon hover hint - Navigate the open bookmark tab back to its saved URL"
+            )
+        case .separateFromBookmark:
+            return NSLocalizedString(
+                "Separate From Bookmark",
+                comment: "Bookmark favicon command-hover hint - Preserve the current page as a normal tab and reset the bookmark"
+            )
+        }
+    }
+}
+
 private struct SidebarBookmarkCellContentView: View {
     let state: BookmarkCellViewState
     let primaryTabViewModel: TabViewModel
     let secondaryTabViewModel: TabViewModel
     let onClose: () -> Void
+    let onNavigatePrimaryToOriginalURL: (Bool) -> Void
+    let onNavigateSecondaryToOriginalURL: (Bool) -> Void
+
+    @State private var primaryFaviconHoverAction: BookmarkFaviconHoverAction?
+    @State private var secondaryFaviconHoverAction: BookmarkFaviconHoverAction?
 
     @Environment(\.phiAppearance) private var appearance
 
@@ -629,6 +703,14 @@ private struct SidebarBookmarkCellContentView: View {
         state.isOpened && state.isHovered && !state.isEditing
     }
 
+    private var faviconHoverAction: BookmarkFaviconHoverAction? {
+        primaryFaviconHoverAction ?? secondaryFaviconHoverAction
+    }
+
+    private var showBookmarkFaviconHint: Bool {
+        faviconHoverAction != nil
+    }
+
     var body: some View {
         HStack(alignment: .center, spacing: 8) {
             BookmarkFaviconView(
@@ -636,7 +718,9 @@ private struct SidebarBookmarkCellContentView: View {
                 pageURL: state.primaryPageURL,
                 revision: state.primaryFaviconRevision,
                 isFolder: state.isFolder,
-                liveTabViewModel: state.primaryTabIsLive ? primaryTabViewModel : nil
+                liveTabViewModel: state.primaryTabIsLive ? primaryTabViewModel : nil,
+                onNavigateToOriginalURL: onNavigatePrimaryToOriginalURL,
+                onReturnHoverChanged: { primaryFaviconHoverAction = $0 }
             )
 
             if !state.isEditing,
@@ -651,7 +735,9 @@ private struct SidebarBookmarkCellContentView: View {
                     pageURL: state.secondaryPageURL,
                     revision: state.secondaryFaviconRevision,
                     isFolder: false,
-                    liveTabViewModel: state.secondaryTabIsLive ? secondaryTabViewModel : nil
+                    liveTabViewModel: state.secondaryTabIsLive ? secondaryTabViewModel : nil,
+                    onNavigateToOriginalURL: onNavigateSecondaryToOriginalURL,
+                    onReturnHoverChanged: { secondaryFaviconHoverAction = $0 }
                 )
 
                 if !state.isEditing,
@@ -661,15 +747,28 @@ private struct SidebarBookmarkCellContentView: View {
                 }
             }
 
-            UnifiedTabTitleTextView(
-                displayTitle: state.title,
-                isShimmering: false,
-                isPressed: state.isFolder ? false : state.isPressed
-            )
+            ZStack(alignment: .leading) {
+                UnifiedTabTitleTextView(
+                    displayTitle: state.title,
+                    isShimmering: false,
+                    isPressed: state.isFolder ? false : state.isPressed
+                )
+                .themedForeground(textColor)
+                .fontWeight(state.isFolder ? .medium : .regular)
+                .frame(height: 16, alignment: .center)
+                .offset(y: showBookmarkFaviconHint ? -7 : 0)
+
+                Text(faviconHoverAction?.hintText ?? "")
+                .font(.system(size: 9))
+                .lineLimit(1)
+                .themedForeground(.textTertiary)
+                .offset(y: 8)
+                .opacity(showBookmarkFaviconHint ? 1 : 0)
+            }
             .opacity(state.isEditing ? 0 : 1)
-            .themedForeground(textColor)
-            .fontWeight(state.isFolder ? .medium : .regular)
-            .frame(height: 16, alignment: .center)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(height: 30)
+            .animation(.easeOut(duration: 0.1), value: showBookmarkFaviconHint)
 
             if showCloseButton {
                 UnifiedTabCloseButton(action: onClose)
@@ -702,24 +801,121 @@ private struct BookmarkFaviconView: View {
     let revision: Int
     let isFolder: Bool
     let liveTabViewModel: TabViewModel?
+    let onNavigateToOriginalURL: (Bool) -> Void
+    let onReturnHoverChanged: (BookmarkFaviconHoverAction?) -> Void
+
+    @State private var isReturnButtonHovered = false
+    @State private var isCommandKeyPressed = false
+    @State private var modifierFlagsMonitor: Any?
 
     private static let slotSize: CGFloat = 16
     private static let faviconSize: CGFloat = 14
     private static let faviconCornerRadius: CGFloat = 3
+    private static let returnButtonSize: CGFloat = 24
+
+    private var canNavigateToOriginalURL: Bool {
+        guard !isFolder,
+              let originalURL = pageURL,
+              !originalURL.isEmpty,
+              let currentURL = liveTabViewModel?.url,
+              !currentURL.isEmpty else {
+            return false
+        }
+        return currentURL != originalURL
+    }
+
+    private var hoverAction: BookmarkFaviconHoverAction {
+        isCommandKeyPressed ? .separateFromBookmark : .backToSavedURL
+    }
 
     var body: some View {
-        Group {
-            if let liveTabViewModel {
-                UnifiedTabFaviconView(viewModel: liveTabViewModel)
-            } else if let image {
-                faviconImage(image)
-            } else {
-                Image.favicon(for: pageURL, configuration: .init(cornerRadius: Self.faviconCornerRadius))
-                    .id(revision)
-                    .frame(width: Self.faviconSize, height: Self.faviconSize)
+        Button(action: handleReturnButtonClick) {
+            faviconContent
+                .frame(width: Self.returnButtonSize, height: Self.returnButtonSize)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .background(
+            RoundedRectangle(cornerRadius: 4, style: .continuous)
+                .themedFill(.hover)
+                .opacity(canNavigateToOriginalURL && isReturnButtonHovered ? 1 : 0)
+        )
+        .onHover(perform: updateReturnButtonHover)
+        .onChange(of: canNavigateToOriginalURL) { _, canNavigate in
+            if !canNavigate {
+                updateReturnButtonHover(false)
             }
         }
+        .onDisappear {
+            stopModifierFlagsMonitor()
+            onReturnHoverChanged(nil)
+        }
+        .allowsHitTesting(canNavigateToOriginalURL)
+        .accessibilityHidden(!canNavigateToOriginalURL)
+        .accessibilityLabel(
+            Text(
+                isCommandKeyPressed
+                    ? BookmarkFaviconHoverAction.separateFromBookmark.hintText
+                    : NSLocalizedString(
+                        "Return to Bookmark URL",
+                        comment: "Bookmark favicon button - Navigate the open bookmark tab back to its saved URL"
+                    )
+            )
+        )
         .frame(width: Self.slotSize, height: Self.slotSize)
+    }
+
+    private func updateReturnButtonHover(_ hovering: Bool) {
+        let isHovered = canNavigateToOriginalURL && hovering
+        guard isReturnButtonHovered != isHovered else { return }
+        isReturnButtonHovered = isHovered
+        if isHovered {
+            isCommandKeyPressed = NSEvent.modifierFlags.contains(.command)
+            startModifierFlagsMonitor()
+            onReturnHoverChanged(hoverAction)
+        } else {
+            stopModifierFlagsMonitor()
+            isCommandKeyPressed = false
+            onReturnHoverChanged(nil)
+        }
+    }
+
+    private func handleReturnButtonClick() {
+        let modifierFlags = NSApp.currentEvent?.modifierFlags ?? NSEvent.modifierFlags
+        onNavigateToOriginalURL(modifierFlags.contains(.command))
+    }
+
+    private func startModifierFlagsMonitor() {
+        guard modifierFlagsMonitor == nil else { return }
+        modifierFlagsMonitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { event in
+            let commandKeyPressed = event.modifierFlags.contains(.command)
+            if isCommandKeyPressed != commandKeyPressed {
+                isCommandKeyPressed = commandKeyPressed
+                if isReturnButtonHovered {
+                    onReturnHoverChanged(hoverAction)
+                }
+            }
+            return event
+        }
+    }
+
+    private func stopModifierFlagsMonitor() {
+        guard let modifierFlagsMonitor else { return }
+        NSEvent.removeMonitor(modifierFlagsMonitor)
+        self.modifierFlagsMonitor = nil
+    }
+
+    @ViewBuilder
+    private var faviconContent: some View {
+        if let liveTabViewModel {
+            UnifiedTabFaviconView(viewModel: liveTabViewModel)
+        } else if let image {
+            faviconImage(image)
+        } else {
+            Image.favicon(for: pageURL, configuration: .init(cornerRadius: Self.faviconCornerRadius))
+                .id(revision)
+                .frame(width: Self.faviconSize, height: Self.faviconSize)
+        }
     }
 
     @ViewBuilder

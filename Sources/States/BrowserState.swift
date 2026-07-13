@@ -32,6 +32,12 @@ class BrowserState {
         var isSplit: Bool { splitId != nil }
     }
 
+    private struct PinnedTabOriginNavigationContext {
+        let tab: Tab
+        let currentURL: String
+        let originalURL: String
+    }
+
     /// Tabs mirrored from Chromium, including their order.
     @Published var tabs: [Tab] = []
     /// Non-pinned tabs shown in the sidebar list.
@@ -867,15 +873,44 @@ class BrowserState {
     }
 
     func navigatePinnedTabToOriginalURL(_ tab: Tab) {
-        guard let guid = tab.guidInLocalDB,
-              let realTab = pinnedTabs.first(where: { $0.guidInLocalDB == guid }),
-              let originalURL = realTab.pinnedUrl,
-              !originalURL.isEmpty,
-              realTab.url != originalURL else {
+        guard let context = pinnedTabOriginNavigationContext(for: tab) else {
             return
         }
 
-        navigateOpenPinnedTab(realTab, to: originalURL)
+        navigateOpenPinnedTab(context.tab, to: context.originalURL)
+    }
+
+    /// Preserves a pinned tab's current page as a normal background tab,
+    /// then returns the pinned tab to its stored URL.
+    func separatePinnedTabFromCurrentURL(_ tab: Tab) {
+        guard let context = pinnedTabOriginNavigationContext(for: tab) else {
+            return
+        }
+
+        createTab(context.currentURL, customGuid: nil, focusAfterCreate: false)
+        navigateOpenPinnedTab(context.tab, to: context.originalURL)
+    }
+
+    private func pinnedTabOriginNavigationContext(
+        for tab: Tab
+    ) -> PinnedTabOriginNavigationContext? {
+        guard let guid = tab.guidInLocalDB,
+              let realTab = pinnedTabs.first(where: { $0.guidInLocalDB == guid }),
+              realTab.isOpenned,
+              let wrapper = realTab.webContentWrapper,
+              let currentURL = wrapper.urlString ?? realTab.url,
+              !currentURL.isEmpty,
+              let originalURL = realTab.pinnedUrl,
+              !originalURL.isEmpty,
+              currentURL != originalURL else {
+            return nil
+        }
+
+        return .init(
+            tab: realTab,
+            currentURL: currentURL,
+            originalURL: originalURL
+        )
     }
     
     func toggleSidebar(_ collapse: Bool? = nil) {

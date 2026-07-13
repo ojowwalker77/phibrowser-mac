@@ -1940,9 +1940,9 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
                 self.handleTabSelection(tab: tab)
             }
             if isPinned {
-                view.onDoubleSelect = { [weak self, weak tab] in
+                view.onDoubleSelect = { [weak self, weak tab] modifierFlags in
                     guard let tab else { return }
-                    self?.browserState.navigatePinnedTabToOriginalURL(tab)
+                    self?.handlePinnedTabDoubleClick(tab, modifierFlags: modifierFlags)
                 }
             } else {
                 view.onDoubleSelect = nil
@@ -1967,9 +1967,9 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
                 self.handleTabSelection(tab: partner)
             }
             if isPinned, let partner = pinnedSplitPartners[id] {
-                view.onSecondaryDoubleSelect = { [weak self, weak partner] in
+                view.onSecondaryDoubleSelect = { [weak self, weak partner] modifierFlags in
                     guard let partner else { return }
-                    self?.browserState.navigatePinnedTabToOriginalURL(partner)
+                    self?.handlePinnedTabDoubleClick(partner, modifierFlags: modifierFlags)
                 }
             } else {
                 view.onSecondaryDoubleSelect = nil
@@ -2821,6 +2821,21 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
         } else {
             self.scrollToMakeTabVisible(tab)
             tab.makeSelfActive()
+        }
+    }
+
+    private func handlePinnedTabDoubleClick(
+        _ tab: Tab,
+        modifierFlags: NSEvent.ModifierFlags
+    ) {
+        if modifierFlags.contains(.command) {
+            if browserState.multiSelection.isActive {
+                browserState.clearMultiSelection()
+            }
+            handleTabSelection(tab: tab)
+            browserState.separatePinnedTabFromCurrentURL(tab)
+        } else {
+            browserState.navigatePinnedTabToOriginalURL(tab)
         }
     }
 

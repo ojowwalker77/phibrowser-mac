@@ -4,6 +4,14 @@
 // found in the LICENSE file.
 
 import Foundation
+
+private typealias BookmarkOriginNavigationContext = (
+    currentURL: String,
+    originalURL: String,
+    wrapper: WebContentWrapper & NSObject,
+    restoredCustomValue: String
+)
+
 extension BrowserState {
     private func syncBookmarkBinding(_ bookmark: Bookmark, with tab: Tab?, focusingTabGuid: Int?) {
         if let tab {
@@ -259,6 +267,81 @@ extension BrowserState {
             }
         } else {
             createTab(URLProcessor.processUserInput(url), customGuid: realBookmark.guid, focusAfterCreate: true)
+        }
+    }
+
+    /// Returns one live bookmark pane to the URL stored by its bookmark.
+    /// The tab's custom value is cleared around navigation so a cross-domain
+    /// return stays in place instead of being redirected into a new tab.
+    func navigateBookmarkTabToOriginalURL(_ tab: Tab, bookmark: Bookmark) {
+        guard let context = bookmarkOriginNavigationContext(for: tab, bookmark: bookmark) else {
+            return
+        }
+        performBookmarkOriginNavigation(context)
+    }
+
+    /// Preserves a bookmark pane's current page as a normal background tab,
+    /// then returns the bookmark pane to its stored URL.
+    func separateBookmarkTabFromCurrentURL(_ tab: Tab, bookmark: Bookmark) {
+        guard let context = bookmarkOriginNavigationContext(for: tab, bookmark: bookmark) else {
+            return
+        }
+        createTab(context.currentURL, customGuid: nil, focusAfterCreate: false)
+        performBookmarkOriginNavigation(context)
+    }
+
+    private func bookmarkOriginNavigationContext(
+        for tab: Tab,
+        bookmark: Bookmark
+    ) -> BookmarkOriginNavigationContext? {
+        guard tabs.contains(where: { $0 === tab }),
+              let realBookmark = bookmarkManager.bookmark(withGuid: bookmark.guid) else {
+            return nil
+        }
+
+        let originalURL: String?
+        if let splitId = splitBookmarkBindings[realBookmark.guid],
+           let group = splits.first(where: { $0.id == splitId }) {
+            if tab.guid == group.primaryTabId {
+                originalURL = realBookmark.url
+            } else if tab.guid == group.secondaryTabId {
+                originalURL = realBookmark.secondaryUrl
+            } else {
+                return nil
+            }
+        } else {
+            guard realBookmark.isOpened,
+                  tab.guidInLocalDB == realBookmark.guid,
+                  splitGroup(forTabId: tab.guid) == nil else {
+                return nil
+            }
+            originalURL = realBookmark.url
+        }
+
+        guard let originalURL,
+              !originalURL.isEmpty,
+              let currentURL = tab.url,
+              !currentURL.isEmpty,
+              currentURL != originalURL,
+              let wrapper = tab.webContentWrapper else {
+            return nil
+        }
+
+        return (
+            currentURL: currentURL,
+            originalURL: originalURL,
+            wrapper: wrapper,
+            restoredCustomValue: tab.guidInLocalDB ?? ""
+        )
+    }
+
+    private func performBookmarkOriginNavigation(_ context: BookmarkOriginNavigationContext) {
+        DispatchQueue.main.async {
+            context.wrapper.updateTabCustomValue("")
+            context.wrapper.navigate(toURL: context.originalURL)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                context.wrapper.updateTabCustomValue(context.restoredCustomValue)
+            }
         }
     }
 

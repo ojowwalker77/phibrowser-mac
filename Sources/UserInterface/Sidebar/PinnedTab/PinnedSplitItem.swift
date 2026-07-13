@@ -29,7 +29,7 @@ class PinnedSplitItem: NSCollectionViewItem, NSMenuDelegate {
     /// Tab whose action runs when the cell is clicked (the pane the user
     /// most recently interacted with, or the left pane as fallback).
     var itemClicked: ((Tab?) -> Void)?
-    var itemDoubleClicked: ((Tab?) -> Void)?
+    var itemDoubleClicked: ((Tab?, NSEvent.ModifierFlags) -> Void)?
 
     private lazy var contextMenu: NSMenu = {
         let menu = NSMenu()
@@ -74,7 +74,7 @@ class PinnedSplitItem: NSCollectionViewItem, NSMenuDelegate {
         backgroundView.doubleClickAction = { [weak self] event in
             guard let self else { return }
             let point = self.backgroundView.convert(event.locationInWindow, from: nil)
-            self.itemDoubleClicked?(self.tab(at: point))
+            self.itemDoubleClicked?(self.tab(at: point), event.modifierFlags)
         }
 
         leftIconView = makeIconView()

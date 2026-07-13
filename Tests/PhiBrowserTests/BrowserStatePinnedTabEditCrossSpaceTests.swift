@@ -122,6 +122,38 @@ final class BrowserStatePinnedTabEditCrossSpaceTests: XCTestCase {
         XCTAssertTrue(wrapper.customValues.isEmpty)
     }
 
+    func testPinnedTabSeparationOpensCurrentURLInBackgroundBeforeReturningToOrigin() throws {
+        let store = try makeStore()
+        try seedPinnedTab(in: store, guid: "pinned-guid", url: "https://www.google.com/")
+
+        let state = PinnedOriginRecordingBrowserState(
+            windowId: 1,
+            localStore: store,
+            profileId: "Default",
+            spaceId: "space-a"
+        )
+        let pinnedTab = try XCTUnwrap(state.pinnedTabs.first)
+        let wrapper = PinnedEditWebContentWrapperSpy(
+            urlString: "https://www.google.com/search?q=1"
+        )
+        pinnedTab.isOpenned = true
+        pinnedTab.setWebContentsWrapper(wrapper: wrapper)
+
+        state.separatePinnedTabFromCurrentURL(pinnedTab)
+
+        XCTAssertEqual(
+            state.createTabRequests,
+            [
+                .init(
+                    url: "https://www.google.com/search?q=1",
+                    customGuid: nil,
+                    focusAfterCreate: false
+                )
+            ]
+        )
+        XCTAssertEqual(wrapper.navigatedURLs, ["https://www.google.com/"])
+    }
+
     private func makeStore() throws -> LocalStore {
         let directory = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -162,6 +194,30 @@ final class BrowserStatePinnedTabEditCrossSpaceTests: XCTestCase {
             RunLoop.main.run(until: Date().addingTimeInterval(0.01))
         }
         XCTFail("Timed out waiting for: \(expectation). pinnedTabs=\(state.pinnedTabs.map { "\($0.guidInLocalDB ?? "?") url=\($0.url ?? "nil") pinnedUrl=\($0.pinnedUrl ?? "nil") open=\($0.isOpenned)" })")
+    }
+}
+
+private final class PinnedOriginRecordingBrowserState: BrowserState {
+    struct CreateTabRequest: Equatable {
+        let url: String?
+        let customGuid: String?
+        let focusAfterCreate: Bool
+    }
+
+    private(set) var createTabRequests: [CreateTabRequest] = []
+
+    override func createTab(
+        _ url: String?,
+        customGuid: String?,
+        focusAfterCreate: Bool
+    ) {
+        createTabRequests.append(
+            .init(
+                url: url,
+                customGuid: customGuid,
+                focusAfterCreate: focusAfterCreate
+            )
+        )
     }
 }
 

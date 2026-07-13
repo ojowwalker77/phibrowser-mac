@@ -312,6 +312,9 @@
     "Back" : {
       "comment" : "Web content header - Accessibility description for back navigation button"
     },
+    "Back to Saved URL" : {
+      "comment" : "Bookmark favicon hover hint - Navigate the open bookmark tab back to its saved URL"
+    },
     "Back Up Phi User Data" : {
       "comment" : "Debug clear data - NSSavePanel title for saving Phi user data directory as zip"
     },
@@ -1546,6 +1549,9 @@
     "Retry after Phi Sentinel is running normally." : {
       "comment" : "IM Channels - Official bot retry hint when service is unavailable"
     },
+    "Return to Bookmark URL" : {
+      "comment" : "Bookmark favicon button - Navigate the open bookmark tab back to its saved URL"
+    },
     "Reverse Panes" : {
       "comment" : "Tab context menu - Swap the left/right (or top/bottom) panes of the split this tab belongs to"
     },
@@ -1596,6 +1602,9 @@
     },
     "Service issue" : {
       "comment" : "Phi Link - Custom bot service issue status\nPhi Link - Official bot service issue status"
+    },
+    "Separate From Bookmark" : {
+      "comment" : "Bookmark favicon command-hover hint - Preserve the current page as a normal tab and reset the bookmark"
     },
     "Set as default" : {
       "comment" : "Account settings - Button to set Phi as default browser"

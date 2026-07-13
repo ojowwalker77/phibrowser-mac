@@ -37,12 +37,12 @@ final class TabItemView: NSView {
     // MARK: - Public Properties
 
     var onSelect: ((NSEvent.ModifierFlags) -> Void)?
-    var onDoubleSelect: (() -> Void)?
+    var onDoubleSelect: ((NSEvent.ModifierFlags) -> Void)?
     /// Fires for split-merged cells when the click falls on the right half
     /// (the partner pane's favicon). Standalone tabs leave this nil and
     /// every click routes through `onSelect`.
     var onSecondarySelect: ((NSEvent.ModifierFlags) -> Void)?
-    var onSecondaryDoubleSelect: (() -> Void)?
+    var onSecondaryDoubleSelect: ((NSEvent.ModifierFlags) -> Void)?
     var onHoverChanged: ((Bool) -> Void)?
 
     /// Called when a drag begins from this tab view.
@@ -919,12 +919,12 @@ final class TabItemView: NSView {
             // pane's tab so each favicon acts as its own click target.
             if pinnedSplitPartner != nil, point.x > bounds.midX, onSecondarySelect != nil {
                 if event.clickCount == 2, let onSecondaryDoubleSelect {
-                    onSecondaryDoubleSelect()
+                    onSecondaryDoubleSelect(event.modifierFlags)
                 } else {
                     onSecondarySelect?(event.modifierFlags)
                 }
             } else if event.clickCount == 2, let onDoubleSelect {
-                onDoubleSelect()
+                onDoubleSelect(event.modifierFlags)
             } else {
                 onSelect?(event.modifierFlags)
             }

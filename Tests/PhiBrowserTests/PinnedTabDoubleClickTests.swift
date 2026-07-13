@@ -13,14 +13,23 @@ final class PinnedTabDoubleClickTests: XCTestCase {
         let view = HoverableView()
         var clickCount = 0
         var doubleClickCount = 0
+        var doubleClickModifierFlags: NSEvent.ModifierFlags = []
         view.clickAction = { clickCount += 1 }
-        view.doubleClickAction = { _ in doubleClickCount += 1 }
+        view.doubleClickAction = { event in
+            doubleClickCount += 1
+            doubleClickModifierFlags = event.modifierFlags
+        }
 
         view.mouseUp(with: try makeMouseUpEvent(at: .zero, clickCount: 1))
-        view.mouseUp(with: try makeMouseUpEvent(at: .zero, clickCount: 2))
+        view.mouseUp(with: try makeMouseUpEvent(
+            at: .zero,
+            clickCount: 2,
+            modifierFlags: [.command]
+        ))
 
         XCTAssertEqual(clickCount, 1)
         XCTAssertEqual(doubleClickCount, 1)
+        XCTAssertTrue(doubleClickModifierFlags.contains(.command))
     }
 
     func testSidebarPinnedSplitDoubleClickRoutesToClickedPane() throws {
@@ -34,14 +43,20 @@ final class PinnedTabDoubleClickTests: XCTestCase {
 
         let backgroundView = try XCTUnwrap(item.view.subviews.first as? HoverableView)
         var doubleClickedTab: Tab?
-        item.itemDoubleClicked = { doubleClickedTab = $0 }
+        var doubleClickModifierFlags: NSEvent.ModifierFlags = []
+        item.itemDoubleClicked = { tab, modifierFlags in
+            doubleClickedTab = tab
+            doubleClickModifierFlags = modifierFlags
+        }
 
         backgroundView.mouseUp(with: try makeMouseUpEvent(
             at: NSPoint(x: backgroundView.bounds.maxX - 1, y: backgroundView.bounds.midY),
             clickCount: 2,
+            modifierFlags: [.command],
             windowNumber: window.windowNumber
         ))
         XCTAssertTrue(doubleClickedTab === rightTab)
+        XCTAssertTrue(doubleClickModifierFlags.contains(.command))
 
         backgroundView.mouseUp(with: try makeMouseUpEvent(
             at: NSPoint(x: backgroundView.bounds.minX + 1, y: backgroundView.bounds.midY),
@@ -69,16 +84,25 @@ final class PinnedTabDoubleClickTests: XCTestCase {
         let window = makeHostWindow(for: view)
 
         var selectedPane = ""
+        var doubleClickModifierFlags: NSEvent.ModifierFlags = []
         view.onSecondarySelect = { _ in selectedPane = "right-single" }
-        view.onDoubleSelect = { selectedPane = "left" }
-        view.onSecondaryDoubleSelect = { selectedPane = "right" }
+        view.onDoubleSelect = { modifierFlags in
+            selectedPane = "left"
+            doubleClickModifierFlags = modifierFlags
+        }
+        view.onSecondaryDoubleSelect = { modifierFlags in
+            selectedPane = "right"
+            doubleClickModifierFlags = modifierFlags
+        }
 
         view.mouseUp(with: try makeMouseUpEvent(
             at: NSPoint(x: view.bounds.maxX - 1, y: view.bounds.midY),
             clickCount: 2,
+            modifierFlags: [.command],
             windowNumber: window.windowNumber
         ))
         XCTAssertEqual(selectedPane, "right")
+        XCTAssertTrue(doubleClickModifierFlags.contains(.command))
 
         view.mouseUp(with: try makeMouseUpEvent(
             at: NSPoint(x: view.bounds.minX + 1, y: view.bounds.midY),
@@ -102,12 +126,13 @@ final class PinnedTabDoubleClickTests: XCTestCase {
     private func makeMouseUpEvent(
         at location: NSPoint,
         clickCount: Int,
+        modifierFlags: NSEvent.ModifierFlags = [],
         windowNumber: Int = 0
     ) throws -> NSEvent {
         try XCTUnwrap(NSEvent.mouseEvent(
             with: .leftMouseUp,
             location: location,
-            modifierFlags: [],
+            modifierFlags: modifierFlags,
             timestamp: 0,
             windowNumber: windowNumber,
             context: nil,

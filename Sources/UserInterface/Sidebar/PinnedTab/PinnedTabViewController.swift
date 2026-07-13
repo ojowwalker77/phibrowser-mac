@@ -72,9 +72,9 @@ class PinnedTabViewController: NSViewController {
                     guard let tab else { return }
                     self?.handleTabClicked(tab)
                 }
-                tabItem.itemDoubleClicked = { [weak self] tab in
+                tabItem.itemDoubleClicked = { [weak self] tab, modifierFlags in
                     guard let tab else { return }
-                    self?.browserState?.navigatePinnedTabToOriginalURL(tab)
+                    self?.handleTabDoubleClicked(tab, modifierFlags: modifierFlags)
                 }
                 return tabItem
 
@@ -91,15 +91,31 @@ class PinnedTabViewController: NSViewController {
                 splitItem.itemClicked = { [weak self] tab in
                     self?.handleSplitCellClicked(group: group, preferredTab: tab)
                 }
-                splitItem.itemDoubleClicked = { [weak self] tab in
+                splitItem.itemDoubleClicked = { [weak self] tab, modifierFlags in
                     guard let tab else { return }
-                    self?.browserState?.navigatePinnedTabToOriginalURL(tab)
+                    self?.handleTabDoubleClicked(tab, modifierFlags: modifierFlags)
                 }
                 return splitItem
             }
         }
         return dataSource
     }()
+
+    private func handleTabDoubleClicked(
+        _ tab: Tab,
+        modifierFlags: NSEvent.ModifierFlags
+    ) {
+        guard let browserState else { return }
+        if modifierFlags.contains(.command) {
+            if browserState.multiSelection.isActive {
+                browserState.clearMultiSelection()
+            }
+            browserState.openOrFocusPinnedTab(tab)
+            browserState.separatePinnedTabFromCurrentURL(tab)
+        } else {
+            browserState.navigatePinnedTabToOriginalURL(tab)
+        }
+    }
     
     private enum Section: Int, CaseIterable {
         case extensions = 0
