@@ -17,8 +17,13 @@ import SwiftUI
 protocol TabGroupCellViewDelegate: AnyObject {
     /// Cell's desired height changed (collapse toggle or member-count
     /// shift). Controller forwards to
-    /// `outlineView.noteHeightOfRowsWithIndexesChanged(_)`.
-    func tabGroupCellNeedsHeightUpdate(_ cell: TabGroupCellView, for token: String)
+    /// `outlineView.noteHeightOfRowsWithIndexesChanged(_)`, using the
+    /// caller's animation policy.
+    func tabGroupCellNeedsHeightUpdate(
+        _ cell: TabGroupCellView,
+        for token: String,
+        animated: Bool
+    )
 
     /// Inner table's chevron requested a collapse toggle. Controller
     /// dispatches to the bridge (mirrors the existing user-gesture
@@ -41,6 +46,14 @@ protocol TabGroupCellViewDelegate: AnyObject {
     /// by ungrouped tab cells via `TabCellDelegate`.
     func tabGroupCell(_ cell: TabGroupCellView,
                       tabDidRequestClose tab: Tab)
+
+    func tabGroupCell(_ cell: TabGroupCellView,
+                      didRequestMultiSelectionFor tab: Tab,
+                      modifierFlags: NSEvent.ModifierFlags) -> Bool
+
+    func tabGroupCell(_ cell: TabGroupCellView,
+                      didRequestMultiSelectionFor splitPair: SplitPairSidebarItem,
+                      modifierFlags: NSEvent.ModifierFlags) -> Bool
 
     /// Inner table detected a grouped-tab row drag. The controller owns
     /// the outer outline view, so it starts the AppKit drag session from
@@ -92,6 +105,10 @@ protocol TabGroupCellViewDelegate: AnyObject {
     func tabGroupCell(_ cell: TabGroupCellView,
                       canAcceptBookmarkWithGuid guid: String) -> Bool
 
+    /// Inner table can accept a bookmark multi-selection batch.
+    func tabGroupCell(_ cell: TabGroupCellView,
+                      canAcceptBookmarksWithGuids guids: [String]) -> Bool
+
     /// Inner table can accept pinned tabs that can become group members.
     func tabGroupCell(_ cell: TabGroupCellView,
                       canAcceptPinnedTabWithGuid pinnedGuid: String) -> Bool
@@ -108,6 +125,14 @@ protocol TabGroupCellViewDelegate: AnyObject {
     /// converts it to a normal group member and removes the bookmark.
     func tabGroupCell(_ cell: TabGroupCellView,
                       didAcceptBookmarkWithGuid bookmarkGuid: String,
+                      intoGroupToken token: String,
+                      atNormalTabsIdx normalTabsIdx: Int,
+                      groupIndex: Int) -> Bool
+
+    /// Drop landed in the inner table for a bookmark multi-selection batch.
+    func tabGroupCell(_ cell: TabGroupCellView,
+                      didAcceptBookmarksWithGuids bookmarkGuids: [String],
+                      tabIds: [Int],
                       intoGroupToken token: String,
                       atNormalTabsIdx normalTabsIdx: Int,
                       groupIndex: Int) -> Bool
@@ -490,7 +515,7 @@ final class TabGroupCellView: SidebarCellView {
         innerTable.setDraggingSourceOperationMask([.move, .copy], forLocal: true)
         innerTable.setDraggingSourceOperationMask([.move, .copy], forLocal: false)
         innerTable.registerForDraggedTypes([
-            .normalTab, .normalTabs, .pinnedTab, .phiBookmark, .sourceWindowId
+            .normalTab, .normalTabs, .pinnedTab, .phiBookmark, .bookmarks, .sourceWindowId
         ])
 
         // Cell width is controlled by `GroupTabsTableView.frameOfCell`,
@@ -567,6 +592,7 @@ final class TabGroupCellView: SidebarCellView {
                     cell.identifier = identifier
                 }
                 cell.browserState = self.configuredBrowserState
+                cell.owner = self.groupCellDelegate as? SidebarTabListItemOwner
                 cell.configure(with: pair)
                 return cell
             }
@@ -621,12 +647,13 @@ final class TabGroupCellView: SidebarCellView {
         let captureToken = groupItem.group.token
         collapseSubscription = groupItem.group.$isCollapsed
             .removeDuplicates()
+            .dropFirst()
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
                 guard let self else { return }
                 self.applyEffectiveCollapseState()
                 self.groupCellDelegate?.tabGroupCellNeedsHeightUpdate(
-                    self, for: captureToken)
+                    self, for: captureToken, animated: true)
             }
 
         colorSubscription?.cancel()
@@ -763,7 +790,11 @@ final class TabGroupCellView: SidebarCellView {
         }
         dataSource.apply(snap, animatingDifferences: animated)
 
-        groupCellDelegate?.tabGroupCellNeedsHeightUpdate(self, for: token)
+        groupCellDelegate?.tabGroupCellNeedsHeightUpdate(
+            self,
+            for: token,
+            animated: animated
+        )
     }
 
     /// Cell-height formula. `BrowserState` is the live source of truth
@@ -945,20 +976,6 @@ extension TabGroupCellView {
         activateMemberRow(for: currentMemberOrder[row])
     }
 
-    fileprivate func handleMultiSelectionCommandClick(for key: Int) -> Bool {
-        guard let state = configuredBrowserState else { return false }
-        if let pair = splitPairsByKey[key] {
-            return state.toggleMultiSelectionForSplitPair(
-                leftTab: pair.leftTab,
-                rightTab: pair.rightTab
-            )
-        }
-        if let tab = tabsByGuid[key] {
-            return state.toggleMultiSelection(for: tab)
-        }
-        return false
-    }
-
     fileprivate func activateMemberRow(for key: Int) {
         if let pair = splitPairsByKey[key] {
             pair.performAction(with: nil)
@@ -1069,13 +1086,22 @@ extension TabGroupCellView: GroupTabsTableViewDelegate {
             return
         }
         let key = currentMemberOrder[row]
-        // Cmd+click toggles multi-selection; a plain click clears it first.
+        let modifierFlags = NSApp.currentEvent?.modifierFlags ?? []
+        if let pair = splitPairsByKey[key],
+           groupCellDelegate?.tabGroupCell(
+               self,
+               didRequestMultiSelectionFor: pair,
+               modifierFlags: modifierFlags) == true {
+            return
+        }
+        if let tab = tabsByGuid[key],
+           groupCellDelegate?.tabGroupCell(
+               self,
+               didRequestMultiSelectionFor: tab,
+               modifierFlags: modifierFlags) == true {
+            return
+        }
         if let state = configuredBrowserState {
-            let isCommandClick = NSApp.currentEvent?.modifierFlags.contains(.command) ?? false
-            if isCommandClick,
-               handleMultiSelectionCommandClick(for: key) {
-                return
-            }
             if state.multiSelection.isActive {
                 state.clearMultiSelection()
             }
@@ -1267,6 +1293,15 @@ extension TabGroupCellView: GroupTabsDragSource {
                 }
                 return .move
             }
+            let bookmarkGuids = pasteboard.phiBookmarkGuids()
+            if !bookmarkGuids.isEmpty {
+                guard groupCellDelegate?.tabGroupCell(
+                    self,
+                    canAcceptBookmarksWithGuids: bookmarkGuids) == true else {
+                    return []
+                }
+                return .move
+            }
             if let bookmarkGuid = pasteboard.string(forType: .phiBookmark),
                !bookmarkGuid.isEmpty,
                groupCellDelegate?.tabGroupCell(self, canAcceptBookmarkWithGuid: bookmarkGuid) == true {
@@ -1329,12 +1364,21 @@ extension TabGroupCellView: GroupTabsDragSource {
 
         let pasteboard = info.draggingPasteboard
         let batchTabIds = pasteboard.phiNormalTabIds()
+        let bookmarkGuids = pasteboard.phiBookmarkGuids()
         let accepted: Bool
         if let pinnedGuid = pasteboard.string(forType: .pinnedTab),
            !pinnedGuid.isEmpty {
             accepted = groupCellDelegate?.tabGroupCell(
                 self,
                 didAcceptPinnedTabWithGuid: pinnedGuid,
+                intoGroupToken: group.token,
+                atNormalTabsIdx: normalTabsIdx,
+                groupIndex: groupIndex) ?? false
+        } else if !bookmarkGuids.isEmpty {
+            accepted = groupCellDelegate?.tabGroupCell(
+                self,
+                didAcceptBookmarksWithGuids: bookmarkGuids,
+                tabIds: batchTabIds,
                 intoGroupToken: group.token,
                 atNormalTabsIdx: normalTabsIdx,
                 groupIndex: groupIndex) ?? false

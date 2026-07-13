@@ -475,6 +475,272 @@ extension LocalStore {
             }
         }
     }
+
+    /// Moves an explicit bookmark selection as a visual batch.
+    ///
+    /// When a selected folder also contains selected descendants, only the
+    /// selected descendant roots stay inside that folder. Unselected children
+    /// are lifted next to their selected parent, and selected descendant
+    /// folders shed their own unselected children recursively.
+    func moveSelectedBookmarks(_ guids: [String],
+                               profileId: String,
+                               to parentId: String?,
+                               newIndex: Int?) {
+        performBackgroundWrite { [weak self] context in
+            guard let self else { return }
+            do {
+                var uniqueGuids: [String] = []
+                var seenGuids = Set<String>()
+                for guid in guids where seenGuids.insert(guid).inserted {
+                    uniqueGuids.append(guid)
+                }
+                guard !uniqueGuids.isEmpty else { return }
+
+                var nodes: [TabDataModel] = []
+                for guid in uniqueGuids {
+                    guard let node = try self.bookmarkNode(with: guid, in: context),
+                          try !self.isBookmarkRoot(node, in: context) else {
+                        continue
+                    }
+                    nodes.append(node)
+                }
+                guard !nodes.isEmpty else { return }
+
+                let resolveSpaceId = nodes.first?.spaceId ?? Self.defaultSpaceId
+                guard let targetParent = try self.resolveParent(for: parentId,
+                                                                profileId: profileId,
+                                                                spaceId: resolveSpaceId,
+                                                                in: context) else {
+                    AppLogError("Target parent not found for selected bookmark move")
+                    return
+                }
+
+                let selectedGuids = Set(nodes.map(\.guid))
+                guard !selectedGuids.contains(targetParent.guid) else {
+                    AppLogError("Attempted to move selected bookmarks into selected folder")
+                    return
+                }
+
+                for node in nodes where node.dataType == .bookmarkFolder {
+                    if targetParent.guid == node.guid ||
+                        self.hasAncestor(of: targetParent, in: [node.guid]) {
+                        AppLogError("Attempted to move selected bookmark folder into itself")
+                        return
+                    }
+                }
+
+                let rootNodes = nodes.filter { !self.hasAncestor(of: $0, in: selectedGuids) }
+                guard !rootNodes.isEmpty else { return }
+
+                let rootGuids = Set(rootNodes.map(\.guid))
+                let originalTargetChildren = try self.children(of: targetParent, in: context)
+                let adjustedIndex: Int? = {
+                    guard var index = newIndex else { return nil }
+                    let upperBound = min(index, originalTargetChildren.count)
+                    let movingBeforeIndex = originalTargetChildren
+                        .prefix(upperBound)
+                        .filter { rootGuids.contains($0.guid) }
+                        .count
+                    index -= movingBeforeIndex
+                    return index
+                }()
+
+                var sourceParentsByGuid: [String: TabDataModel] = [:]
+                for node in rootNodes {
+                    if let originalParent = node.parent {
+                        sourceParentsByGuid[originalParent.guid] = originalParent
+                    }
+                    node.parent = targetParent
+                    node.updatedDate = Date()
+                }
+
+                for parent in sourceParentsByGuid.values where parent.guid != targetParent.guid {
+                    self.normalizeIndexes(for: try self.children(of: parent, in: context))
+                }
+
+                var targetSiblings = try self.children(of: targetParent, in: context)
+                    .filter { !rootGuids.contains($0.guid) }
+                let targetIndex = Self.clamp(index: adjustedIndex ?? Int.max,
+                                             upperBound: targetSiblings.count)
+                targetSiblings.insert(contentsOf: rootNodes, at: targetIndex)
+                self.normalizeIndexes(for: targetSiblings)
+
+                let now = Date()
+                for node in rootNodes where node.dataType == .bookmarkFolder {
+                    if try self.hasSelectedDescendant(of: node,
+                                                      selectedGuids: selectedGuids,
+                                                      in: context) {
+                        try self.liftUnselectedChildren(from: node,
+                                                        selectedGuids: selectedGuids,
+                                                        updatedDate: now,
+                                                        in: context)
+                    }
+                }
+            } catch {
+                AppLogError("Failed to move selected bookmarks: \(error)")
+            }
+        }
+    }
+
+    /// Moves an explicit bookmark selection to another Space's bookmark root.
+    /// Selected folder descendants remain inside the folder while unselected
+    /// children are lifted beside it, matching bookmark drag behavior.
+    func moveBookmarks(_ guids: [String],
+                       sourceProfileId: String,
+                       toSpaceId targetSpaceId: String,
+                       targetProfileId: String) {
+        performBackgroundWrite { [weak self] context in
+            guard let self else { return }
+            do {
+                guard !guids.isEmpty else { return }
+                let targetSpaceIsWritable: Bool
+                if targetSpaceId == Self.defaultSpaceId {
+                    targetSpaceIsWritable = true
+                } else {
+                    targetSpaceIsWritable = try self.importTargetSpaceIsWritable(profileId: targetProfileId,
+                                                                                 spaceId: targetSpaceId,
+                                                                                 in: context)
+                }
+                guard targetSpaceIsWritable else {
+                    AppLogError("Target Space not found when moving bookmarks")
+                    return
+                }
+                guard let targetProfile = try self.profile(with: targetProfileId,
+                                                           in: context,
+                                                           createIfNeeded: true),
+                      let targetRoot = try self.bookmarkRoot(profileId: targetProfileId,
+                                                             spaceId: targetSpaceId,
+                                                             in: context,
+                                                             createIfNeeded: true) else {
+                    AppLogError("Target bookmark root not found when moving bookmarks")
+                    return
+                }
+
+                let requestedGuids = Set(guids)
+                var sourceParentsByGuid: [String: TabDataModel] = [:]
+                var movedNodes: [TabDataModel] = []
+                var movedGuids = Set<String>()
+                let now = Date()
+
+                for guid in guids {
+                    guard let node = try self.bookmarkNode(with: guid, in: context),
+                          node.profileId == sourceProfileId,
+                          try !self.isBookmarkRoot(node, in: context),
+                          !self.hasAncestor(of: node, in: requestedGuids) else {
+                        continue
+                    }
+                    if node.spaceId == targetSpaceId && node.profileId == targetProfileId {
+                        continue
+                    }
+
+                    if let parent = node.parent {
+                        sourceParentsByGuid[parent.guid] = parent
+                    }
+                    node.parent = targetRoot
+                    try self.retagBookmarkSubtree(node,
+                                                  profileId: targetProfileId,
+                                                  profile: targetProfile,
+                                                  spaceId: targetSpaceId,
+                                                  updatedDate: now,
+                                                  in: context)
+                    movedNodes.append(node)
+                    movedGuids.insert(node.guid)
+                }
+
+                guard !movedNodes.isEmpty else { return }
+                for parent in sourceParentsByGuid.values where parent.guid != targetRoot.guid {
+                    let siblings = try self.children(of: parent, in: context)
+                    self.normalizeIndexes(for: siblings)
+                }
+
+                var targetSiblings = try self.children(of: targetRoot, in: context)
+                    .filter { !movedGuids.contains($0.guid) }
+                targetSiblings.append(contentsOf: movedNodes)
+                self.normalizeIndexes(for: targetSiblings)
+
+                for node in movedNodes where node.dataType == .bookmarkFolder {
+                    if try self.hasSelectedDescendant(of: node,
+                                                      selectedGuids: requestedGuids,
+                                                      in: context) {
+                        try self.liftUnselectedChildren(from: node,
+                                                        selectedGuids: requestedGuids,
+                                                        updatedDate: now,
+                                                        in: context)
+                    }
+                }
+                targetRoot.updatedDate = now
+            } catch {
+                AppLogError("Failed to move bookmarks to Space: \(error)")
+            }
+        }
+    }
+
+    /// Clones an explicit bookmark selection into another Space's bookmark
+    /// root. A folder with explicitly selected descendants copies only those
+    /// descendants; a folder selected by itself still copies its whole tree.
+    func cloneBookmarks(_ guids: [String],
+                        sourceProfileId: String,
+                        toSpaceId targetSpaceId: String,
+                        targetProfileId: String) {
+        performBackgroundWrite { [weak self] context in
+            guard let self else { return }
+            do {
+                guard !guids.isEmpty else { return }
+                let targetSpaceIsWritable: Bool
+                if targetSpaceId == Self.defaultSpaceId {
+                    targetSpaceIsWritable = true
+                } else {
+                    targetSpaceIsWritable = try self.importTargetSpaceIsWritable(
+                        profileId: targetProfileId,
+                        spaceId: targetSpaceId,
+                        in: context)
+                }
+                guard targetSpaceIsWritable else {
+                    AppLogError("Target Space not found when cloning bookmarks")
+                    return
+                }
+                guard try self.profile(with: targetProfileId,
+                                       in: context,
+                                       createIfNeeded: true) != nil,
+                      let targetRoot = try self.bookmarkRoot(profileId: targetProfileId,
+                                                             spaceId: targetSpaceId,
+                                                             in: context,
+                                                             createIfNeeded: true) else {
+                    AppLogError("Target bookmark root not found when cloning bookmarks")
+                    return
+                }
+
+                let requestedGuids = Set(guids)
+                var sourceRoots: [TabDataModel] = []
+                for guid in guids {
+                    guard let node = try self.bookmarkNode(with: guid, in: context),
+                          node.profileId == sourceProfileId,
+                          try !self.isBookmarkRoot(node, in: context),
+                          !self.hasAncestor(of: node, in: requestedGuids) else {
+                        continue
+                    }
+                    sourceRoots.append(node)
+                }
+                guard !sourceRoots.isEmpty else { return }
+
+                let insertionIndex = try self.children(of: targetRoot, in: context).count
+                let now = Date()
+                for (offset, sourceRoot) in sourceRoots.enumerated() {
+                    _ = try self.cloneSelectedBookmarkSubtree(sourceRoot,
+                                                              selectedGuids: requestedGuids,
+                                                              to: targetRoot,
+                                                              at: insertionIndex + offset,
+                                                              profileId: targetProfileId,
+                                                              spaceId: targetSpaceId,
+                                                              createdDate: now,
+                                                              in: context)
+                }
+                targetRoot.updatedDate = now
+            } catch {
+                AppLogError("Failed to clone bookmarks to Space: \(error)")
+            }
+        }
+    }
     
     /// Updates bookmark title and URL, normalizing the URL when provided.
     /// `secondaryUrl` / `secondaryTitle` are split-bookmark specific: pass
@@ -811,6 +1077,249 @@ private extension LocalStore {
         let predicate = #Predicate<TabDataModel> { $0.guid == guid }
         let descriptor = FetchDescriptor<TabDataModel>(predicate: predicate)
         return try context.fetch(descriptor).first
+    }
+
+    func hasAncestor(of node: TabDataModel, in guids: Set<String>) -> Bool {
+        var parent = node.parent
+        while let current = parent {
+            if guids.contains(current.guid) {
+                return true
+            }
+            parent = current.parent
+        }
+        return false
+    }
+
+    func hasSelectedDescendant(of folder: TabDataModel,
+                               selectedGuids: Set<String>,
+                               in context: ModelContext) throws -> Bool {
+        for child in try children(of: folder, in: context) {
+            if selectedGuids.contains(child.guid) {
+                return true
+            }
+            if child.dataType == .bookmarkFolder,
+               try hasSelectedDescendant(of: child,
+                                         selectedGuids: selectedGuids,
+                                         in: context) {
+                return true
+            }
+        }
+        return false
+    }
+
+    func selectedDescendantRoots(under node: TabDataModel,
+                                 selectedGuids: Set<String>,
+                                 in context: ModelContext) throws -> [TabDataModel] {
+        guard node.dataType == .bookmarkFolder else { return [] }
+        var roots: [TabDataModel] = []
+        for child in try children(of: node, in: context) {
+            if selectedGuids.contains(child.guid) {
+                roots.append(child)
+            } else {
+                roots.append(contentsOf: try selectedDescendantRoots(under: child,
+                                                                     selectedGuids: selectedGuids,
+                                                                     in: context))
+            }
+        }
+        return roots
+    }
+
+    func moveBookmarkNode(_ node: TabDataModel,
+                          to parent: TabDataModel,
+                          at index: Int,
+                          updatedDate: Date,
+                          in context: ModelContext) throws {
+        let originalParent = node.parent
+        node.parent = parent
+        node.updatedDate = updatedDate
+
+        if let originalParent, originalParent.guid != parent.guid {
+            let originalSiblings = try children(of: originalParent, in: context)
+            normalizeIndexes(for: originalSiblings)
+        }
+
+        var siblings = try children(of: parent, in: context).filter { $0.guid != node.guid }
+        let targetIndex = Self.clamp(index: index, upperBound: siblings.count)
+        siblings.insert(node, at: targetIndex)
+        normalizeIndexes(for: siblings)
+    }
+
+    func liftUnselectedChildren(from folder: TabDataModel,
+                                selectedGuids: Set<String>,
+                                updatedDate: Date,
+                                in context: ModelContext) throws {
+        guard let parent = folder.parent else { return }
+
+        let originalChildren = try children(of: folder, in: context)
+        var siblingOffsetAfterFolder = 1
+
+        for child in originalChildren {
+            if selectedGuids.contains(child.guid) {
+                if child.dataType == .bookmarkFolder,
+                   try hasSelectedDescendant(of: child,
+                                             selectedGuids: selectedGuids,
+                                             in: context) {
+                    try liftUnselectedChildren(from: child,
+                                               selectedGuids: selectedGuids,
+                                               updatedDate: updatedDate,
+                                               in: context)
+                }
+                continue
+            }
+
+            let selectedDescendantRoots = try selectedDescendantRoots(under: child,
+                                                                      selectedGuids: selectedGuids,
+                                                                      in: context)
+            if !selectedDescendantRoots.isEmpty {
+                let currentFolderChildren = try children(of: folder, in: context)
+                let childIndex = currentFolderChildren.firstIndex { $0.guid == child.guid }
+                    ?? currentFolderChildren.count
+                var descendantInsertionIndex = childIndex
+                for descendant in selectedDescendantRoots {
+                    try moveBookmarkNode(descendant,
+                                         to: folder,
+                                         at: descendantInsertionIndex,
+                                         updatedDate: updatedDate,
+                                         in: context)
+                    descendantInsertionIndex += 1
+                    if descendant.dataType == .bookmarkFolder,
+                       try hasSelectedDescendant(of: descendant,
+                                                 selectedGuids: selectedGuids,
+                                                 in: context) {
+                        try liftUnselectedChildren(from: descendant,
+                                                   selectedGuids: selectedGuids,
+                                                   updatedDate: updatedDate,
+                                                   in: context)
+                    }
+                }
+            }
+
+            let parentChildren = try children(of: parent, in: context)
+            guard let folderIndex = parentChildren.firstIndex(where: { $0.guid == folder.guid }) else {
+                continue
+            }
+            try moveBookmarkNode(child,
+                                 to: parent,
+                                 at: folderIndex + siblingOffsetAfterFolder,
+                                 updatedDate: updatedDate,
+                                 in: context)
+            siblingOffsetAfterFolder += 1
+        }
+
+        normalizeIndexes(for: try children(of: folder, in: context))
+    }
+
+    func retagBookmarkSubtree(_ node: TabDataModel,
+                              profileId: String,
+                              profile: ProfileModel,
+                              spaceId: String,
+                              updatedDate: Date,
+                              in context: ModelContext) throws {
+        node.profileId = profileId
+        node.profile = profile
+        node.spaceId = spaceId
+        node.updatedDate = updatedDate
+        for child in try children(of: node, in: context) {
+            try retagBookmarkSubtree(child,
+                                     profileId: profileId,
+                                     profile: profile,
+                                     spaceId: spaceId,
+                                     updatedDate: updatedDate,
+                                     in: context)
+        }
+    }
+
+    func cloneBookmarkSubtree(_ source: TabDataModel,
+                              to parent: TabDataModel,
+                              at index: Int,
+                              profileId: String,
+                              spaceId: String,
+                              createdDate: Date,
+                              in context: ModelContext) throws -> TabDataModel {
+        let clone: TabDataModel
+        if source.dataType == .bookmarkFolder {
+            clone = try insertDirectoryNode(title: source.title,
+                                            profileId: profileId,
+                                            parent: parent,
+                                            index: index,
+                                            guid: nil,
+                                            spaceId: spaceId,
+                                            now: createdDate,
+                                            in: context)
+            for (childIndex, child) in try children(of: source, in: context).enumerated() {
+                _ = try cloneBookmarkSubtree(child,
+                                             to: clone,
+                                             at: childIndex,
+                                             profileId: profileId,
+                                             spaceId: spaceId,
+                                             createdDate: createdDate,
+                                             in: context)
+            }
+        } else {
+            clone = try insertBookmarkNode(title: source.title,
+                                           profileId: profileId,
+                                           url: source.url,
+                                           parent: parent,
+                                           index: index,
+                                           guid: nil,
+                                           spaceId: spaceId,
+                                           secondaryUrl: source.secondaryUrl,
+                                           secondaryTitle: source.secondaryTitle,
+                                           favicon: source.favicon,
+                                           now: createdDate,
+                                           in: context)
+            clone.lastSeen = source.lastSeen
+        }
+        clone.overrideTitle = source.overrideTitle
+        clone.source = source.source
+        return clone
+    }
+
+    func cloneSelectedBookmarkSubtree(_ source: TabDataModel,
+                                      selectedGuids: Set<String>,
+                                      to parent: TabDataModel,
+                                      at index: Int,
+                                      profileId: String,
+                                      spaceId: String,
+                                      createdDate: Date,
+                                      in context: ModelContext) throws -> TabDataModel {
+        guard source.dataType == .bookmarkFolder,
+              try hasSelectedDescendant(of: source,
+                                        selectedGuids: selectedGuids,
+                                        in: context) else {
+            return try cloneBookmarkSubtree(source,
+                                            to: parent,
+                                            at: index,
+                                            profileId: profileId,
+                                            spaceId: spaceId,
+                                            createdDate: createdDate,
+                                            in: context)
+        }
+
+        let clone = try insertDirectoryNode(title: source.title,
+                                            profileId: profileId,
+                                            parent: parent,
+                                            index: index,
+                                            guid: nil,
+                                            spaceId: spaceId,
+                                            now: createdDate,
+                                            in: context)
+        let selectedChildren = try selectedDescendantRoots(under: source,
+                                                           selectedGuids: selectedGuids,
+                                                           in: context)
+        for (childIndex, child) in selectedChildren.enumerated() {
+            _ = try cloneSelectedBookmarkSubtree(child,
+                                                 selectedGuids: selectedGuids,
+                                                 to: clone,
+                                                 at: childIndex,
+                                                 profileId: profileId,
+                                                 spaceId: spaceId,
+                                                 createdDate: createdDate,
+                                                 in: context)
+        }
+        clone.overrideTitle = source.overrideTitle
+        clone.source = source.source
+        return clone
     }
 
     func insertDirectoryNode(title: String,

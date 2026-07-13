@@ -94,6 +94,13 @@ final class SplitPairSidebarItem: SidebarItem, ContextMenuRepresentable {
         target.performAction(with: owner)
     }
 
+    func boundBookmarkGuid(in state: BrowserState?) -> String? {
+        guard let state = state ?? browserState else { return nil }
+        return state.splitBookmarkBindings.first { entry in
+            entry.value == groupId && state.bookmarkManager.bookmark(withGuid: entry.key) != nil
+        }?.key
+    }
+
     /// Drives the merged cell's context menu off the left pane so the
     /// user gets split-aware items (Remove from Split, etc.) after the
     /// shared multi-selection menu gets first chance to take over.
@@ -168,6 +175,8 @@ extension NSPasteboard.PasteboardType {
     static let normalTabs = NSPasteboard.PasteboardType("com.phibrowser.normalTabs")
     /// Bookmark pasteboard type storing the bookmark GUID.
     static let phiBookmark = NSPasteboard.PasteboardType("com.phibrowser.bookmark")
+    /// Multi-selection bookmark pasteboard type storing comma-separated GUIDs.
+    static let bookmarks = NSPasteboard.PasteboardType("com.phibrowser.bookmarks")
     /// Source window identifier used for cross-window drags.
     static let sourceWindowId = NSPasteboard.PasteboardType("com.phibrowser.sourceWindowId")
     /// Tab-group pasteboard type storing the group's hex token. Used
@@ -184,5 +193,14 @@ extension NSPasteboard {
             .split(separator: ",")
             .compactMap { Int(String($0).trimmingCharacters(in: .whitespacesAndNewlines)) }
             .filter { seen.insert($0).inserted }
+    }
+
+    func phiBookmarkGuids() -> [String] {
+        guard let payload = string(forType: .bookmarks) else { return [] }
+        var seen = Set<String>()
+        return payload
+            .split(separator: ",")
+            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty && seen.insert($0).inserted }
     }
 }
