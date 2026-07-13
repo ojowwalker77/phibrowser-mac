@@ -111,9 +111,9 @@ struct SpacesStripView: View {
     @State private var stripDraggingId: String?
     @State private var stripOrderedIds: [String] = []
 
-    /// Index of the first pip inside the strip's sliding viewport. When the
-    /// active Space's pip sits outside the visible window, the row slides the
-    /// minimal distance that brings it in (see `ensureActivePipVisible`).
+    /// Index of the first pip inside the strip's sliding viewport. The row
+    /// slides to keep the active Space's pip centered in the visible window,
+    /// clamped at the list's ends (see `ensureActivePipVisible`).
     /// Always read through `clampedStripStart`, so a shrinking Space list or
     /// a widening sidebar can never leave the window hanging past the end.
     @State private var stripStartIndex: Int = 0
@@ -442,20 +442,20 @@ struct SpacesStripView: View {
                 value: slot.activeSpaceId
             )
             .onAppear {
-                ensureActivePipVisible(visibleCount: visibleCount, animated: false)
+                ensureActivePipVisible(availableWidth: geo.size.width, animated: false)
             }
             .onChange(of: slot.activeSpaceId) { _ in
-                ensureActivePipVisible(visibleCount: visibleCount, animated: true)
+                ensureActivePipVisible(availableWidth: geo.size.width, animated: true)
             }
             .onChange(of: geo.size.width) { newWidth in
-                ensureActivePipVisible(visibleCount: visiblePipCount(availableWidth: newWidth), animated: false)
+                ensureActivePipVisible(availableWidth: newWidth, animated: false)
             }
             .onChange(of: stripOrderedSpaces.map(\.spaceId)) { _ in
                 // A delete/reorder can push the active pip out of the window
                 // (e.g. removing a pip ahead of it). Re-anchor — but never
                 // mid-drag, where the live rearrangement is transient.
                 guard stripDraggingId == nil else { return }
-                ensureActivePipVisible(visibleCount: visibleCount, animated: false)
+                ensureActivePipVisible(availableWidth: geo.size.width, animated: false)
             }
         }
         .frame(height: rowHeight)
@@ -571,20 +571,26 @@ struct SpacesStripView: View {
         min(stripStartIndex, max(0, stripOrderedSpaces.count - visibleCount))
     }
 
-    /// Slides the viewport the minimal distance that brings the active pip
-    /// fully into the window — no-op while it is already visible. Animated
-    /// for user switches (matching the glass chip's slide); instant for
-    /// layout events (first appearance, sidebar resize, list changes).
-    private func ensureActivePipVisible(visibleCount: Int, animated: Bool) {
+    /// Slides the viewport so the active pip sits centered in the window —
+    /// clamped at the list's ends, so the first/last few pips still fill the
+    /// window rather than leaving blank slots. Animated for user switches
+    /// (matching the glass chip's slide); instant for layout events (first
+    /// appearance, sidebar resize, list changes).
+    ///
+    /// The pip count is derived HERE, from the live Space list — never passed
+    /// in from the body's `visibleCount`. An `onChange(of:perform:)` action
+    /// runs before the view re-renders, so a count captured in the body is
+    /// one update stale; on cold launch (strip mounts before the store's
+    /// first spaces emission, `activeSpaceId` already set at slot init and
+    /// never changing) the list-arrival re-anchor would then run with the
+    /// empty list's count of 0, bail, and leave the restored active pip
+    /// stranded outside the window with no later event to fix it.
+    private func ensureActivePipVisible(availableWidth: CGFloat, animated: Bool) {
+        let visibleCount = visiblePipCount(availableWidth: availableWidth)
         guard visibleCount > 0,
               let activeId = slot.activeSpaceId,
               let index = stripOrderedSpaces.firstIndex(where: { $0.spaceId == activeId }) else { return }
-        var start = clampedStripStart(visibleCount: visibleCount)
-        if index < start {
-            start = index
-        } else if index >= start + visibleCount {
-            start = index - visibleCount + 1
-        }
+        let start = max(0, min(index - visibleCount / 2, stripOrderedSpaces.count - visibleCount))
         guard start != stripStartIndex else { return }
         if animated {
             withAnimation(.easeInOut(duration: PhiPreferences.GeneralSettings.loadSwitchSpaceAnimationDuration())) {
