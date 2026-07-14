@@ -508,8 +508,10 @@ struct SpacesStripView: View {
         let step = Self.stripItemWidth + Self.stripSpacing
         // When pips are hidden past an edge, the window widens by half an
         // icon there so the neighbor peeks through the clip — the cue that
-        // the row continues. The peeked halves stay non-interactive: their
-        // hit region would extend past the clip into the padding / Spacer.
+        // the row continues. The peeked pip's OWN hit testing stays off (its
+        // region would extend past the clip into the padding / Spacer);
+        // instead a transparent hit target overlaid on the visible sliver
+        // (see `peekHitTarget`) makes the half icon hover- and clickable.
         let peek = Self.stripItemWidth / 2 + Self.stripSpacing
         let leadingPeek: CGFloat = start > 0 ? peek : 0
         let trailingPeek: CGFloat = start + visibleCount < stripOrderedSpaces.count ? peek : 0
@@ -557,6 +559,19 @@ struct SpacesStripView: View {
         .offset(x: -CGFloat(start) * step + leadingPeek)
         .frame(width: pipRowWidth(visibleCount) + leadingPeek + trailingPeek, alignment: .leading)
         .clipped()
+        // Interactive stand-ins for the peeked half-pips, sized to exactly the
+        // sliver that shows through the clip so no hit region leaks past it.
+        // The peek conditions guarantee the indexed neighbor exists.
+        .overlay(alignment: .leading) {
+            if leadingPeek > 0 {
+                peekHitTarget(for: stripOrderedSpaces[start - 1])
+            }
+        }
+        .overlay(alignment: .trailing) {
+            if trailingPeek > 0 {
+                peekHitTarget(for: stripOrderedSpaces[start + visibleCount])
+            }
+        }
     }
 
     /// Width of `count` uniform strip items plus the gaps between them.
@@ -697,19 +712,7 @@ struct SpacesStripView: View {
         // stays on screen for the animation).
         let isActive = space.spaceId == slot.activeSpaceId
         return Button {
-            // While the Create-a-Space overlay is open the strip stays visible
-            // for reference only: a click must NOT switch Spaces (that swaps
-            // away the very window hosting the form). Hover still shows the
-            // pip's info card — see `isHoverCardPresented`. Guarding the action
-            // (rather than `.disabled`) keeps `.onHover` live so the card works.
-            guard !slot.isCreatingSpace else { return }
-            // A click means "switch", not "hover": drop this pip's hover card
-            // and keep it down — across the window swap, in the target Space
-            // window's strip too — until the pointer leaves the pip. Without
-            // this the target strip's fresh hover re-presents the card right
-            // after the swap (a disappear-then-reappear blink).
-            slot.suppressHoverCard(spaceId: space.spaceId)
-            slot.activate(spaceId: space.spaceId, userInitiated: true)
+            activatePip(space)
         } label: {
             SpaceIconView(
                 storedValue: space.iconName,
@@ -762,6 +765,51 @@ struct SpacesStripView: View {
                     iconEditSpaceId = nil
                 }
             )
+        }
+    }
+
+    /// Shared click handling for a pip and its peek stand-in.
+    private func activatePip(_ space: SpaceModel) {
+        // While the Create-a-Space overlay is open the strip stays visible
+        // for reference only: a click must NOT switch Spaces (that swaps
+        // away the very window hosting the form). Hover still shows the
+        // pip's info card — see `isHoverCardPresented`. Guarding the action
+        // (rather than `.disabled`) keeps `.onHover` live so the card works.
+        guard !slot.isCreatingSpace else { return }
+        // A click means "switch", not "hover": drop this pip's hover card
+        // and keep it down — across the window swap, in the target Space
+        // window's strip too — until the pointer leaves the pip. Without
+        // this the target strip's fresh hover re-presents the card right
+        // after the swap (a disappear-then-reappear blink).
+        slot.suppressHoverCard(spaceId: space.spaceId)
+        slot.activate(spaceId: space.spaceId, userInitiated: true)
+    }
+
+    /// Transparent hit target laid over a peeked half-pip's visible sliver, so
+    /// the half icon hovers and clicks like a full pip. The pip itself stays
+    /// hit-testing-off past the window (see `pipsViewport`): its full-width hit
+    /// region would leak past the clip into the padding / Spacer, while this
+    /// stand-in covers only what the user can see. Visuals come from the real
+    /// pip underneath — the shared `highlightedPipId` draws its hover wash
+    /// (clipped to the same sliver) and `hoverBegan` presents its hover card.
+    private func peekHitTarget(for space: SpaceModel) -> some View {
+        Button {
+            activatePip(space)
+        } label: {
+            Color.clear
+                .frame(width: Self.stripItemWidth / 2, height: rowHeight)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(space.name)
+        .onHover { hovering in
+            if hovering {
+                highlightedPipId = space.spaceId
+                hoverBegan(space.spaceId)
+            } else {
+                if highlightedPipId == space.spaceId { highlightedPipId = nil }
+                hoverEnded(space.spaceId)
+            }
         }
     }
 
