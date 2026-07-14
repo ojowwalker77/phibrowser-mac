@@ -33,6 +33,38 @@ enum SidebarNewTabStickyResolver {
     }
 }
 
+enum SidebarBookmarkFolderDropTarget: Equatable {
+    case keepOriginal
+    case dropOnFolder
+    case insertBeforeFolder
+    case insertAfterFolder
+    case insertAsFirstChild
+}
+
+/// Converts AppKit's folder-row proposal into a stable target independent of
+/// the dragged payload type. Gap targets become sibling insertions, while a
+/// genuine on-folder target keeps the existing folder-entry behavior.
+enum SidebarBookmarkFolderDropResolver {
+    static func resolve(
+        isExpanded: Bool,
+        isUpperHalf: Bool,
+        isDropOnItem: Bool
+    ) -> SidebarBookmarkFolderDropTarget {
+        if isExpanded {
+            return isDropOnItem ? .insertAsFirstChild : .keepOriginal
+        }
+
+        if isUpperHalf && isDropOnItem {
+            return .dropOnFolder
+        }
+        return isUpperHalf ? .insertBeforeFolder : .insertAfterFolder
+    }
+
+    static func shouldHighlightFolder(isExpanded: Bool, isDropOnItem: Bool) -> Bool {
+        !isExpanded && isDropOnItem
+    }
+}
+
 class SidebarTabListViewController: NSViewController {
     private static let bottomContentInset: CGFloat = 130
     private static let bookmarkRenameClickInterval: TimeInterval = 0.5
@@ -1573,13 +1605,17 @@ extension SidebarTabListViewController: NSOutlineViewDataSource {
             }
         }
 
-
-        if let remapped = remappedDropTargetForFolderRule(in: outlineView, info: info, resolvedItem: originalResolvedItem, proposedChildIndex: index) {
+        if let remapped = remappedDropTargetForFolderRule(
+            in: outlineView,
+            info: info,
+            resolvedItem: originalResolvedItem,
+            proposedChildIndex: index
+        ) {
             outlineView.setDropItem(remapped.item, dropChildIndex: remapped.childIndex)
             resolvedItem = remapped.item
             resolvedIndex = remapped.childIndex
         }
-        
+
         updateDropFeedbackFolder(in: outlineView, with: resolvedItem, childIndex: resolvedIndex, pasteboard: pasteboardItem)
         
         let maxRootDropIndex = maxRootDropChildIndex()
@@ -1775,14 +1811,40 @@ extension SidebarTabListViewController: NSOutlineViewDataSource {
         guard !bookmarks.isEmpty else { return [] }
         let bookmarkGuids = bookmarks.map(\.guid)
 
-        if let targetBookmark = resolvedItem as? Bookmark, targetBookmark.isFolder {
+        // Folder-containing batches return before the shared validation path,
+        // so normalize their target here with the same geometry used by all
+        // other tab and bookmark payloads.
+        var effectiveItem = resolvedItem
+        var effectiveIndex = resolvedIndex
+        if let remapped = remappedDropTargetForFolderRule(
+            in: outlineView,
+            info: info,
+            resolvedItem: resolvedItem,
+            proposedChildIndex: resolvedIndex
+        ) {
+            outlineView.setDropItem(remapped.item, dropChildIndex: remapped.childIndex)
+            effectiveItem = remapped.item
+            effectiveIndex = remapped.childIndex
+        }
+
+        if let targetBookmark = effectiveItem as? Bookmark, targetBookmark.isFolder {
             let canAccept = browserState.canMoveSelectedBookmarks(bookmarkGuids: bookmarkGuids,
                                                                   to: targetBookmark)
-            setDropFeedback(canAccept ? .bookmarkFolder(guid: targetBookmark.guid) : .none)
+            if canAccept,
+               let pasteboardItem = info.draggingPasteboard.pasteboardItems?.first {
+                updateDropFeedbackFolder(
+                    in: outlineView,
+                    with: targetBookmark,
+                    childIndex: effectiveIndex,
+                    pasteboard: pasteboardItem
+                )
+            } else {
+                setDropFeedback(.none)
+            }
             return canAccept ? .move : []
         }
 
-        if let targetBookmark = resolvedItem as? Bookmark, !targetBookmark.isFolder {
+        if let targetBookmark = effectiveItem as? Bookmark, !targetBookmark.isFolder {
             guard let insertion = bookmarkInsertionTarget(before: targetBookmark) else {
                 setDropFeedback(.none)
                 return []
@@ -1794,10 +1856,10 @@ extension SidebarTabListViewController: NSOutlineViewDataSource {
             return canAccept ? .move : []
         }
 
-        if resolvedItem == nil {
-            let proposedRow = resolvedIndex == NSOutlineViewDropOnItemIndex
+        if effectiveItem == nil {
+            let proposedRow = effectiveIndex == NSOutlineViewDropOnItemIndex
                 ? outlineView.numberOfRows
-                : resolvedIndex
+                : effectiveIndex
             guard isRowInBookmarkSection(proposedRow) else {
                 setDropFeedback(.none)
                 return []
@@ -2986,10 +3048,12 @@ extension SidebarTabListViewController: NSOutlineViewDataSource {
         || pasteboard.string(forType: .phiBookmark) != nil
         || pasteboard.string(forType: .bookmarks) != nil
         guard isTabLikeDrag,
-              childIndex == NSOutlineViewDropOnItemIndex,
               let folder = resolvedItem as? Bookmark,
-              !outlineView.isItemExpanded(folder),
-              folder.isFolder else {
+              folder.isFolder,
+              SidebarBookmarkFolderDropResolver.shouldHighlightFolder(
+                isExpanded: outlineView.isItemExpanded(folder),
+                isDropOnItem: childIndex == NSOutlineViewDropOnItemIndex
+              ) else {
             clearDropFeedback()
             return
         }
@@ -3230,33 +3294,32 @@ extension SidebarTabListViewController: NSOutlineViewDataSource {
         
         let locationInOutline = outlineView.convert(info.draggingLocation, from: nil)
         let rowRect = outlineView.rect(ofRow: row)
-        
-        // Rule 1: collapsed folder — cursor in upper half + on-item keeps "enter folder";
-        // all other cases (lower half, or gap regardless of half) remap to parent level.
-        if !isExpanded {
-            let insertBefore = outlineView.isFlipped ? (locationInOutline.y < rowRect.midY) : (locationInOutline.y > rowRect.midY)
-            
-            if insertBefore && proposedChildIndex == NSOutlineViewDropOnItemIndex {
-                return nil
-            }
-            
+
+        let target = SidebarBookmarkFolderDropResolver.resolve(
+            isExpanded: isExpanded,
+            isUpperHalf: outlineView.isFlipped
+                ? locationInOutline.y < rowRect.midY
+                : locationInOutline.y > rowRect.midY,
+            isDropOnItem: proposedChildIndex == NSOutlineViewDropOnItemIndex
+        )
+
+        switch target {
+        case .keepOriginal, .dropOnFolder:
+            return nil
+        case .insertAsFirstChild:
+            return (item: folder, childIndex: 0)
+        case .insertBeforeFolder, .insertAfterFolder:
             let parentItem = folder.parent
             let siblings = dataSourceChildren(of: parentItem)
             guard let folderIndex = siblings.firstIndex(where: { $0.id == folder.id }) else {
                 return nil
             }
-            
-            let targetIndex = insertBefore ? folderIndex : folderIndex + 1
+
+            let targetIndex = target == .insertBeforeFolder
+                ? folderIndex
+                : folderIndex + 1
             return (item: parentItem, childIndex: targetIndex)
         }
-        
-        // Rule 2: expanded folder + on-item => disable on behavior and map to first child slot.
-        // This makes "drop after A row" land before A1 instead of before sibling B.
-        if isExpanded && proposedChildIndex == NSOutlineViewDropOnItemIndex {
-            return (item: folder, childIndex: 0)
-        }
-        
-        return nil
     }
     
     private func dataSourceChildren(of parent: SidebarItem?) -> [SidebarItem] {
