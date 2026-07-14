@@ -879,15 +879,30 @@ export async function waitForLoad({ timeout = 25 } = {}) {
  * Polls until a target exists (and, by default, is visible). Returns its
  * center `{x, y}` and size — handy to chain into click. Observation only, so it
  * is not ownership-gated. Accepts every target form except raw coordinates.
+ * `{minCount: N}` waits until at least N (visible) elements match — for SPA
+ * lists that stream in ("wait until the feed has 10 items"); the return then
+ * carries `count` alongside the FIRST match's rect. minCount needs a selector
+ * target (css/xpath/loc) — a ref identifies exactly one node.
  */
-export async function waitForElement(target, { timeout = 15, visible = true } = {}) {
+export async function waitForElement(target, { timeout = 15, visible = true,
+                                               minCount = 1 } = {}) {
   const spec = normalizeTarget(target)
   if (spec.coords) {
     throw new Error('waitForElement needs an element target, not coordinates')
   }
+  if (minCount > 1 && spec.kind === 'ref') {
+    throw new Error('waitForElement: minCount needs a selector target — a ref identifies one node')
+  }
   const deadline = Date.now() + timeout * 1000
   while (Date.now() < deadline) {
     if (state.openDialog) return { dialog: state.openDialog }
+    let count = null
+    if (minCount > 1) {
+      count = await evalInPage(
+        `${PHI_LOCATE};__phiCount(${JSON.stringify(spec)}, ${!!visible})`, 4000)
+        .catch(() => 0)
+      if (!(count >= minCount)) { await wait(0.25); continue }
+    }
     const hit = await callOnTarget(spec, `function (needVisible) {
       var r = this.getBoundingClientRect()
       var s = getComputedStyle(this)
@@ -909,10 +924,42 @@ export async function waitForElement(target, { timeout = 15, visible = true } = 
       return { found: vis, x: Math.round(r.left + r.width / 2 + fx), y: Math.round(r.top + r.height / 2 + fy),
                w: Math.round(r.width), h: Math.round(r.height) }
     }`, [visible]).catch(() => null)
-    if (hit && hit.found) return hit
+    if (hit && hit.found) return minCount > 1 ? { ...hit, count } : hit
     await wait(0.25)
   }
-  throw new Error('waitForElement: timed out for ' + describeTarget(target))
+  throw new Error('waitForElement: timed out for ' + describeTarget(target) +
+                  (minCount > 1 ? ` (minCount ${minCount})` : ''))
+}
+
+/**
+ * Polls `expression` in the page until it evaluates truthy, then returns that
+ * value; throws on timeout (mentioning the last evaluation error, so a typo'd
+ * expression doesn't fail as a silent timeout). The bounded generic wait for
+ * SPA readiness that waitForElement can't express — e.g.
+ * `waitForFunction('window.__APP_READY === true')` or a computed condition.
+ * The expression is arbitrary page JS (same rules as js()), so it is
+ * ownership-gated per poll: a user takeover stops the wait immediately.
+ * Options (seconds): {timeout = 15, poll = 0.25}.
+ */
+export async function waitForFunction(expression, { timeout = 15, poll = 0.25 } = {}) {
+  const expr = String(expression)
+  const deadline = Date.now() + timeout * 1000
+  let lastErr = null
+  for (;;) {
+    await guardAgentControl()
+    if (state.openDialog) return { dialog: state.openDialog }
+    let value
+    try {
+      value = await evalInPage(expr, 4000)
+      lastErr = null
+    } catch (err) { lastErr = err }
+    if (value) return value
+    if (Date.now() >= deadline) {
+      throw new Error('waitForFunction: timed out for ' + expr.slice(0, 80) +
+                      (lastErr ? ` (last error: ${lastErr.message})` : ''))
+    }
+    await wait(poll)
+  }
 }
 
 /**
@@ -2040,7 +2087,7 @@ function normalizeTarget(target) {
 // Searches the top document first, then every same-origin child frame, so
 // locs produced by the scan inside iframes still resolve.
 const PHI_LOCATE = `
-function __phiFind(spec){
+function __phiDocs(){
   var docs = [document]
   var collect = function (win) {
     for (var i = 0; i < win.frames.length; i++) {
@@ -2051,6 +2098,21 @@ function __phiFind(spec){
     }
   }
   try { collect(window) } catch (e) {}
+  return docs
+}
+function __phiRoleOf(el){
+  var r = el.getAttribute('role')
+  if (r) return r
+  var t = el.tagName
+  if (t === 'A') return 'link'
+  if (t === 'BUTTON') return 'button'
+  if (t === 'INPUT' && el.type === 'checkbox') return 'checkbox'
+  if (t === 'INPUT' && el.type === 'radio') return 'radio'
+  return ''
+}
+function __phiNameOf(el){ return (el.getAttribute('aria-label') || el.innerText || el.value || '').trim().toLowerCase() }
+function __phiFind(spec){
+  var docs = __phiDocs()
   var findIn = function (doc) {
     if (spec.kind === 'css') { try { return doc.querySelector(spec.value) } catch(e){ return null } }
     if (spec.kind === 'xpath') {
@@ -2062,19 +2124,8 @@ function __phiFind(spec){
     }
     if (spec.kind === 'role') {
       var want = (spec.name || '').trim().toLowerCase()
-      var roleOf = function(el){
-        var r = el.getAttribute('role')
-        if (r) return r
-        var t = el.tagName
-        if (t === 'A') return 'link'
-        if (t === 'BUTTON') return 'button'
-        if (t === 'INPUT' && el.type === 'checkbox') return 'checkbox'
-        if (t === 'INPUT' && el.type === 'radio') return 'radio'
-        return ''
-      }
-      var nameOf = function(el){ return (el.getAttribute('aria-label') || el.innerText || el.value || '').trim().toLowerCase() }
       var all = Array.prototype.slice.call(doc.querySelectorAll('*'))
-      return all.find(function(el){ return roleOf(el) === spec.role && (!want || nameOf(el).indexOf(want) >= 0) }) || null
+      return all.find(function(el){ return __phiRoleOf(el) === spec.role && (!want || __phiNameOf(el).indexOf(want) >= 0) }) || null
     }
     return null
   }
@@ -2083,6 +2134,42 @@ function __phiFind(spec){
     if (hit) return hit
   }
   return null
+}
+function __phiCount(spec, needVisible){
+  var isVis = function (el) {
+    if (!needVisible) return true
+    var r = el.getBoundingClientRect()
+    if (r.width <= 0 || r.height <= 0) return false
+    var s = (el.ownerDocument.defaultView || window).getComputedStyle(el)
+    return !!s && s.visibility !== 'hidden' && s.display !== 'none'
+  }
+  var docs = __phiDocs()
+  var n = 0
+  var add = function (el) { if (el && el.nodeType === 1 && isVis(el)) n++ }
+  for (var di = 0; di < docs.length; di++) {
+    var doc = docs[di]
+    if (spec.kind === 'css') {
+      var list; try { list = doc.querySelectorAll(spec.value) } catch(e){ list = [] }
+      for (var i = 0; i < list.length; i++) add(list[i])
+    } else if (spec.kind === 'xpath') {
+      try {
+        var snap = doc.evaluate(spec.value, doc, null, 7, null)
+        for (var x = 0; x < snap.snapshotLength; x++) add(snap.snapshotItem(x))
+      } catch(e){}
+    } else if (spec.kind === 'href') {
+      var links = doc.querySelectorAll('a[href]')
+      for (var l = 0; l < links.length; l++) {
+        if (links[l].href === spec.value || links[l].getAttribute('href') === spec.value) add(links[l])
+      }
+    } else if (spec.kind === 'role') {
+      var want = (spec.name || '').trim().toLowerCase()
+      var all = doc.querySelectorAll('*')
+      for (var a = 0; a < all.length; a++) {
+        if (__phiRoleOf(all[a]) === spec.role && (!want || __phiNameOf(all[a]).indexOf(want) >= 0)) add(all[a])
+      }
+    }
+  }
+  return n
 }`
 
 /**
@@ -2150,12 +2237,32 @@ async function callOnTarget(spec, fnDecl, args = []) {
   }
 }
 
+// SPAs often mount a control a beat after the scan (or navigation) that led
+// to it, so an acting helper failing INSTANTLY with "target not found" is
+// usually a race, not a real absence. Acting helpers (click/hover/fillInput/
+// uploadFile) give target RESOLUTION this short bounded grace — a resolved
+// target still acts immediately, only a missing one waits. Longer or
+// conditional waits stay explicit: waitForElement / waitForFunction.
+const RESOLVE_RETRY_MS = 3000
+
+async function retryResolve(attempt, retryMs = RESOLVE_RETRY_MS) {
+  const deadline = Date.now() + retryMs
+  for (;;) {
+    const v = await attempt()
+    if (v != null) return v
+    if (Date.now() >= deadline || state.openDialog) return null
+    await wait(0.25)
+  }
+}
+
 /** Resolves a target to viewport {x, y} (center, or top-left + offset),
- *  scrolling it into view first. Throws if not found. */
-async function locateRect(target) {
+ *  scrolling it into view first. Throws if not found (after the short
+ *  resolution grace above; {retryMs: 0} probes exactly once). Element hits
+ *  carry w/h; raw-coordinate targets return {x, y} alone. */
+async function locateRect(target, { retryMs = RESOLVE_RETRY_MS } = {}) {
   const spec = normalizeTarget(target)
   if (spec.coords) return { x: spec.coords.x, y: spec.coords.y }
-  const rect = await callOnTarget(spec, `function (offX, offY) {
+  const rect = await retryResolve(() => callOnTarget(spec, `function (offX, offY) {
     try { this.scrollIntoView({ block: 'center', inline: 'center' }) } catch (e) {}
     var r = this.getBoundingClientRect()
     // Rects inside an iframe are relative to the FRAME's viewport; input
@@ -2174,16 +2281,17 @@ async function locateRect(target) {
     var x = (offX != null ? r.left + offX : r.left + r.width / 2) + fx
     var y = (offY != null ? r.top + offY : r.top + r.height / 2) + fy
     return { x: Math.round(x), y: Math.round(y), w: Math.round(r.width), h: Math.round(r.height) }
-  }`, [spec.offX ?? null, spec.offY ?? null])
+  }`, [spec.offX ?? null, spec.offY ?? null]), retryMs)
   if (!rect) throw new Error('target not found: ' + describeTarget(target))
   return rect
 }
 
-/** Resolves a target to a Runtime remote-object id (for CDP DOM commands). */
+/** Resolves a target to a Runtime remote-object id (for CDP DOM commands),
+ *  with the same short resolution grace as locateRect. */
 async function locateObjectId(target) {
   const spec = normalizeTarget(target)
   if (spec.coords) throw new Error('this helper needs an element target, not coordinates')
-  const objectId = await resolveSpecObjectId(spec)
+  const objectId = await retryResolve(() => resolveSpecObjectId(spec))
   if (!objectId) throw new Error('target not found: ' + describeTarget(target))
   return objectId
 }
@@ -2708,17 +2816,20 @@ export async function click(target, arg2, arg3) {
   await guardAgentControl()
   const client = await cdpClient()
   let x, y, opts
+  let elementTarget = false
   if (typeof target === 'number') {
     x = target; y = arg2; opts = arg3 || {}
   } else {
     const rect = await locateRect(target)
     x = rect.x; y = rect.y
+    // Element hits carry w/h; a raw-coordinate target form doesn't.
+    elementTarget = rect.w !== undefined
     opts = (arg2 && typeof arg2 === 'object' && !Array.isArray(arg2)) ? arg2 : {}
   }
   const { button = 'left', clickCount = 1 } = opts
   // CSS -> widget coords under a zoom scale (see inputScale).
   const s = inputScale()
-  const ix = Math.round(x * s), iy = Math.round(y * s)
+  let ix = Math.round(x * s), iy = Math.round(y * s)
   try { mirrorCursor(ix, iy) } catch {}
   const sid = requireSession()
   // Real hover precedes the press (hover states react like they would for a
@@ -2727,6 +2838,21 @@ export async function click(target, arg2, arg3) {
   await client.send('Input.dispatchMouseEvent',
                     { type: 'mouseMoved', x: ix, y: iy, pointerType: 'mouse' }, sid)
   await new Promise(resolve => setTimeout(resolve, 450))
+  // The page can shift under the glide pause (a streaming list, late media):
+  // re-measure an element target and press at the FRESH spot, not the stale
+  // one — a click that "succeeds" onto whatever moved into the old rect is
+  // the worst kind of silent miss. One probe, no retry; a target that
+  // vanished mid-glide keeps the measured coords (best remaining guess).
+  if (elementTarget) {
+    const fresh = await locateRect(target, { retryMs: 0 }).catch(() => null)
+    if (fresh && (fresh.x !== x || fresh.y !== y)) {
+      x = fresh.x; y = fresh.y
+      ix = Math.round(x * s); iy = Math.round(y * s)
+      try { mirrorCursor(ix, iy) } catch {}
+      await client.send('Input.dispatchMouseEvent',
+                        { type: 'mouseMoved', x: ix, y: iy, pointerType: 'mouse' }, sid)
+    }
+  }
   // A multi-click must be dispatched as the FULL press/release sequence with
   // an increasing count (1, 2, …): a single pair sent straight with
   // clickCount=2 never synthesizes dblclick, so apps ignore it.
@@ -2776,7 +2902,9 @@ export async function fillInput(target, text, { instant = false } = {}) {
 
   // One pass: scroll into view, focus, select-all (so typed text REPLACES the
   // current value), classify, and measure for the overlay's typing pulse.
-  const prep = await callOnTarget(spec, `function () {
+  // Resolution rides the same short grace as click (see retryResolve); the
+  // side-effectful body only runs once the element exists.
+  const prep = await retryResolve(() => callOnTarget(spec, `function () {
     var el = this
     try { el.scrollIntoView({ block: 'center' }) } catch (e) {}
     try { el.focus() } catch (e) {}
@@ -2811,7 +2939,7 @@ export async function fillInput(target, text, { instant = false } = {}) {
     }
     return { typeable: typeable, rect: rect,
              focused: el.ownerDocument.activeElement === el }
-  }`)
+  }`))
   if (!prep) throw new Error('fillInput: target not found: ' + describeTarget(target))
 
   let pulse = null

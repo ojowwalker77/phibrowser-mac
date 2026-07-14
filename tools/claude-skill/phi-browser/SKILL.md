@@ -60,7 +60,7 @@ The heredoc body is a Node.js script; all helpers below are preloaded.
 - Ownership: `ownership()`, `handOff(message)`, `takeOver()`, `waitForAgentControl({timeout})`
 - Tabs: `listTabs()`, `openTab(url)` (reuses the Space's blank seed tab in place when one exists; `{reuseBlank: false}` forces a separate tab; safe to fire concurrently for many tabs — see "Caveats"), `switchTab(targetId)`, `closeTab(targetId?)`
 - Navigation: `goto(url, {timeout})`, `waitForLoad({timeout})`
-- Waiting: `waitForElement(target, {timeout, visible})`, `waitForNetworkIdle({timeout, idleMs, maxInflight})`
+- Waiting: `waitForElement(target, {timeout, visible, minCount})` (`minCount: N` waits until ≥N matches — streaming SPA lists), `waitForFunction(expr, {timeout, poll})` (poll arbitrary page JS until truthy; returns the value), `waitForNetworkIdle({timeout, idleMs, maxInflight})`
 - Challenges: `detectChallenge()` — Cloudflare interstitial/Turnstile/block detection; hand off on first sight — see "Cloudflare challenges"
 - Consent: `acceptCookies(opts?)` — dismiss a cookie/GDPR banner with static rules (no model turn); `goto`/`openTab` run it automatically — see "Cookie-consent banners"
 - Observation: `observe(opts?)` (primary — structured element map), `snapshotText(opts?)` (fallback — prose), `annotatedScreenshot(path?)` (screenshot with @ref-labeled boxes — Read it), `screenshot(path?)` (returns a PNG path — Read it), `pageInfo()`. Both scans take `{diff, within, showHidden}` — see "Scan options"
@@ -168,6 +168,13 @@ Notes:
 
 Prefer refs/locators over pixel coordinates: they survive layout shifts and are
 auto-scrolled into view.
+
+Acting helpers (`click`, `fillInput`, `hover`, `uploadFile`) retry target
+RESOLUTION for up to ~3s before failing, so a control that mounts a beat after
+your scan self-heals — no need to sprinkle `wait()` before every action. A
+resolved target acts immediately; only a missing one waits. For longer or
+conditional readiness, wait explicitly: `waitForElement` (existence/count) or
+`waitForFunction` (any page condition).
 
 ### Canvas-like editors (Google Docs, Sheets, Notion, Figma, …)
 
