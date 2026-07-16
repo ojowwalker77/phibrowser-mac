@@ -5,7 +5,6 @@
 
 import Cocoa
 import Combine
-import AVFoundation
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -1263,19 +1262,19 @@ final class ProfileSelectionButtonCell: NSButtonCell {
 class OnboardingBaseViewController: NSViewController {
     var nextClosure: ((Bool) -> Void)?
     
-    // MARK: - Video Background
-    private var videoPlayer: AVPlayer?
-    private var videoPlayerLayer: AVPlayerLayer?
-    private var loopObserver: Any?
-    
     /// If true, will try to make window center
     var isFisrtPage = false
     
-    // Placeholder to hide gray flash while video loads
-    private var placeholderView: NSImageView = {
-        let image = NSImage(resource: .loginWallpaper)
-        let imageView = NSImageView(image: image)
-        return imageView
+    private var backgroundView: NSView = {
+        let view = NSView()
+        view.wantsLayer = true
+        view.layer?.backgroundColor = NSColor(
+            calibratedRed: 0.055,
+            green: 0.059,
+            blue: 0.075,
+            alpha: 1
+        ).cgColor
+        return view
     }()
     
     var dotView: NSImageView = {
@@ -1325,7 +1324,7 @@ class OnboardingBaseViewController: NSViewController {
     override func loadView() {
         view = NSView()
         view.wantsLayer = true
-        view.addSubview(placeholderView)
+        view.addSubview(backgroundView)
         view.addSubview(dotView)
         view.addSubview(titleLabel)
         view.addSubview(nextButton)
@@ -1337,7 +1336,7 @@ class OnboardingBaseViewController: NSViewController {
             make.height.equalTo(800)
         }
         
-        placeholderView.snp.makeConstraints { make in
+        backgroundView.snp.makeConstraints { make in
             make.edges.equalToSuperview()
         }
         
@@ -1363,21 +1362,6 @@ class OnboardingBaseViewController: NSViewController {
         }
     }
     
-    override func viewDidLoad() {
-        super.viewDidLoad()
-        setupVideoBackground()
-    }
-    
-    override func viewWillAppear() {
-        super.viewWillAppear()
-        startVideoPlayback()
-    }
-    
-    override func viewWillDisappear() {
-        super.viewWillDisappear()
-        stopVideoPlayback()
-    }
-    
     override func viewDidAppear() {
         super.viewDidAppear()
         view.layoutSubtreeIfNeeded()
@@ -1386,71 +1370,6 @@ class OnboardingBaseViewController: NSViewController {
         }
     }
     
-    // MARK: - Video Background
-    private var statusObservation: NSKeyValueObservation?
-    
-    private func setupVideoBackground() {
-        guard videoPlayer == nil else { return }
-        
-        guard let url = Bundle.main.url(forResource: "login-dot-bg", withExtension: "mp4") else {
-            return
-        }
-        
-        let playerItem = AVPlayerItem(url: url)
-        let player = AVPlayer(playerItem: playerItem)
-        player.isMuted = true
-        
-        // Observe player item status to know when first frame is ready
-        statusObservation = playerItem.observe(\.status, options: [.new]) { [weak self] item, _ in
-            guard let self = self else { return }
-            if item.status == .readyToPlay {
-                DispatchQueue.main.async {
-                    // Fade out placeholder when video is ready
-                    NSAnimationContext.runAnimationGroup { context in
-                        context.duration = 0.3
-                        self.placeholderView.animator().alphaValue = 0
-                    } completionHandler: {
-                        self.placeholderView.isHidden = true
-                    }
-                }
-            }
-        }
-        
-        let layer = AVPlayerLayer(player: player)
-        layer.frame = view.bounds
-        layer.autoresizingMask = [.layerWidthSizable, .layerHeightSizable]
-        layer.videoGravity = .resizeAspectFill
-        
-        if let rootLayer = view.layer {
-            rootLayer.insertSublayer(layer, at: 0)
-        }
-        
-        self.videoPlayer = player
-        self.videoPlayerLayer = layer
-        
-        // Setup loop observer
-        loopObserver = NotificationCenter.default.addObserver(
-            forName: .AVPlayerItemDidPlayToEndTime,
-            object: player.currentItem,
-            queue: .main
-        ) { [weak player] _ in
-            player?.seek(to: .zero)
-            player?.play()
-        }
-    }
-    
-    private func startVideoPlayback() {
-        videoPlayer?.seek(to: .zero)
-        videoPlayer?.play()
-    }
-    
-    private func stopVideoPlayback() {
-        videoPlayer?.pause()
-        if let observer = loopObserver {
-            NotificationCenter.default.removeObserver(observer)
-            loopObserver = nil
-        }
-    }
 }
 
 /// Import-target caption hosted in the standalone import window: the target

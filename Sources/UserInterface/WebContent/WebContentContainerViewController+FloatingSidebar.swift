@@ -76,7 +76,8 @@ extension WebContentContainerViewController {
 
         let panelContentView = NSView()
         panelContentView.wantsLayer = true
-        panelContentView.layer?.cornerRadius = LiquidGlassCompatible.webContentContainerCornerRadius
+        panelContentView.layer?.cornerCurve = .continuous
+        panelContentView.layer?.cornerRadius = 14
         panelContentView.layer?.masksToBounds = true
         panelContentView.phiLayer?.setBorderColor(.border)
         panelContentView.layer?.borderWidth = 1
@@ -87,16 +88,7 @@ extension WebContentContainerViewController {
             make.edges.equalToSuperview()
         }
 
-        let panelVisualContainer: NSView
-        if #available(macOS 26.0, *) {
-            let glass = NSGlassEffectView()
-            glass.contentView = panelContentView
-            glass.cornerRadius = 14
-            glass.style = .regular
-            panelVisualContainer = glass
-        } else {
-            panelVisualContainer = panelContentView
-        }
+        let panelVisualContainer = panelContentView
 
         interactionContainerView.addSubview(panelVisualContainer)
         panelVisualContainer.snp.makeConstraints { make in

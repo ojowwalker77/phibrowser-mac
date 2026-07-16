@@ -38,8 +38,7 @@ struct SpaceChooserItem: Identifiable {
 struct SpaceChooserView: View {
     /// Every Space, ordered with the current one first.
     let items: [SpaceChooserItem]
-    /// The window's overlay-background color (its alpha is the user's Opacity
-    /// setting), layered over the blur so the box matches window translucency.
+    /// The window's opaque overlay-background color.
     let boxBackground: Color
     let onChoose: (String?) -> Void
 
@@ -66,10 +65,7 @@ struct SpaceChooserView: View {
             spaceList
                 .padding(8)
                 .frame(width: 300)
-                // Overlay tint (carries the Opacity setting) over a blur, so
-                // the box reads as translucent like the window itself.
                 .background(boxBackground, in: RoundedRectangle(cornerRadius: 16))
-                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
                 .overlay(
                     RoundedRectangle(cornerRadius: 16)
                         .strokeBorder(Color.primary.opacity(0.08))

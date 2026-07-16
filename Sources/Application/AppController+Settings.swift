@@ -23,17 +23,11 @@ extension AppController {
     
     private func panes() -> [SettingsPane] {
         var panes: [SettingsPane] =
-        [AccountSettingViewController(),
-         GeneralSettingViewController(),
+        [GeneralSettingViewController(),
          ProfilesSettingViewController(),
          SpacesSettingViewController(),
-         AISettingsViewController(),
-         IMChannelsSettingViewController(),
          ShortcutsSettingViewController(),
         ]
-        if PhiPreferences.AgentSpaces.skillFeatureEnabled {
-            panes.append(DeveloperSettingViewController())
-        }
         return panes
     }
     

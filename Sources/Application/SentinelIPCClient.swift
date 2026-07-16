@@ -51,7 +51,7 @@ final class SentinelIPCClient: Sendable {
     /// Computes the Sentinel user-specific storage path from the browser side.
     /// Path: ~/Library/Application Support/<sentinelBundleId>/<userSub>/
     private func sentinelStoragePath() -> String? {
-        guard let auth0Sub = currentAuth0Sub(), !auth0Sub.isEmpty else { return nil }
+        let localAccountID = Account.defaultUid
 
         let sentinelBundleId = sentinelBundleIdentifier()
         guard let appSupportURL = try? FileManager.default.url(
@@ -61,7 +61,7 @@ final class SentinelIPCClient: Sendable {
             create: false
         ) else { return nil }
 
-        let safeSub = sanitizePathComponent(auth0Sub)
+        let safeSub = sanitizePathComponent(localAccountID)
         let storagePath = appSupportURL
             .appendingPathComponent(sentinelBundleId, isDirectory: true)
             .appendingPathComponent(safeSub, isDirectory: true)
@@ -77,13 +77,6 @@ final class SentinelIPCClient: Sendable {
             return "com.phibrowser.canary.Sentinel"
         }
         return "com.phibrowser.Sentinel"
-    }
-
-    private func currentAuth0Sub() -> String? {
-        if let token = SharedAuthTokenStore.shared.read() {
-            return token.auth0Sub
-        }
-        return nil
     }
 
     /// Mirrors FileSystemUtils.sanitizePathComponent from Sentinel.

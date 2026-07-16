@@ -25,37 +25,9 @@ struct AgentAvatarImagePayload {
 
 class APIClient {
     static let shared = APIClient()
-    #if DEBUG
-    private var accountBaseURL: String {
-        if AuthManager.useStagingAuth0 {
-            return "https://account.stag.phibrowser.com"
-        } else {
-            return "https://account.phibrowser.com"
-        }
-    }
-    private var connectorBaseURL: String {
-        if AuthManager.useStagingAuth0 {
-            return "https://ai.stag.phibrowser.com/data"
-        } else {
-            return "https://ai.phibrowser.com/data"
-        }
-    }
-    #elseif NIGHTLY_BUILD
-    private let accountBaseURL = "https://account.stag.phibrowser.com"
-    private let connectorBaseURL = "https://ai.stag.phibrowser.com/data"
-    #else
     private let accountBaseURL = "https://account.phibrowser.com"
     private let connectorBaseURL = "https://ai.phibrowser.com/data"
-    #endif
-    private var token: String {
-        let accessToken = AuthManager.shared.getAccessTokenSyncly()
-
-        if accessToken == nil {
-            AppLogError("Failed to get Auth0 token")
-        }
-
-        return accessToken ?? ""
-    }
+    private let token = ""
 
     func oauthNativeFinishedRedirect(provider: String, result: String) -> String {
         guard var components = URLComponents(string: "\(accountBaseURL)/oauth/native-finished") else {

@@ -32,6 +32,7 @@ public enum UserAppearanceChoice: Int, CaseIterable, Codable {
 
 /// Coordinates the active theme and appearance settings.
 public final class ThemeManager: NSObject, ThemeSource {
+    private static let currentPaletteVersion = 1
     
     // MARK: - Singleton
     @MainActor
@@ -92,9 +93,6 @@ public final class ThemeManager: NSObject, ThemeSource {
     /// Theme ID to restore once that theme is registered.
     private var pendingThemeId: String?
 
-    /// Theme identifiers that should be archived and restored from local storage.
-    private var persistedThemeIDs = Set<String>()
-    
     /// Observation token for system appearance changes.
     private var appearanceObservation: NSKeyValueObservation?
     
@@ -116,8 +114,6 @@ public final class ThemeManager: NSObject, ThemeSource {
         super.init()
         
         Theme.builtInThemes.forEach(registerTheme)
-        restorePersistedThemes()
-        
         restoreUserPreferences()
         
         setupAppearanceObservation()
@@ -130,43 +126,25 @@ public final class ThemeManager: NSObject, ThemeSource {
             userAppearanceChoice = choice
         }
         updateAppearanceMode()
+
+        let paletteVersionKey = PhiPreferences.ThemeSettings.paletteVersion.rawValue
+        let storedPaletteVersion = UserDefaults.standard.integer(forKey: paletteVersionKey)
+        if storedPaletteVersion < Self.currentPaletteVersion {
+            UserDefaults.standard.set(Self.currentPaletteVersion, forKey: paletteVersionKey)
+            UserDefaults.standard.set(Theme.default.id, forKey: PhiPreferences.ThemeSettings.currentThemeId.rawValue)
+            UserDefaults.standard.removeObject(forKey: "PhiThemeSnapshots")
+            currentTheme = Theme.default
+            return
+        }
         
-        if var themeId = UserDefaults.standard.string(forKey: PhiPreferences.ThemeSettings.currentThemeId.rawValue) {
-            if themeId == "default" {
-                themeId = Theme.default.id
-            }
+        if let savedThemeId = UserDefaults.standard.string(forKey: PhiPreferences.ThemeSettings.currentThemeId.rawValue) {
+            let themeId = Theme.migratedBuiltInThemeId(savedThemeId)
             if let theme = registeredThemes[themeId] {
                 currentTheme = theme
             } else {
                 pendingThemeId = themeId
             }
         }
-    }
-
-    private func restorePersistedThemes() {
-        guard let data = UserDefaults.standard.data(forKey: PhiPreferences.ThemeSettings.themeSnapshots.rawValue) else {
-            return
-        }
-
-        let decoder = JSONDecoder()
-        guard let snapshots = try? decoder.decode([ThemeSnapshot].self, from: data) else {
-            return
-        }
-
-        for snapshot in snapshots {
-            persistedThemeIDs.insert(snapshot.id)
-            registeredThemes[snapshot.id] = snapshot.makeTheme()
-        }
-    }
-
-    private func persistThemeSnapshots() {
-        let snapshots = persistedThemeIDs
-            .sorted()
-            .compactMap { registeredThemes[$0]?.makeSnapshot() }
-
-        let encoder = JSONEncoder()
-        guard let data = try? encoder.encode(snapshots) else { return }
-        UserDefaults.standard.set(data, forKey: PhiPreferences.ThemeSettings.themeSnapshots.rawValue)
     }
     
     /// Updates the active appearance mode from the user preference.
@@ -208,46 +186,6 @@ public final class ThemeManager: NSObject, ThemeSource {
         currentTheme = theme
     }
 
-    @MainActor
-    func applyThemeSnapshot(_ snapshot: ThemeSnapshot) {
-        let theme = snapshot.makeTheme()
-        AppLogDebug("[OverlayOpacity] applyThemeSnapshot id=\(theme.id) lightAlpha=\(theme.windowOverlayOpacity(for: .light)) darkAlpha=\(theme.windowOverlayOpacity(for: .dark))")
-        registeredThemes[theme.id] = theme
-        persistedThemeIDs.insert(theme.id)
-        persistThemeSnapshots()
-        currentTheme = theme
-    }
-
-    @MainActor
-    public func updateCurrentThemeOverlayOpacity(_ opacity: CGFloat, for appearance: Appearance? = nil) {
-        let targetAppearance = appearance ?? currentAppearance
-        // Opacity is a single global control: applying it only to the active
-        // theme would leave Spaces pinned to a different theme unchanged
-        // (their `BrowserThemeContext.mirrorsSharedTheme` is false, so they
-        // never see the active theme's snapshot update). Update every
-        // registered theme so every Space picks up the new opacity.
-        var refreshedCurrent: Theme?
-        for (themeId, theme) in registeredThemes {
-            let updatedSnapshot = theme
-                .makeSnapshot()
-                .updatingOverlayOpacity(opacity, for: targetAppearance)
-            let updatedTheme = updatedSnapshot.makeTheme()
-            registeredThemes[themeId] = updatedTheme
-            persistedThemeIDs.insert(themeId)
-            if themeId == currentTheme.id {
-                refreshedCurrent = updatedTheme
-            }
-        }
-        persistThemeSnapshots()
-        AppLogDebug("[OverlayOpacity] updateCurrentThemeOverlayOpacity opacity=\(opacity) target=\(targetAppearance) themes=\(registeredThemes.count)")
-        if let refreshedCurrent {
-            // Assigning a fresh instance fires the publisher so mirroring
-            // windows refresh; pinned windows re-resolve their own theme id
-            // from the registry inside `BrowserThemeContext.bindSharedTheme`.
-            currentTheme = refreshedCurrent
-        }
-    }
-    
     // MARK: - Appearance
     
     /// Sets the user appearance preference.

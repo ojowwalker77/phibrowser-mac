@@ -83,7 +83,7 @@ class BrowserState {
     /// one Chromium order echo, then return to normal Chromium resequencing.
     private var nativeOrderProtectedTabIds: Set<Int> = []
     
-    /// Pending requests to mark the next created tab as a native NTP (incognito only).
+    /// Pending requests to mark the next created tab as Phi's native NTP.
     private var pendingNativeNtpCount: Int = 0
 
     private struct PendingNormalTabInsertion {
@@ -181,8 +181,7 @@ class BrowserState {
 
     private var lastLegacyLayout: Bool?
     @Published var layoutMode: LayoutMode = .performance
-    @Published var lastPhiAIEnabled: Bool = PhiPreferences.AISettings.phiAIEnabled.loadValue()
-    private var lastSentinelOnLogin: Bool = PhiPreferences.AISettings.launchSentinelOnLogin.loadValue()
+    @Published var lastPhiAIEnabled = false
     
     /// Currently focused tab.
     @Published var focusingTab: Tab? {
@@ -367,14 +366,14 @@ class BrowserState {
         return getTabIdentifier(for: tab)
     }
 
-    // MARK: - Native NTP (Incognito)
+    // MARK: - Native NTP
 
     func enqueueNativeNTP() {
         pendingNativeNtpCount += 1
     }
 
     private func consumePendingNativeNTP() -> Bool {
-        guard isIncognito, pendingNativeNtpCount > 0 else { return false }
+        guard pendingNativeNtpCount > 0 else { return false }
         pendingNativeNtpCount -= 1
         return true
     }
@@ -458,7 +457,6 @@ class BrowserState {
                     self.clearMultiSelection()
                 }
                 self.mayUpdateNormalTabsOnLayoutChanged()
-                self.updateAISettings()
             }
             .store(in: &cancellables)
 
@@ -643,25 +641,6 @@ class BrowserState {
                 continue
             }
             bookmark.isActive = (bookmark.chromiumTabGuid == focusingTab?.guid)
-        }
-    }
-
-    private func updateAISettings() {
-        let aiEnabled = PhiPreferences.AISettings.phiAIEnabled.loadValue()
-        let sentinelOnLogin = PhiPreferences.AISettings.launchSentinelOnLogin.loadValue()
-
-        let aiChanged = aiEnabled != lastPhiAIEnabled
-        let sentinelChanged = sentinelOnLogin != lastSentinelOnLogin
-
-        guard aiChanged || sentinelChanged else { return }
-
-        lastPhiAIEnabled = aiEnabled
-        lastSentinelOnLogin = sentinelOnLogin
-
-        if aiChanged {
-            onAIEnabledChanged(aiEnabled, sentinelOnLogin: sentinelOnLogin)
-        } else if sentinelChanged {
-            updateSentinelRegistration(sentinelOnLogin)
         }
     }
 
@@ -940,27 +919,7 @@ class BrowserState {
     /// Toggle AI Chat for the currently focused tab
     /// The collapse state is now managed per-tab, not globally
     func toggleAIChat(_ collapse: Bool? = nil) {
-        // Defense in depth: any caller (extension, debug, etc.) hitting this
-        // path during placeholder mode would operate on a stale focusingTab.
-        // Primary entry points are gated upstream; this is the safety net.
-        guard !isInPlaceholderMode else { return }
-        // Overview owns the web content surface; allow forced collapse, but
-        // block stale actions from reopening chat while overview is visible.
-        if groupOverviewState != nil, collapse != true { return }
-
-        // Dispatch to the focusing tab's AI Chat state, mirroring to its split
-        // partner so both panes of a split share one expand/collapse state.
-        if let tab = focusingTab {
-            setAIChatCollapsed(for: tab, collapsed: collapse ?? !tab.aiChatCollapsed)
-        }
-
-        // Also update the global state for backward compatibility
-        // (e.g., for AIChatViewController in non-traditional layout)
-        if let collapse {
-            aiChatCollapsed = collapse
-        } else {
-            aiChatCollapsed.toggle()
-        }
+        // Compatibility no-op. AI chat is not part of this fork.
     }
 
     /// Sets the AI Chat collapsed state for a tab, mirroring it to the tab's
@@ -2363,17 +2322,8 @@ class BrowserState {
     ///   - identifier: The tab identifier to associate with
     ///   - chromeTabId: The Chromium tab ID (used by Chrome extension APIs) of the associated content tab
     func createAIChatTab(for identifier: String, chromeTabId: Int) {
-        guard LoginController.shared.isLoggedin() else {
-            return
-        }
-        if aiChatTabs[identifier] != nil {
-            return
-        }
-        if !aiChatTabsBeingCreated.insert(identifier).inserted {
-            return
-        }
-        let customGuid = Self.aiChatId(for: identifier)
-        createTab("chrome-extension://fenmfiepnpdlhplemgijlimpbebebljo/index.html?is_sidebar=1&tabId=\(chromeTabId)", customGuid: customGuid, focusAfterCreate: false)
+        // Kept as a compatibility callback for older Phi Framework builds.
+        // The local-only fork does not create AI chat WebContents.
     }
     
     /// Close the AI Chat tab associated with the specified identifier
@@ -2427,8 +2377,9 @@ class BrowserState {
             consumePendingSplitSlotSwap(for: tab)
         }
 
-        if consumePendingNativeNTP() {
-            tab.usesNativeNTP = true
+        let nativeNTPWasRequested = consumePendingNativeNTP()
+        if nativeNTPWasRequested || tab.url?.isNTP == true {
+            tab.configureNativeNTP(isIncognito: isIncognito)
         }
 
         // Seed `cachedFaviconData` for cross-window / tear-off

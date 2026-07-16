@@ -37,8 +37,7 @@ struct CreateSpacePanel: View {
     @State private var selectedIcon: IconPickerSelection = .defaultSelection
     @State private var selectedProfileId: String = ""
     /// Theme pinned to the new Space, or `nil` to follow the global theme via
-    /// the "Follow Global" toggle above the swatches. `onAppear` pre-selects a
-    /// random built-in theme; the user can switch to Follow Global or another.
+    /// the "Follow Global" toggle above the swatches. New Spaces start on Zinc.
     @State private var selectedThemeId: String? = nil
     @FocusState private var nameFocused: Bool
 
@@ -50,14 +49,11 @@ struct CreateSpacePanel: View {
         styledContent
             .onAppear {
                 selectedProfileId = resolvedInitialProfileId
-                // Give every new Space a fresh random look out of the box — a
-                // random Phi icon and a random built-in theme — so Spaces are
-                // visually distinct instead of all defaulting to the same first
-                // icon and the inherited theme. The user can still override both
-                // before creating: a pinned theme, or "Follow Global" to track
-                // the global theme instead of pinning one.
+                // Keep icons varied while the theme starts from the app-wide
+                // Zinc default. The user can still pin another color or follow
+                // the global theme before creating the Space.
                 selectedIcon = .phiIcon(id: PhiIconCatalog.allIds.randomElement() ?? PhiIconCatalog.allIds[0])
-                selectedThemeId = Theme.builtInThemes.randomElement()?.id ?? Theme.default.id
+                selectedThemeId = Theme.default.id
                 DispatchQueue.main.async { nameFocused = true }
             }
     }
@@ -71,10 +67,9 @@ struct CreateSpacePanel: View {
                 .padding(.vertical, 24)
                 .frame(width: formMaxWidth + 40)
         case .sidebar:
-            // Transparent so the themed visual-effect backdrop installed by
-            // `SidebarViewController.showCreateSpaceOverlay` shows through —
-            // the form then sits on the active Space's overlay color and
-            // opacity instead of an opaque card that ignores the Space theme.
+            // Transparent so the opaque themed backdrop installed by
+            // `SidebarViewController.showCreateSpaceOverlay` remains the single
+            // owner of the active Space surface color.
             // Vertically centered when the form is shorter than the sidebar, but
             // still scrolls when the embedded icon grid makes it taller than a
             // short sidebar so the create button stays reachable: pinning a
@@ -249,7 +244,7 @@ struct CreateSpacePanel: View {
         return VStack(spacing: 14) {
             // A "Follow Global" toggle above the swatches: it and the theme dots
             // form one selection group, so the new Space either follows the
-            // global theme or pins one of the eight built-ins. A GeometryReader
+            // global theme or pins one of the four built-ins. A GeometryReader
             // gives the row width so the toggle insets its ends to line up with
             // the first/last dot rather than the wider grid bounds.
             GeometryReader { geo in
@@ -257,10 +252,8 @@ struct CreateSpacePanel: View {
                     .padding(.horizontal, followGlobalToggleInset(forWidth: geo.size.width))
             }
             .frame(height: Self.followGlobalToggleHeight)
-            // Lay the eight built-in themes out as two rows of four rather than a
-            // single cramped strip, so each swatch is big enough to read its hue
-            // and tap comfortably. Flexible columns spread the swatches evenly
-            // across the bounded column and shrink with the sidebar.
+            // Four flexible columns keep every swatch large enough to read and
+            // tap comfortably across both window and sidebar layouts.
             LazyVGrid(columns: columns, spacing: Self.themeRowSpacing) {
                 ForEach(Theme.builtInThemes, id: \.id) { theme in
                     themeDot(theme, ringDiameter: Self.themeDotRing)
@@ -299,7 +292,6 @@ struct CreateSpacePanel: View {
     /// dot previews the current global theme color.
     private var followGlobalToggle: some View {
         let globalTheme = ThemeManager.shared.currentTheme
-        let isPure = globalTheme == .pure
         let globalAccent = Color(globalTheme.color(for: .themeColor, appearance: appearance))
         let isSelected = selectedThemeId == nil
         return Button {
@@ -307,7 +299,7 @@ struct CreateSpacePanel: View {
         } label: {
             HStack(spacing: 8) {
                 Circle()
-                    .fill(isPure ? Color.white : globalAccent)
+                    .fill(globalAccent)
                     .frame(width: 14, height: 14)
                     .overlay {
                         Circle().stroke(Color.black.opacity(0.12), lineWidth: 0.5)
@@ -346,27 +338,28 @@ struct CreateSpacePanel: View {
     /// read that the ring alone can't give against a same-hue dot.
     @ViewBuilder
     private func themeDot(_ theme: Theme, ringDiameter: CGFloat) -> some View {
-        let isPure = theme == .pure
-        let accent = Color(theme.color(for: .themeColor, appearance: appearance))
+        let accentColor = theme.color(for: .themeColor, appearance: appearance)
+        let accent = Color(accentColor)
+        let checkColor = accentColor.isLight() ? Color.black.opacity(0.7) : Color.white
         let isSelected = selectedThemeId == theme.id
         let dot = max(ringDiameter - 6, 0)
         Button {
             selectedThemeId = theme.id
         } label: {
             Circle()
-                .fill(isPure ? Color.white : accent)
+                .fill(accent)
                 .frame(width: dot, height: dot)
                 .frame(width: ringDiameter, height: ringDiameter)
                 .overlay {
                     Circle()
-                        .stroke(Color.black.opacity(isPure ? 0.12 : 0), lineWidth: 0.5)
+                        .stroke(Color.black.opacity(0.08), lineWidth: 0.5)
                         .frame(width: dot, height: dot)
                 }
                 .overlay {
                     if isSelected {
                         Image(systemName: "checkmark")
                             .font(.system(size: max(dot * 0.5, 8), weight: .bold))
-                            .foregroundStyle(isPure ? Color.black.opacity(0.55) : Color.white)
+                            .foregroundStyle(checkColor)
                     }
                 }
                 .overlay {

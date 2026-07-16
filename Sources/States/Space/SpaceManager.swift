@@ -439,7 +439,7 @@ final class SpaceManager: ObservableObject {
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(handleLoginCompleted),
-            name: .loginCompleted,
+            name: .onboardingCompleted,
             object: nil
         )
         NotificationCenter.default.addObserver(
@@ -1603,6 +1603,7 @@ final class SpaceManager: ObservableObject {
     /// Space follows the global theme.
     func themeId(forSpaceId spaceId: String) -> String? {
         boundAccount?.userDefaults.spaceThemeIds()[spaceId]
+            .map(Theme.migratedBuiltInThemeId)
     }
 
     /// Sets (or clears) the theme override for `spaceId`. Passing nil makes
@@ -2040,7 +2041,7 @@ final class SpaceManager: ObservableObject {
     /// Applied by `SpaceWindowSlot.registerWindow` so a freshly-spawned
     /// controller adopts any persisted per-Space override before first paint.
     func applyPersistedTheme(to controller: MainBrowserWindowController, spaceId: String) {
-        let persisted = boundAccount?.userDefaults.spaceThemeIds()[spaceId]
+        let persisted = themeId(forSpaceId: spaceId)
         // Only touch the context when there's actually an override to apply —
         // leaving the default `mirrorsSharedTheme = true` alone for Spaces
         // that follow the global theme.
@@ -2114,7 +2115,7 @@ final class SpaceManager: ObservableObject {
         }
         // Re-run the reconcile skipped while logged out. Async so it lands after
         // the window manager registers the dangling windows on this same
-        // `.loginCompleted` post, so `activate` swaps instead of spawning.
+        // `.onboardingCompleted` post, so `activate` swaps instead of spawning.
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             // Read fresh from the bound account; `self.spaces` may still hold the
@@ -2408,28 +2409,19 @@ final class SpaceManager: ObservableObject {
             return (updated.first(where: isAutomaticSwitchTarget) ?? updated.first)?.spaceId
         }()
 
-        // Gate on login: before login, windows are dangling and not yet in any
-        // slot's `windowsBySpaceId`, so `activate`'s spawn guard can't see them
-        // and would spawn a duplicate empty window for a Space that already owns
-        // one (stray windows after a User-Data reset + re-login).
-        // `handleLoginCompleted` re-runs this once windows are registered.
-        if AuthManager.shared.checkLoginStatusOnChromiumLaunch() {
-            for slot in slots {
-                // A slot mid-cascade is on its way out: activating a fallback
-                // would respawn a window into it and fight the teardown. Hit
-                // when an Incognito Space is reaped while its slot's
-                // window-driven cascade is still draining.
-                if slot.isTearingDown {
-                    continue
-                }
-                if let current = slot.activeSpaceId, validIds.contains(current) {
-                    continue
-                }
-                if let fallback {
-                    slot.activate(spaceId: fallback)
-                } else {
-                    slot.clearActiveSpace()
-                }
+        for slot in slots {
+            // A slot mid-cascade is on its way out: activating a fallback
+            // would respawn a window into it and fight the teardown.
+            if slot.isTearingDown {
+                continue
+            }
+            if let current = slot.activeSpaceId, validIds.contains(current) {
+                continue
+            }
+            if let fallback {
+                slot.activate(spaceId: fallback)
+            } else {
+                slot.clearActiveSpace()
             }
         }
 
@@ -3156,6 +3148,7 @@ final class SpaceWindowSlot: ObservableObject {
                    !MainActor.assumeIsolated({
                        AgentSpaceManager.shared.isAgentSpace(spaceId)
                    }) {
+                    target.browserState.enqueueNativeNTP()
                     target.browserState.createQuickLookupTab()
                 }
                 // After a cold-launch restore into fullscreen,
@@ -3383,13 +3376,10 @@ final class SpaceWindowSlot: ObservableObject {
                                             focusAfterCreate: index == 0)
                     }
                 } else {
-                    // Off-the-record windows render the NATIVE new-tab page:
-                    // mark the arriving tab before creating it, exactly like
-                    // `newBrowserTab` does. Without this the Incognito Space's
-                    // first tab shows the raw web chrome://newtab, which is
-                    // blank for its OTR profile.
-                    if let state = self.windowsBySpaceId[spaceId]?.browserState,
-                       state.isIncognito {
+                    // Every user Space renders Phi's composed native new-tab
+                    // page. Mark the arriving tab before creating it, exactly
+                    // like `newBrowserTab` does.
+                    if let state = self.windowsBySpaceId[spaceId]?.browserState {
                         state.enqueueNativeNTP()
                     }
                     bridge.createQuickLookupTab(withWindowId: windowIdNumber.int64Value,

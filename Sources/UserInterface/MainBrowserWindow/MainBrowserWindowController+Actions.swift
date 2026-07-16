@@ -26,9 +26,7 @@ extension MainBrowserWindowController {
             "focusingTab=\(focusingTabText)"
         )
         if openNewTabPage {
-            if browserState.isIncognito {
-                browserState.enqueueNativeNTP()
-            }
+            browserState.enqueueNativeNTP()
             browserState.createQuickLookupTab()
         } else {
             toggleOmniBox(fromAddressBar: false)
@@ -493,38 +491,6 @@ extension MainBrowserWindowController: NSMenuItemValidation {
         browserState.unpinClosedPinnedSplit(leftDB: pair[0], rightDB: pair[1])
     }
     
-    
-    func showFeedbackWindow(crashContextTab: Tab? = nil) {
-        let identifier = NSUserInterfaceItemIdentifier("Phi Feedback Window")
-        // Check if about window already exists
-        if let existingWindow = NSApp.windows.first(where: { $0.identifier == identifier }) {
-            // The feedback window is app-global; rebind it to the window now
-            // reopening it so the report's window-scoped context (Chromium system
-            // logs, focusingTab fallback) follows the current window, then refresh
-            // the crash context (else it keeps the previously-shown tab's url/title).
-            if let fvc = existingWindow.contentViewController as? FeedbackViewController {
-                fvc.rebindHost(self)
-                fvc.setCrashContextTab(crashContextTab)
-            }
-            existingWindow.makeKeyAndOrderFront(nil)
-            return
-        }
-
-        let vc = FeedbackViewController(host: self)
-        vc.setCrashContextTab(crashContextTab)
-        let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 520, height: 580),
-            styleMask: [.titled, .closable],
-            backing: .buffered,
-            defer: false
-        )
-        window.identifier = identifier
-        window.center()
-        window.isReleasedWhenClosed = false
-        window.title = NSLocalizedString("Send Feedback to Phi", comment: "Feedback window - Window title for feedback submission")
-        window.contentViewController = vc
-        window.makeKeyAndOrderFront(nil)
-    }
     
     /// Stable key for associating the long-lived import view controller with its
     /// window, so a re-invocation can retarget it (see `objc_setAssociatedObject`).

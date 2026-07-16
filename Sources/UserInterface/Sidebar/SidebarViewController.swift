@@ -50,30 +50,16 @@ class SidebarViewController: NSViewController {
     /// SwiftUI-backed bottom toolbar.
     private(set) lazy var bottomBarSwiftUI: SidebarBottomBarSwiftUIView = {
         let view = SidebarBottomBarSwiftUIView()
-        view.onFeedbackTap = { [weak self] in
-            self?.state.windowController?.showFeedbackWindow()
-        }
+        view.onFeedbackTap = {}
         view.onBookmarkTap = { [weak self] in
             let url = "phi://bookmarks"
             self?.state.openTab(URLProcessor.processUserInput(url))
         }
-        view.onChatTap = { [weak self] in
-            guard let self else { return }
-            // Defense in depth: chat entry should be hidden in placeholder
-            // mode. Early-return if a stale tap reaches this handler.
-            guard self.state.isInPlaceholderMode == false,
-                  self.state.groupOverviewState == nil else {
-                NSSound.beep()
-                return
-            }
-            self.state.toggleAIChat()
-        }
+        view.onChatTap = {}
         view.onCardEntryTap = { [weak self] in
             self?.showMessageCardTemporarily()
         }
-        view.onMemoryTap = {
-            BrowserState.currentState()?.createTab("chrome://memory/memory.html", focusAfterCreate: true)
-        }
+        view.onMemoryTap = {}
         return view
     }()
     
@@ -218,9 +204,9 @@ class SidebarViewController: NSViewController {
     // MARK: - Lifecycle
     
     override func loadView() {
-        let view = ColoredVisualEffectView()
-        view.themedBackgroundColor = .windowOverlayBackground
-        view.material = .fullScreenUI
+        let view = NSView()
+        view.wantsLayer = true
+        view.phiLayer?.setBackgroundColor(.windowOverlayBackground)
         self.view = view
     }
     
@@ -331,15 +317,16 @@ class SidebarViewController: NSViewController {
         // is not incognito (see `setupView`), and more than one Space exists
         // (see `SidebarHeaderView.updateSpaceSwitchVisibility`). Reserve its
         // height under the exact same condition, or the header would keep an
-        // empty 32pt gap below the address bar for a row that isn't shown.
+        // empty gap below the address bar for a row that isn't shown.
         let spacesEnabled = PhiPreferences.GeneralSettings.spacesFeatureEnabled.loadValue()
             && state.participatesInSpaces
             && (SpaceManager.shared.spaces.count > 1 || headerView.forcesSpaceSwitchVisible)
         // Base = nav row (+ address bar in sidebar layouts). The Spaces switch
-        // row adds 32 (24 row + 8 gap) only when the row is shown, so the header
-        // reclaims the row's height when the row is hidden.
+        // row adds its control height plus the 8pt gap only when shown, so the
+        // header reclaims the row's height when the row is hidden.
         let base: CGFloat = addressInSidebar ? 80 : 42
-        let headerHeight = base + (spacesEnabled ? 32 : 0)
+        let spaceSwitchHeight = SpacesStripView.sidebarHeight + 8
+        let headerHeight = base + (spacesEnabled ? spaceSwitchHeight : 0)
         headerHeightConstraint?.update(offset: headerHeight)
     }
 

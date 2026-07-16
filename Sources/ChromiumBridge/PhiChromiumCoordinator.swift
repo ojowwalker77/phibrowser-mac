@@ -30,7 +30,7 @@ import SwiftUI
 }
 
 extension PhiChromiumCoordinator: PhiChromiumBridgeDelegate {
-    func shouldEnablePhiExtensions() -> Bool { PhiPreferences.AISettings.phiAIEnabled.loadValue() }
+    func shouldEnablePhiExtensions() -> Bool { false }
 
     func isBackupImporting() -> Bool { isBackupImportInProgress }
 
@@ -43,18 +43,11 @@ extension PhiChromiumCoordinator: PhiChromiumBridgeDelegate {
     }
 
     func toggleChatSidebar(_ show: NSNumber?) {
-        guard let state = MainBrowserWindowControllersManager.shared.activeWindowController?.browserState else {
-            return
-        }
-        if let show {
-            state.toggleAIChat(!show.boolValue)
-        } else {
-            state.toggleAIChat()
-        }
+        // Compatibility callback for framework builds that still expose it.
     }
 
     func showFeedbackDialog() {
-        MainBrowserWindowControllersManager.shared.activeWindowController?.showFeedbackWindow()
+        // Feedback uploading is not part of the local-only fork.
     }
 
     func downloadEventOccurred(_ eventType: DownloadEventType, guid: String, downloadItem: (any DownloadItemWrapper)?) {
@@ -110,7 +103,7 @@ extension PhiChromiumCoordinator: PhiChromiumBridgeDelegate {
     }
     
     func getNativeSettings() -> String {
-        return PhiPreferences.AISettings.buildConfig()
+        PhiPreferences.AISettings.buildConfig()
     }
     
     func handleDeeplink(withUrlString urlString: String, windowId: Int64) -> Bool {
@@ -172,11 +165,7 @@ extension PhiChromiumCoordinator: PhiChromiumBridgeDelegate {
                     theme = ThemeManager.shared.currentTheme
                 }
                 let themeNSColor = theme.color(for: .themeColor, appearance: appearance)
-                // Contrast is computed on the opaque color, then the row is
-                // tinted with the theme's overlay opacity (the Opacity setting)
-                // so the item background is translucent like the box.
                 let legible: NSColor = themeNSColor.isLight() ? .black : .white
-                let opacity = theme.windowOverlayOpacity(for: appearance)
                 // The generic Incognito choice is "current" whenever the
                 // navigation started in any Incognito Space — that Space is
                 // what the choice resolves to.
@@ -187,13 +176,11 @@ extension PhiChromiumCoordinator: PhiChromiumBridgeDelegate {
                     name: space.name,
                     iconName: space.iconName,
                     isCurrent: isCurrent,
-                    themeColor: Color(nsColor: themeNSColor.withAlphaComponent(opacity)),
+                    themeColor: Color(nsColor: themeNSColor),
                     textColor: Color(nsColor: legible))
             }
 
-            // The box's translucency follows the current Space's theme overlay
-            // opacity (the Opacity setting in General settings), so it matches
-            // the window it sits over.
+            // The chooser uses the same opaque surface as the current Space.
             let currentTheme: Theme
             if let pinnedId = manager.themeId(forSpaceId: currentSpaceId),
                let pinned = ThemeManager.shared.registeredThemes[pinnedId] {
@@ -326,23 +313,20 @@ extension PhiChromiumCoordinator: PhiChromiumBridgeDelegate {
     }
     
     func isUserLoggedIn() -> Bool {
-        let isLoggedIn = AuthManager.shared.checkLoginStatusOnChromiumLaunch()
-        AppLogDebug("🌐 [Chromium] isUserLoggedIn check: \(isLoggedIn)")
-        return isLoggedIn
+        true
     }
     
     func showLoginUI() {
-        AppLogInfo("🌐 [Chromium] showLoginUI called by Chromium")
+        // Retained for compatibility with the embedded framework protocol.
+        // The local-only browser has no login UI.
         Task { @MainActor in
-            LoginController.shared.showLoginWindow()
+            OnboardingController.shared.showIfNeeded()
         }
     }
     
     func getAuth0AccessTokenSyncly() -> String {
-        let token = AuthManager.shared.getAccessTokenSyncly() ?? ""
-        let hasToken = !token.isEmpty
-        AppLogDebug("🌐 [Chromium] getAuth0AccessTokenSyncly called - hasToken: \(hasToken)")
-        return token
+        // Retained for compatibility with the embedded framework protocol.
+        ""
     }
     
     func mainBrowserWindowCreated(_ window: NSWindow, type browserType: ChromiumBrowserType, profileId: String, windowId: Int64) {
@@ -503,7 +487,7 @@ extension PhiChromiumCoordinator: PhiChromiumBridgeDelegate {
             } else {
                 AppLogInfo("🌐 Shadow window controller initialized but hidden.")
             }
-            AppLogInfo("🌐 [Chromium] ✅ Window controller created and displayed (user logged in)")
+            AppLogInfo("🌐 [Chromium] ✅ Window controller created and displayed")
         } else {
             AppLogInfo("🌐 [Chromium] User not logged in, adding window as dangling window")
             MainBrowserWindowControllersManager.shared.addDanglingWindow(
@@ -515,14 +499,7 @@ extension PhiChromiumCoordinator: PhiChromiumBridgeDelegate {
                 slot: resolvedSlot
             )
             
-            DispatchQueue.main.async {
-                LoginController.shared.showLoginWindow()
-                if let loginWindow = LoginController.shared.loginWindowController?.window {
-                    loginWindow.makeKeyAndOrderFront(nil)
-                    NSApp.activate(ignoringOtherApps: true)
-                }
-            }
-            AppLogInfo("🌐 [Chromium] ✅ Window stored as dangling, login window will be shown")
+            AppLogInfo("🌐 [Chromium] ✅ Duplicate window stored as dangling")
         }
     }
     

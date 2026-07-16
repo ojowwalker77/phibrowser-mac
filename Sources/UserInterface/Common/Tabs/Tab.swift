@@ -101,17 +101,28 @@ class Tab: WebContentRepresentable {
     /// (the tab's `webContentView` is intentionally NOT niled on crash).
     @Published var crashState: CrashPageData?
 
-    /// Use native NTP rendering when the tab URL is an NTP URL.
-    /// Only ever set for off-the-record tabs (see
-    /// `BrowserState.consumePendingNativeNTP`). The flag is set after the
+    /// Use Phi's native NTP rendering when the tab URL is an NTP URL.
+    /// The flag is set after the
     /// title binding's initial emission, so re-derive the placeholder title
     /// on the flip — without this the sidebar keeps the raw
     /// "chrome://newtab/" Chromium reported before the mark arrived.
     var usesNativeNTP: Bool = false {
         didSet {
             guard usesNativeNTP, !oldValue else { return }
-            applyIncognitoNTPTitleIfUntitled()
+            applyNativeNTPTitleIfUntitled()
         }
+    }
+    private var nativeNTPTitle = NSLocalizedString(
+        "New Tab",
+        comment: "Tab title shown for a regular tab rendered by the native NTP"
+    )
+
+    func configureNativeNTP(isIncognito: Bool) {
+        nativeNTPTitle = isIncognito ? Self.incognitoNewTabTitle : NSLocalizedString(
+            "New Tab",
+            comment: "Tab title shown for a regular tab rendered by the native NTP"
+        )
+        usesNativeNTP = true
     }
 
     /// Whether this tab is currently rendered by the native NTP view (rather
@@ -285,12 +296,7 @@ class Tab: WebContentRepresentable {
                 if let localTitle = self.storedTitle, !localTitle.isEmpty {
                     self.title = localTitle
                 } else if self.usesNativeNTP, Self.isUntitledNTPTitle(title, url: self.url) {
-                    // A blank off-the-record chrome://newtab has no page
-                    // title, so Chromium reports the raw URL — e.g. in an
-                    // Incognito Space's dedicated OTR profile, whose NTP
-                    // WebUI does not load. Show the incognito NTP name the
-                    // primary OTR profile's real NTP would carry.
-                    self.title = Self.incognitoNewTabTitle
+                    self.title = self.nativeNTPTitle
                 } else {
                     self.title = title
                 }
@@ -398,14 +404,14 @@ class Tab: WebContentRepresentable {
         "New Incognito Tab",
         comment: "Tab title shown for an incognito new-tab page rendered by the native NTP")
 
-    /// Replace an untitled newtab title with the incognito NTP placeholder.
+    /// Replace an untitled new-tab title with the native NTP placeholder.
     /// Called when `usesNativeNTP` flips on, catching titles that arrived
     /// before the mark; later Chromium title updates go through the same
     /// check in the title binding.
-    private func applyIncognitoNTPTitleIfUntitled() {
+    private func applyNativeNTPTitleIfUntitled() {
         guard storedTitle?.isEmpty != false,
               Self.isUntitledNTPTitle(title, url: url) else { return }
-        title = Self.incognitoNewTabTitle
+        title = nativeNTPTitle
     }
 
     /// True when Chromium supplied no real page title for a new-tab page:

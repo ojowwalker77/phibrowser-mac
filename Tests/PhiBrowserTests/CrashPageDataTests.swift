@@ -56,9 +56,10 @@ final class CrashPageDataTests: XCTestCase {
         XCTAssertEqual(data.primaryAction, .reload)
     }
 
-    func testPrimaryActionIsFeedbackWhenFeedbackButtonOn() {
+    func testPrimaryActionIsReloadWhenLegacyFeedbackButtonIsOn() {
         let data = CrashPageData(dictionary: dict(showFeedback: true))
-        XCTAssertEqual(data.primaryAction, .feedback)
+        XCTAssertEqual(data.primaryAction, .reload)
+        XCTAssertEqual(data.buttonLabel, "Reload")
         XCTAssertTrue(data.showFeedbackButton)
     }
 

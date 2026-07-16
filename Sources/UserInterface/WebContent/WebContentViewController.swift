@@ -226,10 +226,9 @@ class WebContentViewController: NSViewController {
     }()
 
     override func loadView() {
-        let view = ColoredVisualEffectView()
-        view.themedBackgroundColor = .windowOverlayBackground
-        view.material = .fullScreenUI
+        let view = NSView()
         view.wantsLayer = true
+        view.phiLayer?.setBackgroundColor(.windowBackground)
         self.view = view
         setupView()
     }
@@ -454,33 +453,6 @@ class WebContentViewController: NSViewController {
                 self?.updateTheme()
             }
             .store(in: &cancellables)
-
-        AgentAnimationManager.shared.stateChanged
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] tabId in
-                guard let self, self.associatedTab?.guid == tabId else { return }
-                self.updateAgentAnimationOverlay()
-            }
-            .store(in: &cancellables)
-        updateAgentAnimationOverlay()
-
-        AgentSpaceManager.shared.$tasksBySpaceId
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] tasks in
-                self?.updateAgentSpaceOverlay(tasks: tasks)
-            }
-            .store(in: &cancellables)
-        updateAgentSpaceOverlay()
-
-        AgentSpaceManager.shared.effectRequested
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] effect in
-                self?.playAgentSpaceEffect(effect)
-            }
-            .store(in: &cancellables)
-
-        // Observe AI Chat collapse state once the split item exists.
-        setupAIChatObserver()
 
         browserState?.$sidebarCollapsed
             .receive(on: DispatchQueue.main)
@@ -987,17 +959,6 @@ class WebContentViewController: NSViewController {
         webContentSplitViewItem.holdingPriority = .init(rawValue: 240)
         contentSplitViewController.addSplitViewItem(webContentSplitViewItem)
         
-        // Skip AI Chat entirely in incognito mode.
-        guard browserState?.isIncognito != true, let chatVC = embeddedChatViewController else { return }
-        
-        let aiChatSplitViewItem = NSSplitViewItem(viewController: chatVC)
-        aiChatSplitViewItem.minimumThickness = 300
-        aiChatSplitViewItem.maximumThickness = 800
-        aiChatSplitViewItem.canCollapse = true
-        aiChatSplitViewItem.isCollapsed = true
-        aiChatSplitViewItem.holdingPriority = .init(rawValue: 260)
-        contentSplitViewController.addSplitViewItem(aiChatSplitViewItem)
-        self.aiChatSplitViewItem = aiChatSplitViewItem
     }
     
     /// Returns the splitView container's frame in the given coordinate space —

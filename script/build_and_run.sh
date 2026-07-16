@@ -6,9 +6,8 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DERIVED_DATA="$ROOT_DIR/.derivedData"
 APP_NAME="Phi"
 APP_BUNDLE="$DERIVED_DATA/Build/Products/OpenSource/Phi.app"
-BUNDLE_ID="com.ojowwalker77.PhiBrowser"
+BUNDLE_ID="com.phibrowser.Mac"
 
-pkill -x "$APP_NAME" >/dev/null 2>&1 || true
 "$ROOT_DIR/script/fetch_phi_framework.sh"
 
 xcodebuild \
@@ -23,7 +22,23 @@ xcodebuild \
   CODE_SIGNING_REQUIRED=NO \
   build
 
+stop_running_phi() {
+  # The OpenSource build shares the installed app's Chromium and Swift data.
+  # Chromium profiles are single-writer: never launch either app while another
+  # Phi process still owns the profile lock.
+  pkill -x "$APP_NAME" >/dev/null 2>&1 || true
+  for _ in {1..50}; do
+    if ! pgrep -x "$APP_NAME" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 0.1
+  done
+  echo "Phi is still running; quit it before launching the shared development profile." >&2
+  return 1
+}
+
 open_app() {
+  stop_running_phi
   /usr/bin/open -n "$APP_BUNDLE"
 }
 
@@ -32,6 +47,7 @@ case "$MODE" in
     open_app
     ;;
   --debug|debug)
+    stop_running_phi
     lldb -- "$APP_BUNDLE/Contents/MacOS/Phi"
     ;;
   --logs|logs)

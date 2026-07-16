@@ -187,11 +187,7 @@ struct CommandDispatcher {
         case .PHI_SELECT_PREVIOUS_SPACE:
             return activateSpace(by: -1, from: windowController)
         case .PHI_FARRINGDON_TOGGLE:
-            guard FarringdonOrganizer.canOrganizeTabs(in: windowController.browserState) else {
-                return false
-            }
-            FarringdonOrganizer.organizeFocusedWindow()
-            return true
+            return false
         case .PHI_COPY_URL:
             let state = windowController.browserState
             let copiedURLCount = state.selectedTabCountForURLCopy
@@ -208,8 +204,7 @@ struct CommandDispatcher {
             windowController.newBrowserTab(nil)
             return true
         case .IDC_FEEDBACK:
-            windowController.showFeedbackWindow()
-            return true
+            return false
         case .IDC_IMPORT_SETTINGS:
             // Import targets the active Space's profile; off-the-record
             // windows (standalone incognito and the Incognito Space) have
@@ -263,7 +258,6 @@ struct CommandDispatcher {
 
     private static var spacesShortcutsEnabled: Bool {
         PhiPreferences.GeneralSettings.spacesFeatureEnabled.loadValue()
-        && LoginController.shared.isLoggedin()
     }
     
     @MainActor

@@ -58,15 +58,7 @@ final class RendererCrashViewController: NSViewController {
     /// `showFeedbackButton`: reload normally, send-feedback when repeatedly
     /// crashing. The label (`buttonLabel`) already matches the chosen role.
     private func performPrimaryAction() {
-        switch data.primaryAction {
-        case .reload:
-            host?.browserState.resolveTab(tabId)?.reload()
-        case .feedback:
-            guard let host else { return }
-            // Pass THIS crashed tab so feedback prefills its url/title regardless
-            // of focus (a split partner pane's crash isn't the focused tab).
-            host.showFeedbackWindow(crashContextTab: host.browserState.resolveTab(tabId))
-        }
+        host?.browserState.resolveTab(tabId)?.reload()
     }
 
     private func openHelpLink() {

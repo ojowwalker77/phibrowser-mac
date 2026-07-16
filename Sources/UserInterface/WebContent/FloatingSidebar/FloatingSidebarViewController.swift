@@ -102,30 +102,16 @@ class FloatingSidebarViewController: NSViewController {
 
     private(set) lazy var bottomBarSwiftUI: SidebarBottomBarSwiftUIView = {
         let view = SidebarBottomBarSwiftUIView()
-        view.onFeedbackTap = { [weak self] in
-            self?.state.windowController?.showFeedbackWindow()
-        }
+        view.onFeedbackTap = {}
         view.onBookmarkTap = { [weak self] in
             let url = "phi://bookmarks"
             self?.state.openTab(URLProcessor.processUserInput(url))
         }
-        view.onChatTap = { [weak self] in
-            guard let self else { return }
-            // Defense in depth: chat entry should be hidden in placeholder
-            // mode. Early-return if a stale tap reaches this handler.
-            guard self.state.isInPlaceholderMode == false,
-                  self.state.groupOverviewState == nil else {
-                NSSound.beep()
-                return
-            }
-            self.state.toggleAIChat()
-        }
+        view.onChatTap = {}
         view.onCardEntryTap = {
             NotificationCardManager.shared.showManually(for: .sidebar)
         }
-        view.onMemoryTap = {
-            BrowserState.currentState()?.createTab("chrome://memory/memory.html", focusAfterCreate: true)
-        }
+        view.onMemoryTap = {}
         return view
     }()
 
@@ -154,20 +140,10 @@ class FloatingSidebarViewController: NSViewController {
     }
 
     override func loadView() {
-        let view: NSView
-        if #available(macOS 26, *) {
-            view = NSView()
-            view.wantsLayer = true
-            view.phiLayer?.setBackgroundColor(.windowOverlayBackground)
-            
-        } else {
-            let _view = ColoredVisualEffectView()
-            _view.themedBackgroundColor = .windowOverlayBackground
-            _view.blendingMode = .behindWindow
-            view = _view
-        }
+        let view = NSView()
+        view.wantsLayer = true
+        view.phiLayer?.setBackgroundColor(.windowOverlayBackground)
         self.view = view
-       
     }
 
     override func viewDidLoad() {
@@ -545,13 +521,15 @@ class FloatingSidebarViewController: NSViewController {
         // Reserve the Spaces switch row's height under the exact conditions
         // the header shows the row (see
         // `SidebarHeaderView.updateSpaceSwitchVisibility`), mirroring the
-        // docked sidebar's updateHeaderHeight: the row adds 32 (24 row + 8
-        // gap) only while shown, so the header reclaims it when hidden.
+        // docked sidebar's updateHeaderHeight: the row adds its control height
+        // plus the 8pt gap only while shown, so the header reclaims it when
+        // hidden.
         let spacesEnabled = PhiPreferences.GeneralSettings.spacesFeatureEnabled.loadValue()
             && state.participatesInSpaces
             && (SpaceManager.shared.spaces.count > 1 || headerView.forcesSpaceSwitchVisible)
         let base: CGFloat = showInSidebar ? 73 : 41
-        let headerHeight = base + (spacesEnabled ? 32 : 0)
+        let spaceSwitchHeight = SpacesStripView.sidebarHeight + 8
+        let headerHeight = base + (spacesEnabled ? spaceSwitchHeight : 0)
         headerHeightConstraint?.update(offset: headerHeight)
     }
 

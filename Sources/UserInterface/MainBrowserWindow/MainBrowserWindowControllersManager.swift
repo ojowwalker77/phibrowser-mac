@@ -54,7 +54,7 @@ class MainBrowserWindowControllersManager: MainBrowserWindowLookup {
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(handleLoginCompleted),
-            name: .loginCompleted,
+            name: .onboardingCompleted,
             object: nil
         )
     }

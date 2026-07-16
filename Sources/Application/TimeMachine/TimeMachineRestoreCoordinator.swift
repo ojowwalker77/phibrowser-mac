@@ -89,7 +89,7 @@ struct TimeMachineRestoreCoordinator {
         fileCloner: TimeMachineFileCloner = TimeMachineFileCloner(),
         journalStore: TimeMachineRestoreJournalStore? = nil,
         progressHandler: ProgressHandler? = nil,
-        restorePreparationTraceReporter: @escaping RestorePreparationTraceReporter = SentryService.captureTimeMachineRestorePreparationTrace,
+        restorePreparationTraceReporter: @escaping RestorePreparationTraceReporter = { _ in },
         fileManager: FileManager = .default
     ) {
         self.paths = paths

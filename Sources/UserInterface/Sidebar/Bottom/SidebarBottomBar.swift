@@ -94,20 +94,8 @@ struct SidebarBottomBarSwiftUI: View {
     private var regularLayout: some View {
         HStack(spacing: 4) {
             downloadButton
-
-            memoryButton
-
             cardEntryButton
-
             Spacer(minLength: 0)
-
-            FeedbackButtonSwiftUI(action: onFeedbackTap, isIconOnly: state.isFeedbackCompact)
-                .layoutPriority(1)
-
-            if !state.isChatHidden {
-                ChatButton(action: onChatTap)
-                    .layoutPriority(1)
-            }
         }
         .padding(.horizontal, WebContentConstant.edgesSpacing)
     }
@@ -143,24 +131,14 @@ struct SidebarBottomBarSwiftUI: View {
         VStack(spacing: SidebarBottomBarState.rowSpacing) {
             HStack(spacing: 2) {
                 downloadButton
-
-                memoryButton
-
                 cardEntryButton
-
                 Spacer()
-
-                if !state.isChatHidden {
-                    ChatButton(action: onChatTap)
-                }
+                Spacer()
             }
             .padding(.leading, WebContentConstant.edgesSpacing)
             .frame(height: SidebarBottomBarState.singleRowHeight)
             .animation(showCardEntry ? .spring(response: 0.28, dampingFraction: 0.78) : nil, value: showCardEntry)
             
-            FeedbackButtonSwiftUI(action: onFeedbackTap, isIconOnly: false)
-                .padding(.leading, 8)
-                .frame(height: SidebarBottomBarState.singleRowHeight)
         }
     }
 

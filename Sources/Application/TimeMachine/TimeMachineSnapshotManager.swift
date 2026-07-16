@@ -57,7 +57,7 @@ struct TimeMachineSnapshotManager {
         uptimeProvider: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
         idProvider: @escaping () -> UUID = UUID.init,
         fileCloner: TimeMachineFileCloner = TimeMachineFileCloner(),
-        backupTraceReporter: @escaping BackupTraceReporter = SentryService.captureTimeMachineBackupTrace,
+        backupTraceReporter: @escaping BackupTraceReporter = { _ in },
         fileManager: FileManager = .default
     ) {
         self.paths = paths

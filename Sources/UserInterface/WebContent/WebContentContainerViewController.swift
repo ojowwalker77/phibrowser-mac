@@ -260,10 +260,9 @@ class WebContentContainerViewController: NSViewController {
     // MARK: - Lifecycle
     
     override func loadView() {
-        let view = ColoredVisualEffectView()
-        view.themedBackgroundColor = .windowOverlayBackground
-        view.material = .fullScreenUI
+        let view = NSView()
         view.wantsLayer = true
+        view.phiLayer?.setBackgroundColor(.windowBackground)
         self.view = view
     }
     

@@ -104,7 +104,10 @@ class MainBrowserWindowController: NSWindowController {
         
         originalContentView = window.contentView
         
-        window.backgroundColor = NSColor.windowBackgroundColor
+        window.backgroundColor = browserState.themeContext.currentTheme.color(
+            for: .windowBackground,
+            appearance: browserState.themeContext.currentAppearance
+        )
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
         window.isMovableByWindowBackground = true
@@ -194,11 +197,16 @@ class MainBrowserWindowController: NSWindowController {
     }
 
     private func applyThemeAppearance(to window: NSWindow) {
-        let appearance = browserState.themeContext.windowAppearance
-        window.appearance = appearance
-        window.contentView?.appearance = appearance
-        contentViewController?.view.appearance = appearance
-        mainSplitViewController.view.appearance = appearance
+        let context = browserState.themeContext
+        let windowAppearance = context.windowAppearance
+        window.appearance = windowAppearance
+        window.backgroundColor = context.currentTheme.color(
+            for: .windowBackground,
+            appearance: context.currentAppearance
+        )
+        window.contentView?.appearance = windowAppearance
+        contentViewController?.view.appearance = windowAppearance
+        mainSplitViewController.view.appearance = windowAppearance
     }
     
     private func setupContentView() {

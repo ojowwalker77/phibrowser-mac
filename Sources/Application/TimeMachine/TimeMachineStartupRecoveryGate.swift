@@ -25,7 +25,7 @@ struct TimeMachineStartupRecoveryGate {
         isExecutableFile: @escaping (String) -> Bool = FileManager.default.isExecutableFile(atPath:),
         recoveryLauncher: @escaping RecoveryLauncher = Self.launchRecoveryProcess,
         dateProvider: @escaping () -> Date = Date.init,
-        restoreRecoveryTraceReporter: @escaping RestoreRecoveryTraceReporter = SentryService.captureTimeMachineRestoreRecoveryTrace,
+        restoreRecoveryTraceReporter: @escaping RestoreRecoveryTraceReporter = { _ in },
         logger: @escaping (String) -> Void = { AppLogInfo("[TimeMachine] \($0)") }
     ) {
         self.paths = paths

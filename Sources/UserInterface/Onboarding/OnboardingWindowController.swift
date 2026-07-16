@@ -4,82 +4,42 @@
 // found in the LICENSE file.
 
 import Cocoa
-import Auth0
 
-extension NSNotification.Name {
-    static let loginCompleted = NSNotification.Name("LoginCompleted")
+extension Notification.Name {
+    static let onboardingCompleted = Notification.Name("OnboardingCompleted")
 }
 
-class OnboardingWindowController: NSWindowController {
-    private lazy var loginViewController: LoginViewController = {
-        let vc = LoginViewController()
-        vc.onLoginSuccess = { [weak self] credentials in
-            guard let credentials, let self else { return }
-            self.routeToCurrentPhase(using: credentials)
-        }
-        return vc
-    }()
-    
-    private lazy var welcomeViewController: OnboardingWelcomeViewController = {
-        let vc = OnboardingWelcomeViewController()
-        vc.nextClosure = { [weak self] _ in
-            guard let self else { return }
-            LoginController.shared.phase = .layoutSelection
-            ChromiumLauncher.sharedInstance().bridge?.notifyLoginCompleted()
-            setContent(layoutSelectionViewController)
-        }
-        return vc
-    }()
-
+/// Lightweight local first-run setup. Authentication and cloud-account setup
+/// deliberately do not belong in this flow.
+final class OnboardingWindowController: NSWindowController {
     private lazy var layoutSelectionViewController: LayoutSelectionViewController = {
-        let vc = LayoutSelectionViewController()
-        vc.nextClosure = { [weak self] next in
-            guard let self else { return }
-            if next {
-                LoginController.shared.phase = .importData
-                setContent(importViewController)
-            } else {
-                self.showPasswordManagerPage()
-            }
+        let controller = LayoutSelectionViewController()
+        controller.nextClosure = { [weak self] _ in
+            OnboardingController.shared.phase = .importData
+            self?.setContent(self?.importViewController)
         }
-        return vc
+        return controller
     }()
 
     private lazy var importViewController: ImportFromOtherBrowserViewController = {
-        let vc = ImportFromOtherBrowserViewController()
-        vc.onCompletion = { [weak self] in
-            guard let self else { return }
-            self.showPasswordManagerPage()
+        let controller = ImportFromOtherBrowserViewController()
+        controller.onCompletion = { [weak self] in
+            self?.showPasswordManagerPage()
         }
-        vc.nextClosure = { [weak self] next in
-            guard let self else { return }
-            if !next {
-                self.showPasswordManagerPage()
-            }
+        controller.nextClosure = { [weak self] _ in
+            self?.showPasswordManagerPage()
         }
-        return vc
+        return controller
     }()
 
     private lazy var passwordManagerViewController: PasswordManagerViewController = {
-        let vc = PasswordManagerViewController()
-        vc.nextClosure = { [weak self] _ in
-            guard let self else { return }
-            self.finish()
+        let controller = PasswordManagerViewController()
+        controller.nextClosure = { [weak self] _ in
+            self?.finish()
         }
-        return vc
+        return controller
     }()
 
-    private lazy var setNameViewController: SetNameViewController = {
-        let vc = SetNameViewController()
-        vc.newNameSettled = { [weak self] name in
-            guard let self else { return }
-            LoginController.shared.phase = .setTheme
-            welcomeViewController.userName = name
-            setContent(welcomeViewController)
-        }
-        return vc
-    }()
-    
     convenience init() {
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 640, height: 800),
@@ -90,108 +50,38 @@ class OnboardingWindowController: NSWindowController {
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
         window.isReleasedWhenClosed = false
-        window.animationBehavior = .default
 
-        
-        self.init(window: window)        
-        setupContentViewController()
+        self.init(window: window)
+        setContent(viewController(for: OnboardingController.shared.phase))
     }
 
-    private func setupContentViewController() {
-        let contentVc: NSViewController = {
-            if let credentials = AuthManager.shared.currentCredentials {
-                LoginController.shared.initAccountIfNeeded(credentials)
-                let loginPhase = LoginController.shared.phase
-                guard loginPhase != .done else {
-                    DispatchQueue.main.async { [weak self] in
-                        self?.finish()
-                    }
-                    return loginViewController
-                }
-                return viewController(for: loginPhase, credentials: credentials, isFirstPage: true)
-            }
-
-            if let storedUserInfo = AuthManager.shared.storedUserInfo() {
-                LoginController.shared.initAcoountWithUserInfo(storedUserInfo)
-                let loginPhase = LoginController.shared.phase
-                guard loginPhase != .done else {
-                    DispatchQueue.main.async { [weak self] in
-                        self?.finish()
-                    }
-                    return loginViewController
-                }
-                return viewController(for: loginPhase, credentials: nil, isFirstPage: true)
-            }
-
-            return loginViewController
-        }()
-        contentViewController = contentVc
-    }
-    
-    // MARK: - Content Management
-
-    private func setContent(_ vc: NSViewController) {
-        window?.contentViewController = vc
-    }
-    
-    private func routeToCurrentPhase(using credentials: Credentials) {
-        let loginPhase = LoginController.shared.phase
-        guard loginPhase != .done else {
-            finish()
-            return
-        }
-
-        setContent(viewController(for: loginPhase, credentials: credentials, isFirstPage: false))
-    }
-
-    private func viewController(for phase: LoginController.Phase, credentials: Credentials?, isFirstPage: Bool) -> NSViewController {
-        setNameViewController.isFisrtPage = false
-        importViewController.isFisrtPage = false
-        passwordManagerViewController.isFisrtPage = false
-
+    private func viewController(for phase: OnboardingController.Phase) -> NSViewController {
         switch phase {
-        case .login:
-            return loginViewController
-        case .setName:
-            setNameViewController.credentials = credentials
-            setNameViewController.isFisrtPage = isFirstPage
-            return setNameViewController
-        case .setTheme:
-            if let credentials {
-                let user = AuthManager.retriveUserInfo(from: credentials)
-                welcomeViewController.userName = user.name
-            } else {
-                welcomeViewController.userName = AccountController.shared.account?.userInfo?.name
-            }
-            return welcomeViewController
         case .layoutSelection:
             return layoutSelectionViewController
         case .importData:
-            importViewController.isFisrtPage = isFirstPage
             return importViewController
         case .passwordManager:
-            passwordManagerViewController.isFisrtPage = isFirstPage
             return passwordManagerViewController
         case .done:
-            return loginViewController
+            return layoutSelectionViewController
         }
     }
 
+    private func setContent(_ controller: NSViewController?) {
+        guard let controller else { return }
+        window?.contentViewController = controller
+    }
+
     private func showPasswordManagerPage() {
-        LoginController.shared.phase = .passwordManager
+        OnboardingController.shared.phase = .passwordManager
         setContent(passwordManagerViewController)
     }
 
     private func finish() {
-        LoginController.shared.phase = .done
+        OnboardingController.shared.phase = .done
         close()
-        
-        if MainBrowserWindowControllersManager.shared.getFirstAvailableWindowId() == nil {
-            ChromiumLauncher.sharedInstance().bridge?.applicationShouldHandleReopen(NSApp, hasVisibleWindows: false)
-            NotificationCenter.default.post(name: .loginCompleted, object: nil)
-        } else {
-            ChromiumLauncher.sharedInstance().bridge?.notifyRebuildMenuAfterLogin()
-            NotificationCenter.default.post(name: .loginCompleted, object: nil)
-        }
+        ChromiumLauncher.sharedInstance().bridge?.notifyRebuildMenuAfterLogin()
+        NotificationCenter.default.post(name: .onboardingCompleted, object: nil)
     }
 }

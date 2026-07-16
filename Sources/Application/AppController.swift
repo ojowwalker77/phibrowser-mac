@@ -4,15 +4,11 @@
 // found in the LICENSE file.
 
 import Cocoa
-import AuthenticationServices
 import SwiftData
 import CocoaLumberjackSwift
 import Kingfisher
-import Auth0
 import Sparkle
-import WebKit
 import Settings
-import PostHog
 
 @objc class AppController: NSObject, NSApplicationDelegate {
     @IBOutlet var window: NSWindow!
@@ -34,15 +30,11 @@ import PostHog
     
     var menuObservation: NSKeyValueObservation?
 
-    // MARK: - Auth0 login gating
-    private var pendingLaunchAfterLogin: Bool = true
-
     /// Defer forwarding cold-launch URLs until Chromium session restore registers
     /// the first tabbed `Browser` (see `OpenUrlsInBrowserWithProfile`).
     private static let coldOpenURLForwardDelay: TimeInterval = 0.5
     private var coldOpenURLForwardWorkItem: DispatchWorkItem?
     private var pendingColdOpenForwardURLs: [URL] = []
-    private var pendingOpenURLsAwaitingLoginStatus: [URL] = []
     /// Cached in `applicationWillFinishLaunching`; weak — owned by `ChromiumLauncher`, not AppController.
     private weak var chromiumBridge: (any PhiChromiumBridgeProtocol)?
 
@@ -63,36 +55,20 @@ import PostHog
     }
     
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // Chromium may query login state before launch completes, so refresh it first.
-        LoginController.shared.refreshLoginStatusOnLaunching()
-        
-        //        ASWebAuthenticationSessionWebBrowserSessionManager.shared.sessionHandler = self
-        
         ChromiumLauncher.sharedInstance().bridge?.applicationDidFinishLaunching(notification)
-        
-        //        ASWebAuthenticationSessionWebBrowserSessionManager.shared.sessionHandler = self
-        
+
+#if !DEBUG
         setupSparkle()
+#endif
         setupKinfisherCache()
-        
-        SentryService.setup()
-        
+
         MemoryUsageMonitor.shared.start()
-        
+
         DefaultExtensionManifestWriter.start()
-        FeedbackOutboxUploader.shared.start()
-        
+
         NotificationCenter.default.addObserver(self,
                                                selector: #selector(phiWillTryToTerminateApplicationNotification(_:)),
                                                name: Notification.Name("PhiWillTryToTerminateApplicationNotification"),
-                                               object: nil)
-        NotificationCenter.default.addObserver(self,
-                                               selector: #selector(loginStatusRefreshCompleted(_:)),
-                                               name: .loginStatusRefreshCompleted,
-                                               object: nil)
-        NotificationCenter.default.addObserver(self,
-                                               selector: #selector(loginCompleted(_:)),
-                                               name: .loginCompleted,
                                                object: nil)
         NotificationCenter.default.addObserver(self,
                                                selector: #selector(refreshSpacesMenuVisibility),
@@ -103,15 +79,8 @@ import PostHog
                                                name: .activeBrowserWindowDidChange,
                                                object: nil)
         
-        if PhiPreferences.AISettings.launchSentinelOnLogin.loadValue() {
-            SentinelHelper.register()
-        }
-        if PhiPreferences.AISettings.phiAIEnabled.loadValue() {
-            SentinelHelper.launch()
-            SentinelWatchdog.shared.start()
-        }
-        Task.detached(priority: .utility) {
-            await SentinelVersionGuard.shared.runStartupCheck()
+        Task { @MainActor in
+            OnboardingController.shared.showIfNeeded()
         }
     }
 
@@ -120,36 +89,14 @@ import PostHog
 
         // Register defaults before any settings are read.
         UserDefaultsRegistration.registerDefaults()
-        
+
+        // Phi is local-only: one stable account owns all Swift-side browser
+        // state, with no authentication or remote identity lifecycle.
+        AccountController.shared.account = Account.defaultAccount
+
         setupLogging()
-        // Wire the shared keychain store into AppLog so its keychain errors and
-        // retry recoveries land in the same log file as the rest of the app.
-        // Must happen before any auth flow (login / renew / launch recovery)
-        // touches `SharedAuthTokenStore`.
-        SharedAuthTokenStore.shared.logDelegate = SharedAuthTokenStoreLogBridge.shared
         AppLogInfo("------------------------------  Starting: \(Self.makeClientString())  ------------------------------")
         recordLaunchVersion()
-
-        // Set up PostHog before `didFinishLaunchingNotification` fires so the
-        // SDK can observe the app-opened lifecycle event. If either value is
-        // missing the app runs without analytics.
-        if let token = PostHogEnv.projectToken.value,
-           let host = PostHogEnv.host.value {
-            let postHogConfig = PostHogConfig(apiKey: token, host: host)
-            postHogConfig.captureApplicationLifecycleEvents = true
-            #if DEBUG
-            postHogConfig.debug = true
-            #endif
-            postHogConfig.setBeforeSend { event in
-                guard event.event == "$app_opened" else { return event }
-                event.properties["layout_mode"] = PhiPreferences.GeneralSettings.loadLayoutMode().rawValue
-                event.properties["ai_enabled"] = PhiPreferences.AISettings.phiAIEnabled.loadValue()
-                return event
-            }
-            PostHogSDK.shared.setup(postHogConfig)
-        } else {
-            AppLogInfo("PostHog: project token or host not set in PostHogConfig.generated.swift; skipping init")
-        }
 
         chromiumBridge?.applicationWillFinishLaunching(notification)
     }
@@ -195,66 +142,23 @@ import PostHog
     }
     
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
-        if LoginController.shared.orderFrontLoginWindowIfNeeded() {
-            LoginController.shared.showLoginWindow()
+        if SpaceManager.shared.reopenOnPersistedSpaceIfWindowless() {
             return true
-        } else {
-            // Only renew on reopen when the access token is actually close to
-            // expiring. Calling `renewCredentials()` on every reopen turned a
-            // routine UX gesture into a high-frequency RT-exchange trigger and
-            // amplified ferrt risk on stale RTs (see Auth0 incident
-            // 2026-04-22). The periodic renew timer still handles long-term
-            // freshness; this gate just removes the redundant burst on reopen.
-            if AuthManager.shared.shouldRenewOnReopen() {
-                AuthManager.shared.renewCredentials()
-            } else {
-                AppLogDebug("reopen: access token still fresh, skipping renew")
-            }
-            // With no surviving browser window, spawn the persisted
-            // last-active Space ourselves instead of letting Chromium's
-            // reopen create the window: Chromium seeds it from its own
-            // last-used-profile pref, which the window-close cascade
-            // pollutes, and the coordinator then re-resolves the Space to
-            // match that profile — reopening on the default Space instead
-            // of the one the user closed. See
-            // `SpaceManager.reopenOnPersistedSpaceIfWindowless`.
-            if SpaceManager.shared.reopenOnPersistedSpaceIfWindowless() {
-                return true
-            }
-            let handled = ChromiumLauncher.sharedInstance().bridge?.applicationShouldHandleReopen(sender, hasVisibleWindows: hasVisibleWindows) ?? false
-            // Chromium's reopen surfaces every browser window it owns, which
-            // un-hides the slots' hidden sibling Space windows. Re-assert the
-            // one-visible-window-per-slot invariant so only the active Space
-            // stays on screen.
-            SpaceManager.shared.reconcileSlotVisibilityAfterReopen()
-            return handled
         }
+        let handled = ChromiumLauncher.sharedInstance().bridge?.applicationShouldHandleReopen(sender, hasVisibleWindows: hasVisibleWindows) ?? false
+        SpaceManager.shared.reconcileSlotVisibilityAfterReopen()
+        return handled
     }
     
     func applicationDockMenu(_ sender: NSApplication) -> NSMenu? {
-        guard LoginController.shared.isLoggedin() else {
-            return nil
-        }
-        let menu = ChromiumLauncher.sharedInstance().bridge?.applicationDockMenu(sender)
-        return menu
+        ChromiumLauncher.sharedInstance().bridge?.applicationDockMenu(sender)
     }
     
     func application(_ application: NSApplication, open urls: [URL]) {
-        for url in urls where AuthManager.shared.resumeExternalBrowserAuthentication(with: url) {
+        if let url = urls.first, DeeplinkHandler.handle(url) {
             return
         }
-
-        if LoginController.shared.orderFrontLoginWindowIfNeeded() {
-            if AuthManager.shared.hasRecoverableLoginSession() {
-                pendingOpenURLsAwaitingLoginStatus.append(contentsOf: urls)
-            }
-            LoginController.shared.showLoginWindow()
-        } else {
-            if let url = urls.first, DeeplinkHandler.handle(url) {
-                return
-            }
-            scheduleForwardOpenURLsToChromium(application: application, urls: urls)
-        }
+        scheduleForwardOpenURLsToChromium(application: application, urls: urls)
     }
 
     /// Forwards `application(_:open:)` URLs to Chromium. Cold launch defers ~600ms so
@@ -314,46 +218,12 @@ import PostHog
         SpaceManager.shared.markTerminating()
     }
 
-    @objc private func loginStatusRefreshCompleted(_ notification: Notification) {
-        Task { @MainActor in
-            self.flushPendingOpenURLsAwaitingLoginStatus()
-        }
-    }
-
-    @objc private func loginCompleted(_ notification: Notification) {
-        Task { @MainActor in
-            self.flushPendingOpenURLsAwaitingLoginStatus()
-        }
-    }
-
     private func bindChromiumBridgeIfNeeded() {
         if chromiumBridge == nil {
             chromiumBridge = ChromiumLauncher.sharedInstance().bridge
         }
     }
 
-    @MainActor
-    private func flushPendingOpenURLsAwaitingLoginStatus() {
-        guard !pendingOpenURLsAwaitingLoginStatus.isEmpty else {
-            return
-        }
-
-        guard AuthManager.shared.hasRecoverableLoginSession() else {
-            pendingOpenURLsAwaitingLoginStatus.removeAll()
-            return
-        }
-
-        guard !LoginController.shared.orderFrontLoginWindowIfNeeded() else {
-            return
-        }
-
-        let urls = pendingOpenURLsAwaitingLoginStatus
-        pendingOpenURLsAwaitingLoginStatus.removeAll()
-        if let url = urls.first, DeeplinkHandler.handle(url) {
-            return
-        }
-        scheduleForwardOpenURLsToChromium(application: NSApp, urls: urls)
-    }
 }
 
 extension AppController {
@@ -389,15 +259,5 @@ extension AppController {
 extension AppController {
     private func setupKinfisherCache() {
         FaviconDataProvider.setupCache()
-    }
-}
-
-extension AppController: ASWebAuthenticationSessionWebBrowserSessionHandling {
-    func begin(_ request: ASWebAuthenticationSessionRequest!) {
-        ChromiumLauncher.sharedInstance().bridge?.beginHandling(request)
-    }
-    
-    func cancel(_ request: ASWebAuthenticationSessionRequest!)  {
-        ChromiumLauncher.sharedInstance().bridge?.cancel(request)
     }
 }

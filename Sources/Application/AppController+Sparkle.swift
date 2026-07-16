@@ -61,11 +61,6 @@ extension AppController: SPUUpdaterDelegate {
     }
     
     func updaterShouldRelaunchApplication(_ updater: SPUUpdater) -> Bool {
-        // Stop the watchdog BEFORE requesting termination so it does not
-        // relaunch Sentinel during the Sparkle install (which would recreate
-        // the "Sentinel survives the OTA" bug).
-        MainActor.assumeIsolated { SentinelWatchdog.shared.stop() }
-        SentinelHelper.requestTerminationForBrowserUpdate()
         return true
     }
     

@@ -145,35 +145,6 @@ extension AppController {
                 toggleSidebarItem.target = self
                 submenu.addItem(toggleSidebarItem)
 
-                let toggleChatbarItem = NSMenuItem(title: NSLocalizedString("Toggle Chatbar", comment: "View menu - Menu item to show or hide the AI chat bar"),
-                                                   action: #selector(toggleChatbar(_:)),
-                                                   keyEquivalent: "s")
-                toggleChatbarItem.keyEquivalentModifierMask = [.command, .shift]
-                toggleChatbarItem.tag = CommandWrapper.PHI_TOGGLE_CHATBAR.rawValue
-                Shortcuts.updateShortcut(for: toggleChatbarItem)
-                toggleChatbarItem.target = self
-                submenu.addItem(toggleChatbarItem)
-
-                let newConversationItem = NSMenuItem(title: NSLocalizedString("New Conversation", comment: "View menu - Menu item to start a new AI conversation in the sidebar"),
-                                                   action: #selector(newConversation(_:)),
-                                                   keyEquivalent: "o")
-                newConversationItem.keyEquivalentModifierMask = [.command, .shift]
-                newConversationItem.tag = CommandWrapper.PHI_NEW_CONVERSATION.rawValue
-                Shortcuts.updateShortcut(for: newConversationItem)
-                newConversationItem.target = self
-                submenu.addItem(newConversationItem)
-
-                if PhiPreferences.AgentSpaces.skillFeatureEnabled {
-                    let agentAutoViewSeparator = NSMenuItem.separator()
-                    agentAutoViewSeparator.tag = AppController.viewMenuPhiSectionSeparatorTag
-                    submenu.addItem(agentAutoViewSeparator)
-                    let agentAutoViewItem = NSMenuItem(title: NSLocalizedString("Agent Autoview", comment: "View menu - Toggle that automatically switches to the Space of an operating agent"),
-                                                       action: #selector(toggleAgentAutoView(_:)),
-                                                       keyEquivalent: "")
-                    agentAutoViewItem.tag = AppController.agentAutoViewItemTag
-                    agentAutoViewItem.target = self
-                    submenu.addItem(agentAutoViewItem)
-                }
             } else
             
             if menuItem.title == "Phi", let subMenu = menuItem.submenu {
@@ -559,7 +530,6 @@ extension AppController {
     }
     
     @objc func toggleChatbar(_ sendar: Any?) {
-        MainBrowserWindowControllersManager.shared.activeWindowController?.browserState.toggleAIChat()
     }
 
     @MainActor
@@ -588,16 +558,6 @@ extension AppController {
     /// when the sidebar is created) to let exactly that tab's Sidecar respond.
     @MainActor
     @objc func newConversation(_ sender: Any?) {
-        guard let windowController = MainBrowserWindowControllersManager.shared.activeWindowController,
-              let tabId = windowController.browserState.focusingTab?.guid else {
-            return
-        }
-        let payload: [String: Any] = ["tabId": tabId]
-        guard let data = try? JSONSerialization.data(withJSONObject: payload),
-              let json = String(data: data, encoding: .utf8) else {
-            return
-        }
-        ExtensionMessaging.shared.broadcast(type: "newConversation", payload: json)
     }
 
     @objc func toggleBookmarkBar(_ sender: Any?) {
@@ -609,14 +569,6 @@ extension AppController {
     /// works (see `AgentSpaceManager.autoViewReevaluate`). Turning it ON
     /// surfaces an already-running agent immediately.
     @objc func toggleAgentAutoView(_ sender: Any?) {
-        let enabled = !PhiPreferences.AgentSpaces.autoViewEnabled
-        PhiPreferences.AgentSpaces.autoViewEnabled = enabled
-        if enabled {
-            // Menu actions arrive on the main thread; the manager is main-actor.
-            MainActor.assumeIsolated {
-                AgentSpaceManager.shared.autoViewReevaluate()
-            }
-        }
     }
 
     @objc func toggleBookmarkBarOnNewTab(_ sender: Any?) {
@@ -826,14 +778,12 @@ extension AppController {
     @objc func exportLogs(_ sender: Any?) {
         let phiLogsURL = URL(fileURLWithPath: FileSystemUtils.phiBrowserDataDirectory(), isDirectory: true)
             .appendingPathComponent("PhiLogs", isDirectory: true)
-        let sentinelLogsURL = SentinelHelper.sentinelLogsDirectoryURL()
         let fm = FileManager.default
         let hasPhi = fm.fileExists(atPath: phiLogsURL.path)
-        let hasSentinel = fm.fileExists(atPath: sentinelLogsURL.path)
-        guard hasPhi || hasSentinel else {
+        guard hasPhi else {
             let alert = NSAlert()
             alert.messageText = NSLocalizedString("Export Logs", comment: "Help menu - Log export alert title when no log folders exist")
-            alert.informativeText = NSLocalizedString("No Phi or Sentinel log folders were found.", comment: "Help menu - Log export alert when both PhiLogs and Sentinel log directory are missing")
+            alert.informativeText = NSLocalizedString("No Phi log folder was found.", comment: "Help menu - Log export alert when the PhiLogs directory is missing")
             alert.alertStyle = .informational
             alert.addButton(withTitle: NSLocalizedString("OK", comment: "Generic - OK button to dismiss an alert"))
             alert.runModal()
@@ -857,9 +807,6 @@ extension AppController {
             do {
                 try self.zipPhiLogsExport(
                     phiLogsURL: phiLogsURL,
-                    sentinelLogsURL: sentinelLogsURL,
-                    includePhi: hasPhi,
-                    includeSentinel: hasSentinel,
                     destinationZIP: destURL
                 )
             } catch {
@@ -882,9 +829,6 @@ extension AppController {
 
     private func zipPhiLogsExport(
         phiLogsURL: URL,
-        sentinelLogsURL: URL,
-        includePhi: Bool,
-        includeSentinel: Bool,
         destinationZIP: URL
     ) throws {
         let fm = FileManager.default
@@ -892,18 +836,8 @@ extension AppController {
         try fm.createDirectory(at: staging, withIntermediateDirectories: true)
         defer { try? fm.removeItem(at: staging) }
 
-        var zipRoots: [String] = []
-        if includePhi {
-            let dest = staging.appendingPathComponent("PhiLogs", isDirectory: true)
-            try fm.copyItem(at: phiLogsURL, to: dest)
-            zipRoots.append("PhiLogs")
-        }
-        if includeSentinel {
-            let dest = staging.appendingPathComponent("SentinelLogs", isDirectory: true)
-            try fm.copyItem(at: sentinelLogsURL, to: dest)
-            zipRoots.append("SentinelLogs")
-        }
-        guard !zipRoots.isEmpty else { return }
+        let stagedLogs = staging.appendingPathComponent("PhiLogs", isDirectory: true)
+        try fm.copyItem(at: phiLogsURL, to: stagedLogs)
 
         if fm.fileExists(atPath: destinationZIP.path) {
             try fm.removeItem(at: destinationZIP)
@@ -912,7 +846,7 @@ extension AppController {
         let stderrPipe = Pipe()
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/zip")
-        process.arguments = ["-r", "-q", destinationZIP.path] + zipRoots
+        process.arguments = ["-r", "-q", destinationZIP.path, "PhiLogs"]
         process.currentDirectoryURL = staging
         process.standardError = stderrPipe
         try process.run()
@@ -1714,30 +1648,6 @@ extension AppController {
             if itemIsInAgentLockedMenu(menuItem) { return false }
         }
 
-        if item.action == #selector(toggleChatbar(_:)) {
-            let phiAIEnabled = UserDefaults.standard.bool(forKey: PhiPreferences.AISettings.phiAIEnabled.rawValue)
-            let state = MainBrowserWindowControllersManager.shared.getActiveWindowState()
-            if !phiAIEnabled || state?.isIncognito ?? false || state?.groupOverviewState != nil || state?.focusingTab?.aiChatEnabled == false {
-                return false
-            }
-        }
-
-        // New Conversation only applies while focus is inside the AI sidebar;
-        // otherwise disable the item so its shortcut falls through to the
-        // original behavior.
-        if item.action == #selector(newConversation(_:)) {
-            let phiAIEnabled = UserDefaults.standard.bool(forKey: PhiPreferences.AISettings.phiAIEnabled.rawValue)
-            let state = MainBrowserWindowControllersManager.shared.getActiveWindowState()
-            guard phiAIEnabled,
-                  let state,
-                  !state.isIncognito,
-                  state.groupOverviewState == nil,
-                  state.focusingTab?.aiChatEnabled == true,
-                  state.focusingTab?.lastFocusTarget == .aiChat else {
-                return false
-            }
-        }
-
         // Toggle Sidebar is unavailable in the traditional layout.
         if item.action == #selector(toggleSidebar(_:)) {
             if PhiPreferences.GeneralSettings.loadLayoutMode().isTraditional {
@@ -1746,7 +1656,7 @@ extension AppController {
         }
         
         if item.action == #selector(showPreferences(_:)) {
-            return LoginController.shared.isLoggedin()
+            return true
         }
         
         if item.action == #selector(checkForUpdate(_:)) {
@@ -1774,14 +1684,7 @@ extension AppController {
                 default:
                     break
                 }
-                return LoginController.shared.isLoggedin()
-            }
-        }
-
-        if item.action == #selector(toggleAgentAutoView(_:)) {
-            if let menuItem = item as? NSMenuItem {
-                menuItem.state = PhiPreferences.AgentSpaces.autoViewEnabled ? .on : .off
-                return LoginController.shared.isLoggedin()
+                return true
             }
         }
 
@@ -1816,17 +1719,16 @@ extension AppController {
             if let menuItem = item as? NSMenuItem {
                 menuItem.isHidden = !spacesFeatureEnabled
             }
-            return spacesFeatureEnabled && LoginController.shared.isLoggedin()
+            return spacesFeatureEnabled
         }
         if item.action == #selector(newIncognitoSpaceFromMenu(_:)) {
             if let menuItem = item as? NSMenuItem {
                 menuItem.isHidden = !spacesFeatureEnabled
             }
-            return spacesFeatureEnabled && LoginController.shared.isLoggedin()
+            return spacesFeatureEnabled
         }
         if item.action == #selector(deleteSelectedProfile(_:)) {
             guard spacesFeatureEnabled,
-                  LoginController.shared.isLoggedin(),
                   let menuItem = item as? NSMenuItem,
                   let profile = menuItem.representedObject as? PhiBrowserProfile else {
                 return false
@@ -1847,7 +1749,7 @@ extension AppController {
             #selector(openURLRulesEditor(_:)),
         ]
         if let action = item.action, spacesActions.contains(action) {
-            guard spacesFeatureEnabled, LoginController.shared.isLoggedin() else { return false }
+            guard spacesFeatureEnabled else { return false }
             // An Incognito Space's name, profile binding and existence are
             // fixed: its name is derived ("Incognito" / "Incognito N"), its
             // shared OTR profile can't be re-bound, and the Space ends via
@@ -1935,31 +1837,6 @@ extension AppController {
             }
             return !bookmark.isFolder
         }
-        let isLoggedIn = LoginController.shared.isLoggedin()
-        if !isLoggedIn {
-            let allowedActions: [Selector] = [
-                #selector(orderFrontStandardAboutPanel(_:)),
-                #selector(NSApplication.terminate(_:)),
-                #selector(NSApplication.hide(_:)),
-                #selector(NSApplication.hideOtherApplications(_:)),
-                #selector(NSApplication.unhideAllApplications(_:)),
-                #selector(showSentryDebugWindow(_:)),
-                #selector(triggerDeeplink(_:)),
-                #selector(clearLoginStatus(_:)),
-                #selector(clearAllUserData(_:)),
-                #selector(showExtensionInfo(_:)),
-                #selector(exportLogs(_:)),
-                #selector(restoreTimeMachineBackup(_:)),
-                #selector(exportUserData(_:)),
-                #selector(importUserDataFromBackup(_:))
-            ]
-
-            if let action = item.action {
-                return allowedActions.contains(action)
-            }
-            return false
-        }
-
         // Command-dispatched main-menu items that reach the app delegate had no
         // key browser window to handle them. Defer their enabled state to
         // PhiAppController (no-window CommandUpdater: New Tab/New Window enabled,

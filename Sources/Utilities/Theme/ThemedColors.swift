@@ -42,7 +42,7 @@ public extension ThemedColor {
         if appearance.isLight {
             return .white
         } else {
-            return windowOverlayBackground.resolve(theme: theme, appearance: appearance).withAlphaComponent(1)
+            return windowBackground.resolve(theme: theme, appearance: appearance)
         }
     }
 
@@ -126,9 +126,7 @@ extension Theme {
     /// Incognito theme — dedicated theme for private browsing windows.
     static let incognito: Theme = {
         let theme = Theme(id: "incognito", name: "Incognito")
-        theme.setColor(light: NSColor(hex: 0x383838).withAlphaComponent(0.8),
-                       dark:  NSColor(hex: 0x383838).withAlphaComponent(0.8),
-                       for: .windowOverlayBackground)
+        theme.setColor(ColorPair(NSColor(hex: 0xA78BFA)), for: .themeColor)
         return theme
     }()
 }
@@ -136,39 +134,16 @@ extension Theme {
 private func makeDesignTheme(
     id: String,
     name: String,
-    lightOverlay: Int,
-    lightBackground: Int,
-    lightThemeColor: Int,
-    lightExtensionAction: Int,
-    darkOverlay: Int,
-    darkBackground: Int,
-    darkThemeColor: Int,
-    darkExtensionAction: Int
+    signatureColor: Int
 ) -> Theme {
     let theme = Theme(id: id, name: name)
-    let lightTheme = NSColor(hex: lightThemeColor)
-    let darkTheme = NSColor(hex: darkThemeColor)
+    let signature = NSColor(hex: signatureColor)
 
+    theme.setColor(ColorPair(signature), for: .themeColor)
+    theme.setColor(ColorPair(signature), for: .extensionActonColor)
     theme.setColor(
-        light: NSColor(hex: lightOverlay, alpha: ThemeDefaults.overlayLightOpacity),
-        dark: NSColor(hex: darkOverlay, alpha: ThemeDefaults.overlayDarkOpacity),
-        for: .windowOverlayBackground
-    )
-    theme.setColor(
-        light: NSColor(hex: lightBackground),
-        dark: NSColor(hex: darkBackground),
-        for: .windowBackground
-    )
-    theme.setColor(light: lightTheme, dark: darkTheme, for: .themeColor)
-    theme.setColor(
-        light: NSColor(hex: lightExtensionAction),
-        dark: NSColor(hex: darkExtensionAction),
-        for: .extensionActonColor
-    )
-    theme.setColor(
-        // Figma does not define hover explicitly; keep hue/saturation and adjust brightness per spec.
-        light: lightTheme.adjustingBrightness(percent: -5),
-        dark: darkTheme.adjustingBrightness(percent: 5),
+        light: signature.adjustingBrightness(percent: -7),
+        dark: signature.adjustingBrightness(percent: 5),
         for: .themeColorOnHover
     )
 
@@ -178,118 +153,45 @@ private func makeDesignTheme(
 // MARK: - Built-In Themes
 
 public extension Theme {
-    static let pure = makeDesignTheme(
-        id: "pure",
-        name: NSLocalizedString("Pure", comment: "Pure theme name"),
-        lightOverlay: 0xEAEAEA,
-        lightBackground: 0xFFFFFF,
-        lightThemeColor: 0x3AA4D5,
-        lightExtensionAction: 0x2DC882,
-        darkOverlay: 0x383838,
-        darkBackground: 0x383838,
-        darkThemeColor: 0x1E7099,
-        darkExtensionAction: 0x168A55
+    static let zinc = makeDesignTheme(
+        id: "zinc",
+        name: NSLocalizedString("Zinc", comment: "Zinc theme name"),
+        signatureColor: 0x71717A
     )
 
-    static let mist = makeDesignTheme(
-        id: "mist",
-        name: NSLocalizedString("Mist", comment: "Mist theme color name"),
-        lightOverlay: 0x66CCFF,
-        lightBackground: 0xFFFFFF,
-        lightThemeColor: 0x57AED9,
-        lightExtensionAction: 0x2DC882,
-        darkOverlay: 0x0B2938,
-        darkBackground: 0x0B2938,
-        darkThemeColor: 0x1E7099,
-        darkExtensionAction: 0x168A55
-    )
-    
-    static let mint = makeDesignTheme(
-        id: "mint",
-        name: NSLocalizedString("Mint", comment: "Mint theme color name"),
-        lightOverlay: 0x8AE25A,
-        lightBackground: 0xFFFFFF,
-        lightThemeColor: 0x73BD4B,
-        lightExtensionAction: 0x4BB7BD,
-        darkOverlay: 0x1B380B,
-        darkBackground: 0x1B380B,
-        darkThemeColor: 0x48802A,
-        darkExtensionAction: 0x2A7B80
+    static let pink = makeDesignTheme(
+        id: "pink",
+        name: NSLocalizedString("Pink", comment: "Pink theme name"),
+        signatureColor: 0xEF476F
     )
 
-    static let aqua = makeDesignTheme(
-        id: "aqua",
-        name: NSLocalizedString("Aqua", comment: "Aqua theme color name"),
-        lightOverlay: 0x5BDEE3,
-        lightBackground: 0xFFFFFF,
-        lightThemeColor: 0x4BB9BD,
-        lightExtensionAction: 0x4B84BD,
-        darkOverlay: 0x0B3738,
-        darkBackground: 0x0B3738,
-        darkThemeColor: 0x2A7D80,
-        darkExtensionAction: 0x2A5280
+    static let yellow = makeDesignTheme(
+        id: "yellow",
+        name: NSLocalizedString("Yellow", comment: "Yellow theme name"),
+        signatureColor: 0xFFD166
     )
 
-    static let iris = makeDesignTheme(
-        id: "iris",
-        name: NSLocalizedString("Iris", comment: "Iris theme color name"),
-        lightOverlay: 0x7566FF,
-        lightBackground: 0xFFFFFF,
-        lightThemeColor: 0x6357D9,
-        lightExtensionAction: 0xB857D9,
-        darkOverlay: 0x100B38,
-        darkBackground: 0x100B38,
-        darkThemeColor: 0x3D339C,
-        darkExtensionAction: 0x82339C
-    )
-
-    static let petal = makeDesignTheme(
-        id: "petal",
-        name: NSLocalizedString("Petal", comment: "Petal theme color name"),
-        lightOverlay: 0xD966FF,
-        lightBackground: 0xFFFFFF,
-        lightThemeColor: 0xB857D9,
-        lightExtensionAction: 0x4B84BD,
-        darkOverlay: 0x2D0B38,
-        darkBackground: 0x2D0B38,
-        darkThemeColor: 0x82339C,
-        darkExtensionAction: 0x2A5280
-    )
-
-    static let coral = makeDesignTheme(
-        id: "coral",
-        name: NSLocalizedString("Coral", comment: "Coral theme color name"),
-        lightOverlay: 0xFF6666,
-        lightBackground: 0xFFFFFF,
-        lightThemeColor: 0xD95757,
-        lightExtensionAction: 0xD9B857,
-        darkOverlay: 0x380B0B,
-        darkBackground: 0x380B0B,
-        darkThemeColor: 0x9C3E3E,
-        darkExtensionAction: 0x9C8133
-    )
-
-    static let amber = makeDesignTheme(
-        id: "amber",
-        name: NSLocalizedString("Amber", comment: "Amber theme color name"),
-        lightOverlay: 0xFFD966,
-        lightBackground: 0xFFFFFF,
-        lightThemeColor: 0xD9B857,
-        lightExtensionAction: 0xD95757,
-        darkOverlay: 0x382D0B,
-        darkBackground: 0x382D0B,
-        darkThemeColor: 0x9C8133,
-        darkExtensionAction: 0x9C3E3E
+    static let green = makeDesignTheme(
+        id: "green",
+        name: NSLocalizedString("Green", comment: "Green theme name"),
+        signatureColor: 0x06D6A0
     )
 
     static let builtInThemes: [Theme] = [
-        .pure,
-        .mint,
-        .mist,
-        .aqua,
-        .iris,
-        .petal,
-        .coral,
-        .amber
+        .zinc,
+        .pink,
+        .yellow,
+        .green
     ]
+
+    /// Removed palette identifiers all start from Zinc. This avoids silently
+    /// turning an old choice into a newly introduced color after upgrading.
+    static func migratedBuiltInThemeId(_ id: String) -> String {
+        switch id {
+        case "default", "pure", "mist", "mint", "aqua", "iris", "petal", "coral", "amber":
+            return zinc.id
+        default:
+            return id
+        }
+    }
 }

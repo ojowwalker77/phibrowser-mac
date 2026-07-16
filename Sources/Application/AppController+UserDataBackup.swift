@@ -127,8 +127,7 @@ extension AppController {
 
         _clearUserData()
         if includeAuthReset {
-            AuthManager.shared.clearLocalCredentials()
-            LoginController.shared.phase = .login
+            OnboardingController.shared.phase = .layoutSelection
         }
         NSApp.terminate(nil)
     }
@@ -196,20 +195,7 @@ extension AppController {
     }
 
     private func defaultPhiUserDataBackupFileName() -> String {
-        let rawBase: String
-        if let account = AccountController.shared.account {
-            if let name = account.userInfo?.name?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty {
-                rawBase = name
-            } else if let email = account.userInfo?.email,
-                      let localPart = email.split(separator: "@").first.map(String.init),
-                      !localPart.isEmpty {
-                rawBase = localPart
-            } else {
-                rawBase = account.userID
-            }
-        } else {
-            rawBase = "Phi"
-        }
+        let rawBase = AccountController.shared.account?.userID ?? "Phi"
         let sanitized = Self.sanitizedBackupFileNameComponent(rawBase)
         let fallbackSlug = "Phi"
         let resolvedSlug: String

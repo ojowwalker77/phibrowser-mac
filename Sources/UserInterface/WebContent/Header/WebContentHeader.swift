@@ -33,8 +33,8 @@ class WebContentHeaderState: ObservableObject {
         self.showAddressBar = navigationAtTop
         self.showNavigationButtons = navigationAtTop
         self.showDownloadButton = traditionalLayout
-        self.showMemoryButton = traditionalLayout && phiAIEnabled
-        self.showFeedbackButton = traditionalLayout
+        self.showMemoryButton = false
+        self.showFeedbackButton = false
         self.showChatButton = false
     }
 
@@ -346,10 +346,10 @@ class WebContentHeader: NSView {
             guard let self = self else { return }
             self.state.showAddressBar = navigationAtTop
             self.state.showNavigationButtons = navigationAtTop && !isInPlaceholder
-            self.state.showChatButton = navigationAtTop && !overviewActive && !isIncognito && aiChatEnabled && phiAIEnabled && !isInPlaceholder
-            self.state.showFeedbackButton = (traditionalLayout || (navigationAtTop && isCollapsed)) && !isInPlaceholder
+            self.state.showChatButton = false
+            self.state.showFeedbackButton = false
             self.state.showDownloadButton = (traditionalLayout || (navigationAtTop && isCollapsed)) && !isInPlaceholder
-            self.state.showMemoryButton = (traditionalLayout || (navigationAtTop && isCollapsed)) && phiAIEnabled && !isIncognito && !isInPlaceholder
+            self.state.showMemoryButton = false
             self.state.showSidebarButton = !traditionalLayout && navigationAtTop && isCollapsed
             self.state.isIncognito = isIncognito
             self.state.isInPlaceholderMode = isInPlaceholder
@@ -394,7 +394,6 @@ class WebContentHeader: NSView {
     }
 
     @objc private func feedbackButtonClicked() {
-        unsafeBrowserState?.windowController?.showFeedbackWindow()
     }
 
     @objc private func memoryButtonClicked() {

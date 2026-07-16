@@ -185,8 +185,6 @@ class SidebarTabListViewController: NSViewController {
     private lazy var contextMenuHelper = TabAreaContextMenuHelper(browserState: browserState)
     
     private var cancellables = Set<AnyCancellable>()
-    private var lastFarringdonAIEnabled = PhiPreferences.AISettings.phiAIEnabled.loadValue()
-    private var lastFarringdonTabCountEligible = false
     private var allItems: [SidebarItem] = []
     /// Snapshot committed by the latest accepted `reloadWith` request.
     /// Unlike `allItems`, its captured child IDs cannot be changed by model reuse.
@@ -386,36 +384,6 @@ class SidebarTabListViewController: NSViewController {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
                 self?.updateVisibleGroupOverviewSelection()
-            }
-            .store(in: &cancellables)
-
-        // Show/hide the broom (organize-tabs) button when AI is toggled, mirroring
-        // how the sidebar drives other AI UI off `UserDefaults.didChangeNotification`.
-        NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in
-                guard let self else { return }
-                let enabled = PhiPreferences.AISettings.phiAIEnabled.loadValue()
-                guard enabled != self.lastFarringdonAIEnabled else { return }
-                self.lastFarringdonAIEnabled = enabled
-                self.updateNewTabCleanupVisibility()
-            }
-            .store(in: &cancellables)
-
-        // The broom also needs enough tabs to be worth a run; refresh the live
-        // cells whenever the count crosses the threshold.
-        lastFarringdonTabCountEligible =
-            FarringdonOrganizer.isTabCountEligible(
-                FarringdonOrganizer.eligibleTabCount(in: browserState.normalTabs))
-        browserState.$normalTabs
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] tabs in
-                guard let self else { return }
-                let eligible = FarringdonOrganizer.isTabCountEligible(
-                    FarringdonOrganizer.eligibleTabCount(in: tabs))
-                guard eligible != self.lastFarringdonTabCountEligible else { return }
-                self.lastFarringdonTabCountEligible = eligible
-                self.updateNewTabCleanupVisibility()
             }
             .store(in: &cancellables)
 
@@ -3471,7 +3439,6 @@ extension SidebarTabListViewController: NSOutlineViewDelegate {
                 newTabCell = NewTabButtonCellView()
                 newTabCell?.identifier = identifier
             }
-            newTabCell?.cleanupAction = farringdonCleanupActionIfVisible()
             cellView = newTabCell!
             
         case .separator:
@@ -3737,31 +3704,6 @@ extension SidebarTabListViewController: SidebarTabListItemOwner {
         browserState.windowController?.newBrowserTab(nil)
     }
 
-    private func triggerFarringdonCleanup() {
-        FarringdonOrganizer.organizeFocusedWindow()
-    }
-
-    /// The broom (organize-tabs) action is only useful once the window has
-    /// enough eligible tabs to organize.
-    private func farringdonCleanupActionIfVisible() -> (() -> Void)? {
-        guard FarringdonOrganizer.canOrganizeTabs(in: browserState) else { return nil }
-        return { [weak self] in self?.triggerFarringdonCleanup() }
-    }
-
-    /// Reflects cleanup-button eligibility changes onto live New Tab cells without a reload.
-    private func updateNewTabCleanupVisibility() {
-        let action = farringdonCleanupActionIfVisible()
-        if let item = newTabButtonItem {
-            let row = outlineView.row(forItem: item)
-            if row >= 0,
-               let cell = outlineView.view(atColumn: 0, row: row, makeIfNecessary: false)
-                   as? NewTabButtonCellView {
-                cell.cleanupAction = action
-            }
-        }
-        floatingNewTabView?.cellView.cleanupAction = action
-    }
-
     func bookmarkClicked(_ item: any SidebarItem) {
         guard let bookmark = item as? Bookmark, bookmark.isFolder == false else {
             return
@@ -3833,7 +3775,6 @@ extension SidebarTabListViewController: TabSectionDelegate {
                 animated: !outlineStructureChanged && !self.suppressesGroupUpdateAnimations
             )
             self.pushPaneUpdatesToSplitPairCells(change.affectedSplitIds)
-            self.updateNewTabCleanupVisibility()
             self.clearFloatingProxyIfTabClosed()
         }
     }
@@ -4198,7 +4139,6 @@ extension SidebarTabListViewController {
         floatingView.cellView.clickAction = { [weak self] in
             self?.browserState.windowController?.newBrowserTab(nil)
         }
-        floatingView.cellView.cleanupAction = farringdonCleanupActionIfVisible()
         floatingView.hoverStateChanged = { [weak self] hovering in
             self?.setVisibleTabHoverSuppressed(hovering)
         }

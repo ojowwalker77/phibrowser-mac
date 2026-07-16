@@ -4,10 +4,9 @@
 // found in the LICENSE file.
 
 import Foundation
-import PostHog
+
 class Account {
     let userID: String
-    let userInfo: User?
     lazy var localStorage: LocalStore = {
         // Under UI testing the store is redirected to a throwaway per-launch
         // temp directory so tests never read or mutate the real account's
@@ -21,16 +20,8 @@ class Account {
         AccountUserDefaults(account: self)
     }()
     
-    init(userID: String, userInfo: User? = nil) {
+    init(userID: String) {
         self.userID = userID
-        self.userInfo = userInfo
-        if let userInfo {
-            if let sub = userInfo.sub {
-                PostHogSDK.shared.identify(sub)
-            }
-        }
-        
-        SentryService.configureUser(self)
     }
     
     var userDataStorage: URL {
@@ -42,9 +33,63 @@ class Account {
 }
 
 extension Account {
-    static let defaultUid = "default-account-id"
+    private static let fallbackUid = "default-account-id"
+    static let defaultUid = resolveLocalUserID()
+
     static var defaultAccount: Account {
         return Account(userID: defaultUid)
+    }
+
+    /// Reuses the most recently active legacy account directory when one is
+    /// already present. Authentication is intentionally gone, but the user's
+    /// Spaces, bookmarks, and other Swift-side browser state remain valuable
+    /// local data and should not become inaccessible behind the old account id.
+    private static func resolveLocalUserID() -> String {
+        let usersURL = URL(filePath: FileSystemUtils.phiBrowserDataDirectory(), directoryHint: .isDirectory)
+            .appendingPathComponent("users", isDirectory: true)
+        let fileManager = FileManager.default
+
+        if let override = ProcessInfo.processInfo.environment["PHI_LOCAL_ACCOUNT_ID"],
+           isUsableAccountDirectory(usersURL.appendingPathComponent(override, isDirectory: true), fileManager: fileManager) {
+            return override
+        }
+
+        guard let accountURLs = try? fileManager.contentsOfDirectory(
+            at: usersURL,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        ) else {
+            return fallbackUid
+        }
+
+        let legacyAccounts = accountURLs.filter {
+            $0.lastPathComponent != fallbackUid && isUsableAccountDirectory($0, fileManager: fileManager)
+        }
+        guard !legacyAccounts.isEmpty else { return fallbackUid }
+
+        return legacyAccounts.max { lhs, rhs in
+            accountModificationDate(lhs, fileManager: fileManager)
+                < accountModificationDate(rhs, fileManager: fileManager)
+        }?.lastPathComponent ?? fallbackUid
+    }
+
+    private static func isUsableAccountDirectory(_ accountURL: URL, fileManager: FileManager) -> Bool {
+        fileManager.fileExists(
+            atPath: accountURL
+                .appendingPathComponent("localDB", isDirectory: true)
+                .appendingPathComponent("LocalStore.sqlite", isDirectory: false)
+                .path
+        )
+    }
+
+    private static func accountModificationDate(_ accountURL: URL, fileManager: FileManager) -> Date {
+        let localDB = accountURL.appendingPathComponent("localDB", isDirectory: true)
+        let candidates = ["LocalStore.sqlite-wal", "LocalStore.sqlite"]
+        return candidates.compactMap { name in
+            let path = localDB.appendingPathComponent(name, isDirectory: false).path
+            guard let attributes = try? fileManager.attributesOfItem(atPath: path) else { return nil }
+            return attributes[.modificationDate] as? Date
+        }.max() ?? .distantPast
     }
 
     /// A unique-per-launch temp directory for the `LocalStore` when the app is

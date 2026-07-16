@@ -5,13 +5,65 @@
 
 import Cocoa
 import Combine
+
+enum BrowserShellMetrics {
+    static let sidebarMinWidth: CGFloat = 193
+    static let sidebarMaxWidth: CGFloat = 500
+    static let panelInset: CGFloat = 8
+    static let panelCornerRadius: CGFloat = 14
+}
+
+/// Hosts the sidebar as the shell's single floating panel over the flat canvas.
+/// The sidebar controller still owns all sidebar presentation and interaction;
+/// this wrapper owns only shell-level geometry and separation.
+private final class SidebarPanelContainerViewController: NSViewController {
+    private let sidebar: SidebarViewController
+
+    init(sidebar: SidebarViewController) {
+        self.sidebar = sidebar
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func loadView() {
+        let canvas = NSView()
+        canvas.wantsLayer = true
+        canvas.phiLayer?.setBackgroundColor(.windowBackground)
+        view = canvas
+
+        addChild(sidebar)
+        let panel = sidebar.view
+        panel.translatesAutoresizingMaskIntoConstraints = false
+        panel.wantsLayer = true
+        panel.layer?.cornerCurve = .continuous
+        panel.layer?.cornerRadius = BrowserShellMetrics.panelCornerRadius
+        panel.layer?.masksToBounds = true
+        panel.layer?.borderWidth = 1
+        panel.phiLayer?.setBorderColor(.border)
+        canvas.addSubview(panel)
+
+        NSLayoutConstraint.activate([
+            panel.topAnchor.constraint(equalTo: canvas.topAnchor, constant: BrowserShellMetrics.panelInset),
+            panel.leadingAnchor.constraint(equalTo: canvas.leadingAnchor, constant: BrowserShellMetrics.panelInset),
+            panel.trailingAnchor.constraint(equalTo: canvas.trailingAnchor, constant: -BrowserShellMetrics.panelInset),
+            panel.bottomAnchor.constraint(equalTo: canvas.bottomAnchor, constant: -BrowserShellMetrics.panelInset)
+        ])
+    }
+}
+
 class MainSplitViewController: NSViewController {
-    static let leftItemMinWidth: CGFloat = 193
-    static let leftItemMaxWidth: CGFloat = 500
+    static let leftItemMinWidth = BrowserShellMetrics.sidebarMinWidth
+    static let leftItemMaxWidth = BrowserShellMetrics.sidebarMaxWidth
     
     private let splitViewController = NSSplitViewController()
 
     private lazy var verticalTabListViewController: SidebarViewController = { SidebarViewController(browserState: state) }()
+    private lazy var sidebarPanelContainerViewController = SidebarPanelContainerViewController(
+        sidebar: verticalTabListViewController
+    )
 
     /// This window's sidebar controller. Exposed so `SpaceManager` can drive
     /// the vertical-layout Space-switch push-in (snapshot a window's content
@@ -38,7 +90,10 @@ class MainSplitViewController: NSViewController {
     }
 
     override func loadView() {
-        self.view = TitlebarTransparentView()
+        let view = TitlebarTransparentView()
+        view.wantsLayer = true
+        view.phiLayer?.setBackgroundColor(.windowBackground)
+        self.view = view
     }
 
     override func viewDidLoad() {
@@ -202,11 +257,7 @@ class MainSplitViewController: NSViewController {
     }
 
     private func setupLeftSplitViewItem() {
-        if #available(macOS 26.0, *) {
-            sideBarSplitViewItem = NSSplitViewItem(viewController: verticalTabListViewController)
-        } else {
-            sideBarSplitViewItem = NSSplitViewItem(sidebarWithViewController: verticalTabListViewController)
-        }
+        sideBarSplitViewItem = NSSplitViewItem(viewController: sidebarPanelContainerViewController)
         sideBarSplitViewItem.minimumThickness = Self.leftItemMinWidth
         sideBarSplitViewItem.maximumThickness = Self.leftItemMaxWidth
         sideBarSplitViewItem.canCollapse = true
@@ -289,7 +340,7 @@ class MainSplitViewController: NSViewController {
             let topInset = NSView()
             topInset.translatesAutoresizingMaskIntoConstraints = false
             topInset.wantsLayer = true
-            topInset.layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor
+            topInset.phiLayer?.setBackgroundColor(.windowOverlayBackground)
             
             verticalTabListViewController.view.addSubview(topInset)
             

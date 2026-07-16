@@ -1,25 +1,25 @@
 # Phi Browser
 
-**The open-source AI browser for macOS.** Agentic, local-first, and native Swift.
+**A local-first, native Chromium browser for macOS.**
 
-Phi is a Chromium-based browser built as a real native macOS app (AppKit + SwiftUI), with an AI agent that actually does things, a memory that lives in a file you can read, and AI that can run on-device. It's built for something new: a browser a person and an AI agent can use *together*, in the same window and the same session, each a first-class user. No black box. The whole macOS client is open source, right here.
+This fork of Phi is built as a real macOS app with AppKit, SwiftUI, and an embedded Chromium framework. It starts without an account, keeps browser state locally, and focuses on the core browsing experience.
 
 > **Download** (free, macOS): [phibrowser.com](https://phibrowser.com) · If this is your kind of thing, a ⭐ helps a lot.
 
 <!-- TODO (Alpha): drop a screenshot or short demo gif here. It roughly triples how many visitors star. -->
 
-## What makes it different
+## What it includes
 
-- **Humans and agents, in the same browser.** Most tools make you choose: a browser for people, or a headless one for bots. Phi is both at once. A person and an AI agent can work in the same window, the same session, the same tabs, at the same time, each a first-class user instead of the agent being boxed off in a sandbox. CLI-friendly, Playwright-compatible, and MCP support mean your own tools and agents can drive it right alongside you.
-- **The agent does the browsing.** Give it a task and watch it click, type, and navigate, with a visible record of every action it took. Not a chat panel bolted onto a browser.
-- **Memory you can actually read.** Phi's memory lives locally as files you can open, edit, and delete. It stays on your Mac, and it never trains anyone's model.
-- **On-device AI.** Routes through Apple's on-device Foundation Models (and MLX) where it can, so the work happens on your machine, not someone else's server. Bring your own models via Ollama / LM Studio, or switch AI off entirely.
-- **Reusable Skills.** Teach the agent a workflow once (built on an open `SKILL.md` standard); it knows it forever, with permissions enforced at runtime rather than promised in a doc.
-- **Native, not Electron.** Real AppKit + SwiftUI. Fast, and at home on macOS.
+- **No required account.** Launch directly into the browser with a local profile.
+- **Focused first run.** Choose a layout, import data from another browser, and configure password-manager support.
+- **Native macOS interface.** AppKit and SwiftUI provide windows, sidebars, settings, and system integration.
+- **Chromium compatibility.** Tabs, profiles, extensions, downloads, bookmarks, history, and developer tools use the embedded Chromium framework.
+- **Spaces and layouts.** Organize tabs into Spaces and choose the density that fits your workflow.
+- **No AI feature layer.** Chat, agents, browser memory, connectors, AI tab organization, and their background services are not part of this fork.
 
 ## Why open source
 
-A browser sees everything you do, so you should be able to read the code that runs it. Phi's macOS client is Apache-2.0: audit it, fork it, or just trust it because you can check. (The Chromium framework layer lives separately.)
+A browser sees everything you do, so you should be able to read the code that runs it. The macOS client is Apache-2.0 and the Chromium framework layer lives separately.
 
 ## Download
 
@@ -44,6 +44,19 @@ For this fork, `./script/build_and_run.sh --verify` downloads and verifies the
 framework when needed, builds the app, launches it, and confirms that the
 process started. Signed and notarized releases are documented in
 [`RELEASING.md`](RELEASING.md).
+
+### Development profile
+
+The `PhiBrowser-OpenSource` configuration intentionally uses the installed
+Phi app's `com.phibrowser.Mac` data directory. Local builds therefore have the
+same profiles, cookies, history, tabs, and Spaces as the DMG build. The run
+script quits any running Phi process immediately before launching the local
+app because Chromium profiles must never have two writers. Quit the local build
+before reopening `/Applications/Phi.app`.
+
+The distributable `Release` configuration remains isolated under the fork's
+`com.ojowwalker77.PhiBrowser` identifier. Passwords or passkeys protected by
+the upstream Developer ID may still be unavailable to an ad-hoc local build.
 
 ## Contributing
 

@@ -320,11 +320,16 @@ browserState.themeContext.setUserAppearanceChoice(.dark)
 
 ```swift
 Theme.default
-Theme.ocean
-Theme.forest
-Theme.sunset
-Theme.violet
+Theme.zinc
+Theme.pink
+Theme.yellow
+Theme.green
 ```
+
+Built-in browser surfaces are opaque and independent from the selected accent:
+dark windows use a flat `#0A0A0A` canvas and `#171717` panels. Zinc is the
+default accent; Pink uses `#EF476F`, Yellow uses `#FFD166`, and Green uses
+`#06D6A0`. Accent colors never fill the main canvas or sidebar panel.
 
 ## Predefined Color Roles
 

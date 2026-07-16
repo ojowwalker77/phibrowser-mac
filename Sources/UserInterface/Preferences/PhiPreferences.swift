@@ -157,33 +157,28 @@ extension PhiPreferences {
         var defaultValue: Bool {
             switch self {
             case .phiAIEnabled:
-                return true
+                return false
             case .enableConnectors:
-                return true
+                return false
             case .enableConnectorContext:
-                return true
+                return false
             case .enableChatWithTabs:
-                return true
+                return false
             case .enableBrowserMemories:
-                return true
+                return false
             case .launchSentinelOnLogin:
-                return true
+                return false
             case .enableProactiveSuggestionsOnNTP:
-                return true
+                return false
             }
         }
 
         func loadValue() -> Bool {
-            UserDefaults.standard.bool(forKey: rawValue, default: defaultValue)
+            false
         }
 
         static func buildConfig() -> String {
-            var result = [String: Any]()
-            allCases
-                .filter { $0 != .enableBrowserMemories}
-                .forEach {
-                result[$0.rawValue] = UserDefaults.standard.bool(forKey: $0.rawValue)
-            }
+            let result = Dictionary(uniqueKeysWithValues: allCases.map { ($0.rawValue, false) })
             let data = try? JSONSerialization.data(withJSONObject: result, options: [])
             return String(data: data ?? Data(), encoding: .utf8) ?? "{}"
         }
@@ -253,8 +248,8 @@ extension PhiPreferences {
         case userAppearanceChoice = "PhiUserAppearanceChoice"
         /// Current theme identifier.
         case currentThemeId = "PhiCurrentThemeId"
-        /// Archived snapshots for themes customized by the user.
-        case themeSnapshots = "PhiThemeSnapshots"
+        /// Version of the built-in palette migration applied to local choices.
+        case paletteVersion = "PhiThemePaletteVersion"
         /// When `true`, the Mirage extension applies the window theme's accent
         /// to `::selection` on every web page; when `false`, it leaves the
         /// page's native selection color alone. Default `true`.
@@ -265,9 +260,9 @@ extension PhiPreferences {
             case .userAppearanceChoice:
                 return 0  // .system
             case .currentThemeId:
-                return "default"
-            case .themeSnapshots:
-                return Data()
+                return "zinc"
+            case .paletteVersion:
+                return 0
             case .selectionTintEnabled:
                 return true
             }

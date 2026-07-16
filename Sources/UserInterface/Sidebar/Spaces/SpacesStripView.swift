@@ -96,12 +96,10 @@ struct SpacesStripView: View {
     var resolveOwnerController: () -> MainBrowserWindowController? = { nil }
     @ObservedObject private var profileManager: ProfileManager = .shared
     @ObservedObject private var agentSpaceManager: AgentSpaceManager = .shared
+    @Environment(\.phiTheme) private var windowTheme: Theme
     @Environment(\.phiAppearance) private var windowAppearance: Appearance
 
-    @State private var isPickerOpen: Bool = false
     @State private var isIconPickerOpen: Bool = false
-    @State private var isAddButtonHovered: Bool = false
-    @State private var isMoreButtonHovered: Bool = false
 
     /// Drag-reorder state for the sidebar icon strip. `stripOrderedIds` is the
     /// live arrangement shown while a pip is dragged across its siblings, and
@@ -182,8 +180,8 @@ struct SpacesStripView: View {
 
     /// Single-row height — matches the visual rhythm of pinned-tab rows above.
     static let height: CGFloat = 30
-    /// Slimmer height used when the switch sits at the top of the sidebar.
-    static let sidebarHeight: CGFloat = 24
+    /// Labeled segmented-control height used at the top of the sidebar.
+    static let sidebarHeight: CGFloat = 38
     private static let horizontalPadding: CGFloat = 10
     /// Tighter horizontal padding for the lone horizontal-layout chip, so the
     /// single Space icon hugs its glyph instead of floating in a wide chip.
@@ -192,10 +190,8 @@ struct SpacesStripView: View {
     private static let compactChipHorizontalPadding: CGFloat = 2
     private static let iconSize: CGFloat = 14
     private static let iconHitSize: CGFloat = 22
-    /// Uniform hit-target width of every item in the single-row strip — pips,
-    /// the "…" overflow affordance, and the add button — and the gap between
-    /// them. Drives the fit arithmetic in `visiblePipCount`.
-    private static let stripItemWidth: CGFloat = 24
+    /// Smallest width at which an icon-and-name segment remains readable.
+    private static let minimumSegmentWidth: CGFloat = 112
     private static let stripSpacing: CGFloat = 4
     /// How long a pip must stay hovered before its card appears, so brushing
     /// the cursor across the strip doesn't flash cards.
@@ -251,7 +247,6 @@ struct SpacesStripView: View {
         if showsEllipsisAffordance {
             iconEditSpaceId = activeId
         } else {
-            isPickerOpen = false
             isIconPickerOpen = true
         }
     }
@@ -401,35 +396,19 @@ struct SpacesStripView: View {
         }
     }
 
-    /// Sidebar chooser: one tappable icon per Space (the active one carries its
-    /// theme tint, the rest read muted) followed by a trailing "+" that creates
-    /// a new Space. A large number of Spaces can overflow the row; the
-    /// common handful fit within the sidebar width.
+    /// Sidebar chooser: a Claude-style segmented row with one icon-and-name
+    /// segment per Space. The selected segment uses a quiet fill and real
+    /// border. Creation and management live in the app's existing menus.
     private var iconStrip: some View {
-        // Single row that never wraps: a clipped viewport slides along the
-        // full pip row to keep the active pip in view. The trailing slot
-        // (pinned right via a Spacer) holds the add button — or, once any
-        // pips are hidden, a "…" affordance in its place that opens the full
-        // switcher menu.
+        // Single row that never wraps. The segment track owns the full width;
+        // Spaces beyond the current width tier remain available through the
+        // app's existing Space switcher surfaces.
         GeometryReader { geo in
             let visibleCount = visiblePipCount(availableWidth: geo.size.width)
-            let hasOverflow = visibleCount < stripOrderedSpaces.count
-            HStack(spacing: Self.stripSpacing) {
-                pipsViewport(visibleCount: visibleCount)
-                Spacer(minLength: 4)
-                if hasOverflow {
-                    moreButton
-                } else {
-                    addButton
-                }
-            }
-            .frame(width: geo.size.width, height: rowHeight, alignment: .leading)
-            // The whole row is the add button's hover region, so the "+" is
-            // already visible by the time the cursor could reach its
-            // far-right slot.
-            .contentShape(Rectangle())
-            .onHover { stripRowHoverChanged($0) }
-            // Slide the glass chip (and cross-fade the pips' dim/brighten
+            pipsViewport(visibleCount: visibleCount, availableWidth: geo.size.width)
+                .frame(width: geo.size.width, height: rowHeight, alignment: .leading)
+                .contentShape(Rectangle())
+            // Slide the selected segment (and cross-fade the labels' hierarchy
             // swap) to the new active pip on every switch source — click,
             // ⌃-number, menu, swipe. Match the band push-in exactly (same
             // curve + duration) so the chip lands with the slide. The
@@ -458,9 +437,8 @@ struct SpacesStripView: View {
             }
         }
         .frame(height: rowHeight)
-        // Reset a drag that ends off every pip (Spacer / add button / "…" /
-        // padding) so the lifted pip doesn't stay dimmed and `stripOrderedIds`
-        // re-sync doesn't stay frozen until the next drag. See the delegate doc.
+        // Reset a drag that ends off every segment so the lifted item doesn't
+        // stay dimmed and `stripOrderedIds` can re-sync. See the delegate doc.
         .onDrop(of: [.text], delegate: SpaceListResetDropDelegate(
             draggingSpaceId: $stripDraggingId,
             orderedIds: $stripOrderedIds,
@@ -497,27 +475,21 @@ struct SpacesStripView: View {
         }
     }
 
-    /// Clipped sliding window onto the FULL pip row. Every pip stays in the
-    /// tree — the ones outside the window sit beyond the clip with hit
-    /// testing off — so both the window shift and the glass chip are plain
-    /// frame animations, and the chip can slide to a pip that is itself
-    /// still sliding into view.
+    /// Full-width track containing only the Spaces that comfortably fit. The
+    /// active Space remains in this window as the sidebar narrows; hidden
+    /// Spaces move wholly into overflow, with no clipped sliver left behind.
     @ViewBuilder
-    private func pipsViewport(visibleCount: Int) -> some View {
-        let start = clampedStripStart(visibleCount: visibleCount)
-        let step = Self.stripItemWidth + Self.stripSpacing
-        // When pips are hidden past an edge, the window widens by half an
-        // icon there so the neighbor peeks through the clip — the cue that
-        // the row continues. The peeked pip's OWN hit testing stays off (its
-        // region would extend past the clip into the padding / Spacer);
-        // instead a transparent hit target overlaid on the visible sliver
-        // (see `peekHitTarget`) makes the half icon hover- and clickable.
-        let peek = Self.stripItemWidth / 2 + Self.stripSpacing
-        let leadingPeek: CGFloat = start > 0 ? peek : 0
-        let trailingPeek: CGFloat = start + visibleCount < stripOrderedSpaces.count ? peek : 0
+    private func pipsViewport(visibleCount: Int, availableWidth: CGFloat) -> some View {
+        let start = displayedStripStart(visibleCount: visibleCount)
+        let end = min(start + visibleCount, stripOrderedSpaces.count)
+        let visibleSpaces = start < end ? Array(stripOrderedSpaces[start..<end]) : []
+        let gaps = CGFloat(max(0, visibleSpaces.count - 1)) * Self.stripSpacing
+        let segmentWidth = visibleSpaces.isEmpty
+            ? availableWidth
+            : max(0, (availableWidth - gaps) / CGFloat(visibleSpaces.count))
         HStack(spacing: Self.stripSpacing) {
-            ForEach(Array(stripOrderedSpaces.enumerated()), id: \.element.spaceId) { index, space in
-                spacePip(for: space)
+            ForEach(visibleSpaces, id: \.spaceId) { space in
+                spacePip(for: space, width: segmentWidth)
                     .overlay(alignment: .topTrailing) {
                         agentBadge(for: space.spaceId)
                     }
@@ -525,10 +497,6 @@ struct SpacesStripView: View {
                         agentNumberBadge(for: space.spaceId)
                     }
                     .opacity(stripDraggingId == space.spaceId ? 0.5 : 1)
-                    // `.clipped()` below is visual only — pips beyond the
-                    // window would still swallow clicks/hovers aimed at the
-                    // Spacer and the trailing button without this.
-                    .allowsHitTesting(index >= start && index < start + visibleCount)
                     .onDrag {
                         stripDraggingId = space.spaceId
                         return NSItemProvider(object: space.spaceId as NSString)
@@ -541,48 +509,51 @@ struct SpacesStripView: View {
                     ))
             }
         }
-        // The active pip's liquid-glass chip — the selected-tab-row treatment
-        // (translucent white fill + soft drop shadow). One persistent view
-        // behind the row that adopts the active pip's published frame, so a
-        // switch animates it as a slide. It rides inside the viewport so it
-        // shifts and clips with the row.
+        // A quiet shared track makes the options read as one control. One
+        // persistent selected surface adopts the active segment's frame, so
+        // switching reads as a restrained slide instead of two unrelated
+        // button state changes. Persistent chrome gets a border, never depth.
         .background {
-            if let activeId = slot.activeSpaceId,
-               stripOrderedSpaces.contains(where: { $0.spaceId == activeId }) {
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(Color.sidebarTabSelected)
-                    .shadow(color: Color.black.opacity(0.15), radius: 1, x: 0, y: 1)
-                    .matchedGeometryEffect(id: activeId, in: pipGlassNamespace, isSource: false)
-                    .allowsHitTesting(false)
-            }
-        }
-        .offset(x: -CGFloat(start) * step + leadingPeek)
-        .frame(width: pipRowWidth(visibleCount) + leadingPeek + trailingPeek, alignment: .leading)
-        .clipped()
-        // Interactive stand-ins for the peeked half-pips, sized to exactly the
-        // sliver that shows through the clip so no hit region leaks past it.
-        // The peek conditions guarantee the indexed neighbor exists.
-        .overlay(alignment: .leading) {
-            if leadingPeek > 0 {
-                peekHitTarget(for: stripOrderedSpaces[start - 1])
-            }
-        }
-        .overlay(alignment: .trailing) {
-            if trailingPeek > 0 {
-                peekHitTarget(for: stripOrderedSpaces[start + visibleCount])
-            }
-        }
-    }
+            ZStack {
+                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                    .fill(themedColor(.settingItemBackground))
 
-    /// Width of `count` uniform strip items plus the gaps between them.
-    private func pipRowWidth(_ count: Int) -> CGFloat {
-        count <= 0 ? 0 : CGFloat(count) * Self.stripItemWidth + CGFloat(count - 1) * Self.stripSpacing
+                if let activeId = slot.activeSpaceId,
+                   visibleSpaces.contains(where: { $0.spaceId == activeId }) {
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(themedColor(.sidebarTabSelectedBackground))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .stroke(themedColor(.border), lineWidth: 1)
+                        }
+                        .matchedGeometryEffect(id: activeId, in: pipGlassNamespace, isSource: false)
+                }
+            }
+            .allowsHitTesting(false)
+        }
+        .frame(width: availableWidth, height: rowHeight, alignment: .leading)
+        .clipped()
     }
 
     /// `stripStartIndex` clamped so the window never runs past the end of the
     /// pip list (after a delete, or a sidebar resize that fits more pips).
     private func clampedStripStart(visibleCount: Int) -> Int {
         min(stripStartIndex, max(0, stripOrderedSpaces.count - visibleCount))
+    }
+
+    /// Keeps the active Space visible synchronously during a resize or switch.
+    /// `stripStartIndex` still supplies the animated target, but layout never
+    /// renders a stale window that contains only a clipped neighbor.
+    private func displayedStripStart(visibleCount: Int) -> Int {
+        guard visibleCount > 0,
+              let activeId = slot.activeSpaceId,
+              let activeIndex = stripOrderedSpaces.firstIndex(where: { $0.spaceId == activeId }) else {
+            return clampedStripStart(visibleCount: visibleCount)
+        }
+        return max(
+            0,
+            min(activeIndex - visibleCount / 2, stripOrderedSpaces.count - visibleCount)
+        )
     }
 
     /// Slides the viewport so the active pip sits centered in the window —
@@ -615,30 +586,18 @@ struct SpacesStripView: View {
         }
     }
 
-    /// How many whole pips fit inside the sliding window, reserving the
-    /// trailing slot for the add button — or the "…" affordance that replaces
-    /// it when not every Space fits — plus, when overflowing, room for the
-    /// half-pip peeks at the window's edges (see `pipsViewport`). All strip
-    /// items share a uniform width, so the count is pure arithmetic.
+    /// Admit as many readable segments as the actual track can hold. Visible
+    /// segments divide the full width evenly; names truncate only after every
+    /// segment has received its minimum comfortable width.
     private func visiblePipCount(availableWidth: CGFloat) -> Int {
         let total = stripOrderedSpaces.count
         guard total > 0 else { return 0 }
-        let item = Self.stripItemWidth
-        let spacing = Self.stripSpacing
-        func width(_ items: Int) -> CGFloat {
-            items <= 0 ? 0 : CGFloat(items) * item + CGFloat(items - 1) * spacing
-        }
-        // Room left of the trailing slot (which keeps a small gap before it).
-        let budget = availableWidth - item - spacing
-        // Everything fits, with the "+" trailing?
-        if width(total) <= budget { return total }
-        // Overflowing: the "…" takes the trailing slot, and BOTH edge peeks
-        // are reserved regardless of the window's position, so the whole-pip
-        // count never reflows while the row slides.
-        let peekAllowance = item + 2 * spacing
-        var count = total - 1
-        while count > 1, width(count) + peekAllowance > budget { count -= 1 }
-        return count
+        let capacity = max(
+            1,
+            Int((availableWidth + Self.stripSpacing)
+                / (Self.minimumSegmentWidth + Self.stripSpacing))
+        )
+        return min(total, capacity)
     }
 
     /// Pips in drag order: the local `stripOrderedIds` snapshot (rearranged live
@@ -653,10 +612,10 @@ struct SpacesStripView: View {
         return result
     }
 
-    /// A single Space's icon, rendered through `SpaceIconView` so phi-icons,
+    /// A single Space segment, rendered through `SpaceIconView` so phi-icons,
     /// emoji, and legacy SF Symbols all display correctly. Tapping switches this
-    /// window to that Space; the active pip stays at full strength while the rest
-    /// dim, so the difference is only brightness — never a different icon style.
+    /// window to that Space; icon and label make the destination understandable
+    /// before the user clicks it.
     /// Small badge in the agent Space pip's top-trailing corner: a green dot
     /// while the agent is working, a grey dot while it's idle between steps, a
     /// hand while the user holds control, a red mark on error, and a check when a
@@ -703,7 +662,7 @@ struct SpacesStripView: View {
         }
     }
 
-    private func spacePip(for space: SpaceModel) -> some View {
+    private func spacePip(for space: SpaceModel, width: CGFloat) -> some View {
         // The highlight follows `activeSpaceId` (matching the Spaces menu).
         // `activate` flips it to the target up front — before the vertical
         // push-in animation starts — so the active pip moves to the new Space
@@ -714,28 +673,35 @@ struct SpacesStripView: View {
         return Button {
             activatePip(space)
         } label: {
-            SpaceIconView(
-                storedValue: space.iconName,
-                size: Self.iconSize,
-                symbolWeight: .semibold,
-                tint: Color.primary
-            )
-            .opacity(isActive ? 1 : 0.4)
-            .frame(width: 24, height: rowHeight)
+            HStack(spacing: 8) {
+                SpaceIconView(
+                    storedValue: space.iconName,
+                    size: Self.iconSize,
+                    symbolWeight: .semibold,
+                    tint: isActive ? Color.primary : Color.secondary
+                )
+                Text(space.name)
+                    .font(.system(size: 13.5, weight: isActive ? .medium : .regular))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+            .foregroundStyle(isActive ? Color.primary : Color.secondary)
+            .opacity(isActive ? 1 : 0.82)
+            .padding(.horizontal, 12)
+            .frame(width: width, height: rowHeight)
             // Publishes this pip's frame under its spaceId, for the
             // strip-level glass chip to target (see `iconStrip`).
             .matchedGeometryEffect(id: space.spaceId, in: pipGlassNamespace)
             .background {
-                // A hovered inactive pip gets the sidebar's dim hover wash,
-                // which stays flat (no shadow). The active pip's liquid-glass
-                // chip is NOT drawn here — it's a single strip-level view
-                // (see `iconStrip`) so a switch slides it between pips.
+                // A hovered inactive segment gets the sidebar's dim hover wash,
+                // which stays flat. The selected surface is drawn once at the
+                // strip level so a switch slides it between segments.
                 if !isActive, highlightedPipId == space.spaceId {
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(Color.sidebarTabHovered)
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(themedColor(.sidebarTabHoveredBackground))
                 }
             }
-            .contentShape(RoundedRectangle(cornerRadius: 8))
+            .contentShape(RoundedRectangle(cornerRadius: 10))
         }
         .buttonStyle(.plain)
         .accessibilityLabel(space.name)
@@ -783,34 +749,6 @@ struct SpacesStripView: View {
         // after the swap (a disappear-then-reappear blink).
         slot.suppressHoverCard(spaceId: space.spaceId)
         slot.activate(spaceId: space.spaceId, userInitiated: true)
-    }
-
-    /// Transparent hit target laid over a peeked half-pip's visible sliver, so
-    /// the half icon hovers and clicks like a full pip. The pip itself stays
-    /// hit-testing-off past the window (see `pipsViewport`): its full-width hit
-    /// region would leak past the clip into the padding / Spacer, while this
-    /// stand-in covers only what the user can see. Visuals come from the real
-    /// pip underneath — the shared `highlightedPipId` draws its hover wash
-    /// (clipped to the same sliver) and `hoverBegan` presents its hover card.
-    private func peekHitTarget(for space: SpaceModel) -> some View {
-        Button {
-            activatePip(space)
-        } label: {
-            Color.clear
-                .frame(width: Self.stripItemWidth / 2, height: rowHeight)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(space.name)
-        .onHover { hovering in
-            if hovering {
-                highlightedPipId = space.spaceId
-                hoverBegan(space.spaceId)
-            } else {
-                if highlightedPipId == space.spaceId { highlightedPipId = nil }
-                hoverEnded(space.spaceId)
-            }
-        }
     }
 
     /// A pip's hover card shows while it (and only it) is hovered, and never
@@ -900,36 +838,6 @@ struct SpacesStripView: View {
         }
     }
 
-    /// Row-level hover driving the add button's reveal. Kept on the slot — not
-    /// view state — so the "+" survives a Space switch: the target window's
-    /// strip is a fresh view instance whose local state would start hidden and
-    /// blink the button off and back on while the pointer never left the row.
-    ///
-    /// Exits are graded by how much their verdict can be trusted:
-    /// - pointer verifiably still in the row → ignore (the order-out exit of a
-    ///   swap's leaving window; the pointer never moved);
-    /// - "outside"/no-authority from the VISIBLE window's strip → clear now
-    ///   (a genuine move-off; its layout is settled). Nil owner (previews)
-    ///   counts as visible;
-    /// - "outside" from a leaving window's strip → defer to the slot's pointer
-    ///   watchdog. During a spawn hand-off that exit lands while the row rect
-    ///   is a mid-surfacing transient (~17.5pt low), and trusting it stranded
-    ///   the "+" hidden under a stationary pointer; the watchdog re-checks
-    ///   against settled geometry and also covers dropped exits.
-    /// The flip animates via the add button's `.animation(_:value:)`.
-    private func stripRowHoverChanged(_ hovering: Bool) {
-        if hovering {
-            guard !slot.isStripRowHovered else { return }
-            slot.isStripRowHovered = true
-            return
-        }
-        if slot.stripRowContainsPointer() == true { return }
-        let owner = resolveOwnerController()
-        guard owner == nil || owner === slot.visibleController else { return }
-        guard slot.isStripRowHovered else { return }
-        slot.isStripRowHovered = false
-    }
-
     /// Presents the icon/emoji picker anchored to a pip when its right-click
     /// "Change Icon…" entry has targeted that Space.
     private func iconEditBinding(for space: SpaceModel) -> Binding<Bool> {
@@ -969,110 +877,14 @@ struct SpacesStripView: View {
         return Shortcuts.key(for: command)
     }
 
-    /// Trailing affordance that opens the create-Space flow, seeding the new
-    /// Space with the active Space's profile so it lands in the same context.
-    /// Shown only while the pointer is over the strip's row — hidden via
-    /// opacity rather than removed, so it keeps the slot `visiblePipCount`
-    /// reserves for it and the pips never reflow on hover.
-    private var addButton: some View {
-        Button {
-            CreateSpacePanel.requestCreation(initialProfileId: activeSpace?.profileId)
-        } label: {
-            Image(systemName: "plus")
-                .font(.system(size: Self.iconSize, weight: .semibold))
-                .foregroundStyle(Color.secondary)
-                .frame(width: Self.stripItemWidth, height: rowHeight)
-                .background(
-                    RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .fill(isAddButtonHovered ? Color.sidebarTabHovered : Color.clear)
-                )
-                .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-        }
-        .buttonStyle(.plain)
-        .opacity(slot.isStripRowHovered ? 1 : 0)
-        .disabled(!slot.isStripRowHovered)
-        .allowsHitTesting(slot.isStripRowHovered)
-        .accessibilityHidden(!slot.isStripRowHovered)
-        .animation(.easeInOut(duration: 0.15), value: slot.isStripRowHovered)
-//        .offset(x: -2)
-        .onHover { isAddButtonHovered = $0 }
-        .help(NSLocalizedString("New Space", comment: "Tooltip for the add-Space button in the sidebar Spaces strip"))
-    }
-
-    /// Overflow affordance shown in the add button's trailing slot when the row
-    /// can't fit every Space. Drops the exact switcher menu the horizontal chip
-    /// uses — every Space plus a "New Space" row, which also carries creation
-    /// while the "+" it replaces is off screen.
-    private var moreButton: some View {
-        Button {
-            isIconPickerOpen = false
-            isPickerOpen = true
-        } label: {
-            Image(systemName: "ellipsis")
-                .font(.system(size: Self.iconSize, weight: .semibold))
-                .foregroundStyle(Color.secondary)
-                .frame(width: Self.stripItemWidth, height: rowHeight)
-                .background(
-                    RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .fill(isMoreButtonHovered ? Color.sidebarTabHovered : Color.clear)
-                )
-                .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-        }
-        .buttonStyle(.plain)
-        .onHover { isMoreButtonHovered = $0 }
-        .help(NSLocalizedString("More Spaces", comment: "Tooltip for the overflow button that opens the full Spaces list"))
-        .background(SpaceSwitcherMenuAnchor(isPresented: $isPickerOpen) { menu in
-            AppController.shared?.populateSpaceSwitcherMenu(menu)
-        })
-    }
-
-    /// The Space-switcher popover content. The horizontal chip lists every Space
-    /// with a "New Space" row; the sidebar's "…" overflow popover passes the
-    /// already-shown pip ids to `excludedSpaceIds` and `showsCreate: false`, so it
-    /// only surfaces the Spaces that didn't fit and leaves creation to the strip's
-    /// own "+" button.
-    @ViewBuilder
-    private func pickerPopup(excludedSpaceIds: Set<String> = [], showsCreate: Bool = true) -> some View {
-        SpacePickerPopup(
-            manager: manager,
-            slot: slot,
-            profileManager: profileManager,
-            windowAppearance: windowAppearance,
-            onActivate: { spaceId in
-                slot.activate(spaceId: spaceId, userInitiated: true)
-                isPickerOpen = false
-            },
-            onRename: { space in
-                isPickerOpen = false
-                promptRename(for: space)
-            },
-            onChangeIcon: { manager.changeIcon(spaceId: $0, iconName: $1) },
-            onSetTheme: { manager.setTheme(forSpaceId: $0, themeId: $1) },
-            currentThemeId: { manager.themeId(forSpaceId: $0) },
-            onDelete: { space in
-                isPickerOpen = false
-                confirmDelete(space)
-            },
-            onCreate: {
-                isPickerOpen = false
-                CreateSpacePanel.requestCreation(initialProfileId: activeSpace?.profileId)
-            },
-            excludedSpaceIds: excludedSpaceIds,
-            showsCreate: showsCreate
-        )
-    }
-
-    private var activeSpace: SpaceModel? {
-        if let id = slot.activeSpaceId {
-            return manager.spaces.first { $0.spaceId == id }
-        }
-        return nil
-    }
-
     /// Resolves a Space's bound profile to a user-visible name, falling back to
     /// the raw profileId if ProfileManager hasn't refreshed yet.
     private func profileDisplayName(for profileId: String) -> String {
         profileManager.profile(for: profileId)?.displayName ?? profileId
+    }
+
+    private func themedColor(_ color: ThemedColor) -> Color {
+        color.swiftUIColor(theme: windowTheme, appearance: windowAppearance)
     }
 
     /// Each Space's accent comes from its pinned theme (or the global theme
@@ -1089,43 +901,6 @@ struct SpacesStripView: View {
         return Color(nsColor: theme.color(for: .textPrimary, appearance: windowAppearance))
     }
 
-    private func promptRename(for space: SpaceModel) {
-        let alert = NSAlert()
-        alert.messageText = NSLocalizedString("Rename Space", comment: "Title of the rename-Space dialog")
-        alert.informativeText = NSLocalizedString("Enter a new name for this Space.", comment: "Body of the rename-Space dialog")
-        alert.addButton(withTitle: NSLocalizedString("Rename", comment: "Rename button"))
-        alert.addButton(withTitle: NSLocalizedString("Cancel", comment: "Cancel button"))
-        let textField = NSTextField(frame: NSRect(x: 0, y: 0, width: 240, height: 24))
-        textField.stringValue = space.name
-        textField.placeholderString = space.name
-        alert.accessoryView = textField
-        DispatchQueue.main.async {
-            textField.window?.makeFirstResponder(textField)
-            textField.selectText(nil)
-        }
-        let response = alert.runModal()
-        guard response == .alertFirstButtonReturn else { return }
-        let trimmed = textField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, trimmed != space.name else { return }
-        manager.renameSpace(spaceId: space.spaceId, to: trimmed)
-    }
-
-    private func confirmDelete(_ space: SpaceModel) {
-        let alert = NSAlert()
-        alert.messageText = String(
-            format: NSLocalizedString("Delete \u{201C}%@\u{201D}?", comment: "Title of the delete-Space confirmation"),
-            space.name
-        )
-        alert.informativeText = NSLocalizedString(
-            "Bookmarks belonging to this Space will also be removed. This action cannot be undone.",
-            comment: "Body of the delete-Space confirmation"
-        )
-        alert.alertStyle = .warning
-        alert.addButton(withTitle: NSLocalizedString("Delete", comment: "Destructive button"))
-        alert.addButton(withTitle: NSLocalizedString("Cancel", comment: "Cancel button"))
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
-        manager.deleteSpace(spaceId: space.spaceId)
-    }
 }
 
 /// Popover content shown by the ellipsis button. Lists every Space with its

@@ -33,74 +33,32 @@ final class PhiBrowserTests: XCTestCase {
         XCTAssertEqual(shortcut.displayString, "⌥⌃←")
     }
 
-    func testThemeSnapshotRoundTripPreservesEditableColorsAndOverlayOpacity() {
-        let theme = Theme(id: "theme-snapshot-round-trip", name: "Snapshot")
-        theme.setColor(
-            light: NSColor(calibratedRed: 0.10, green: 0.20, blue: 0.30, alpha: 0.45),
-            dark: NSColor(calibratedRed: 0.70, green: 0.60, blue: 0.50, alpha: 0.85),
-            for: .windowOverlayBackground
-        )
-        theme.setColor(
-            light: NSColor(calibratedRed: 0.15, green: 0.25, blue: 0.35, alpha: 1.0),
-            dark: NSColor(calibratedRed: 0.65, green: 0.55, blue: 0.45, alpha: 1.0),
-            for: .windowBackground
-        )
-        theme.setColor(
-            light: NSColor(calibratedRed: 0.20, green: 0.40, blue: 0.60, alpha: 1.0),
-            dark: NSColor(calibratedRed: 0.60, green: 0.40, blue: 0.20, alpha: 1.0),
-            for: .themeColor
-        )
-        theme.setColor(
-            light: NSColor(calibratedRed: 0.30, green: 0.50, blue: 0.70, alpha: 1.0),
-            dark: NSColor(calibratedRed: 0.70, green: 0.50, blue: 0.30, alpha: 1.0),
-            for: .extensionActonColor
-        )
+    func testBuiltInThemePaletteUsesRequestedColorsWithZincAsDefault() {
+        XCTAssertEqual(Theme.default, Theme.zinc)
+        XCTAssertEqual(Theme.builtInThemes.map(\.id), ["zinc", "pink", "yellow", "green"])
 
-        let restoredTheme = theme.makeSnapshot().makeTheme()
+        assertColor(Theme.zinc.color(for: .themeColor, appearance: .light), equals: NSColor(hex: 0x71717A))
+        assertColor(Theme.pink.color(for: .themeColor, appearance: .light), equals: NSColor(hex: 0xEF476F))
+        assertColor(Theme.yellow.color(for: .themeColor, appearance: .light), equals: NSColor(hex: 0xFFD166))
+        assertColor(Theme.green.color(for: .themeColor, appearance: .light), equals: NSColor(hex: 0x06D6A0))
 
-        assertColor(
-            restoredTheme.color(for: .windowOverlayBackground, appearance: .light),
-            equals: theme.color(for: .windowOverlayBackground, appearance: .light)
-        )
-        assertColor(
-            restoredTheme.color(for: .windowOverlayBackground, appearance: .dark),
-            equals: theme.color(for: .windowOverlayBackground, appearance: .dark)
-        )
-        assertColor(
-            restoredTheme.color(for: .windowBackground, appearance: .light),
-            equals: theme.color(for: .windowBackground, appearance: .light)
-        )
-        assertColor(
-            restoredTheme.color(for: .themeColor, appearance: .dark),
-            equals: theme.color(for: .themeColor, appearance: .dark)
-        )
-        assertColor(
-            restoredTheme.color(for: .extensionActonColor, appearance: .light),
-            equals: theme.color(for: .extensionActonColor, appearance: .light)
-        )
-        XCTAssertEqual(
-            restoredTheme.windowOverlayOpacity(for: .light),
-            0.45,
-            accuracy: 0.001,
-            "Theme snapshots should preserve the customized light overlay alpha."
-        )
-        XCTAssertEqual(
-            restoredTheme.windowOverlayOpacity(for: .dark),
-            0.85,
-            accuracy: 0.001,
-            "Theme snapshots should preserve the customized dark overlay alpha."
-        )
+        for theme in Theme.builtInThemes {
+            assertColor(
+                theme.color(for: .windowOverlayBackground, appearance: .dark),
+                equals: NSColor(hex: 0x171717)
+            )
+            assertColor(
+                theme.color(for: .windowBackground, appearance: .dark),
+                equals: NSColor(hex: 0x0A0A0A)
+            )
+        }
     }
 
-    func testNormalizedThemeSliderTrackColorKeepsRgbAndForcesFullOpacity() {
-        let sourceColor = NSColor(calibratedRed: 0.21, green: 0.42, blue: 0.63, alpha: 0.37)
-
-        let normalizedColor = normalizedThemeSliderTrackColor(from: sourceColor)
-
-        assertColor(
-            normalizedColor,
-            equals: NSColor(calibratedRed: 0.21, green: 0.42, blue: 0.63, alpha: 1.0)
-        )
+    func testRemovedThemeIdentifiersMigrateToCurrentPalette() {
+        XCTAssertEqual(Theme.migratedBuiltInThemeId("pure"), Theme.zinc.id)
+        XCTAssertEqual(Theme.migratedBuiltInThemeId("coral"), Theme.zinc.id)
+        XCTAssertEqual(Theme.migratedBuiltInThemeId("amber"), Theme.zinc.id)
+        XCTAssertEqual(Theme.migratedBuiltInThemeId("mint"), Theme.zinc.id)
     }
 
     @MainActor
@@ -121,23 +79,19 @@ final class PhiBrowserTests: XCTestCase {
             )
         )
 
-        var observedLightOverlayOpacity: [CGFloat] = []
+        var observedThemeColors: [NSColor] = []
         let subscription = context.subscribe { theme, appearance in
-            observedLightOverlayOpacity.append(theme.windowOverlayOpacity(for: appearance))
+            observedThemeColors.append(theme.color(for: .themeColor, appearance: appearance))
         }
 
-        let updatedTheme = initialTheme.makeSnapshot()
-            .updatingOverlayOpacity(0.72, for: .light)
-            .makeTheme()
+        let updatedTheme = Theme(id: initialTheme.id, name: initialTheme.name)
+        updatedTheme.setColor(ColorPair(NSColor(hex: 0xEF476F)), for: .themeColor)
         context.setTheme(updatedTheme)
 
         _ = subscription
 
-        XCTAssertEqual(
-            observedLightOverlayOpacity,
-            [0.40, 0.72],
-            "Replacing a window theme with a new instance that keeps the same theme identifier should still notify subscribers so overlay alpha changes hot-update active UI."
-        )
+        XCTAssertEqual(observedThemeColors.count, 2)
+        assertColor(observedThemeColors[1], equals: NSColor(hex: 0xEF476F))
     }
 
     func testBookmarkMainMenuItemRoutingKeepsChromiumBookmarksItemUntouched() {
@@ -292,24 +246,6 @@ final class PhiBrowserTests: XCTestCase {
     }
 
     @MainActor
-    func testAuthManagerStartRenewTimerDoesNotReplaceExistingValidTimer() async throws {
-        let authManager = AuthManager()
-
-        authManager.startRenewTimer()
-        let firstTimer = try await waitForRenewTimer(in: authManager)
-
-        authManager.startRenewTimer()
-        let secondTimer = try await waitForRenewTimer(in: authManager)
-
-        authManager.stopRenewTimer()
-
-        XCTAssertTrue(
-            firstTimer === secondTimer,
-            "Starting the renew timer while an existing valid timer is already running should keep the original timer instance instead of invalidating and replacing it."
-        )
-    }
-
-    @MainActor
     func testExtensionPopupAnchorUsesPrimaryScreenHeightForChromiumFlip() {
         let point = NSPoint(x: 240, y: 320)
         let primaryFrame = NSRect(x: 0, y: 0, width: 1920, height: 900)
@@ -341,101 +277,6 @@ final class PhiBrowserTests: XCTestCase {
             chromiumPoint.y,
             -60,
             "Points above the primary display should remain negative after the AppKit-to-Chromium flip."
-        )
-    }
-
-    func testAuthFailureTraceBufferKeepsMostRecentEntries() {
-        let baseDate = Date(timeIntervalSince1970: 1_713_600_000)
-        var tick: TimeInterval = 0
-        let buffer = AuthFailureTraceBuffer(
-            capacity: 2,
-            dateProvider: {
-                defer { tick += 1 }
-                return baseDate.addingTimeInterval(tick)
-            }
-        )
-
-        buffer.record("launch-recovery", details: ["result": "skipped"])
-        buffer.record("credentials", details: ["result": "loaded"])
-        buffer.record("renew", details: ["result": "failed"])
-
-        let rendered = buffer.renderedTrace()
-
-        XCTAssertFalse(
-            rendered.contains("launch-recovery"),
-            "The oldest auth trace entry should be discarded once the buffer reaches capacity."
-        )
-        XCTAssertTrue(rendered.contains("credentials"))
-        XCTAssertTrue(rendered.contains("renew"))
-    }
-
-    func testAuthFailureTraceBufferRendersCallSiteAndSortedDetails() {
-        let buffer = AuthFailureTraceBuffer(
-            capacity: 4,
-            dateProvider: { Date(timeIntervalSince1970: 1_713_600_100) }
-        )
-
-        buffer.record(
-            "transition-logout",
-            details: [
-                "operation": "renew credentials",
-                "reason": "invalid_refresh_token"
-            ],
-            fileID: "Phi/AuthManager.swift",
-            function: "logCredentialsFailure(_:operation:)",
-            line: 321
-        )
-
-        let rendered = buffer.renderedTrace()
-
-        XCTAssertTrue(rendered.contains("transition-logout"))
-        XCTAssertTrue(rendered.contains("operation=renew credentials"))
-        XCTAssertTrue(rendered.contains("reason=invalid_refresh_token"))
-        XCTAssertTrue(rendered.contains("Phi/AuthManager.swift:321"))
-        XCTAssertTrue(rendered.contains("logCredentialsFailure(_:operation:)"))
-    }
-
-    func testAuthFailureTraceBufferEmitsCallStackWhenProvided() {
-        let buffer = AuthFailureTraceBuffer(
-            capacity: 2,
-            dateProvider: { Date(timeIntervalSince1970: 1_713_600_200) }
-        )
-
-        buffer.record(
-            "transition-to-logged-out",
-            details: ["reason": "invalid_refresh_token"],
-            callStackSymbols: ["0  Phi  AuthManager.renew", "1  Phi  AuthManager.run"]
-        )
-
-        let rendered = buffer.renderedTrace()
-        XCTAssertTrue(
-            rendered.contains("stack:"),
-            "Trace lines for forced-logout transitions must include the captured call stack so refresh-token reuse incidents can be correlated to the triggering caller."
-        )
-        XCTAssertTrue(rendered.contains("Phi  AuthManager.renew"))
-    }
-
-    func testLoginWindowGateKeepsOnboardingVisibleUntilAccountPhaseIsDone() {
-        XCTAssertTrue(
-            LoginWindowGate.shouldShowLoginWindow(
-                hasRecoverableSession: true,
-                accountPhase: .setName
-            ),
-            "A recoverable session should not bypass account-scoped onboarding before the phase reaches done."
-        )
-        XCTAssertFalse(
-            LoginWindowGate.shouldShowLoginWindow(
-                hasRecoverableSession: true,
-                accountPhase: .done
-            ),
-            "A completed account-scoped onboarding phase should allow cold-open URLs to continue into Chromium."
-        )
-        XCTAssertTrue(
-            LoginWindowGate.shouldShowLoginWindow(
-                hasRecoverableSession: false,
-                accountPhase: .done
-            ),
-            "Without a recoverable auth session, Phi should still present login."
         )
     }
 
@@ -609,29 +450,6 @@ final class PhiBrowserTests: XCTestCase {
             didInvokeSecondaryAction,
             "Popover grid items should handle right clicks through their dedicated AppKit container."
         )
-    }
-
-    @MainActor
-    private func waitForRenewTimer(
-        in authManager: AuthManager,
-        timeout: TimeInterval = 1
-    ) async throws -> Timer {
-        let deadline = Date().addingTimeInterval(timeout)
-
-        while Date() < deadline {
-            if let timer = renewTimer(in: authManager), timer.isValid {
-                return timer
-            }
-            await Task.yield()
-            RunLoop.main.run(until: Date().addingTimeInterval(0.01))
-        }
-
-        XCTFail("Expected renew timer to become available before timeout.")
-        throw NSError(domain: "PhiBrowserTests", code: 1)
-    }
-
-    private func renewTimer(in authManager: AuthManager) -> Timer? {
-        Mirror(reflecting: authManager).descendant("renewTimer") as? Timer
     }
 
     private func assertColor(

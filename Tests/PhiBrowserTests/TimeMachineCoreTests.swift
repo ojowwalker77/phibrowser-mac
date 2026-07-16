@@ -198,27 +198,6 @@ final class TimeMachineCoreTests: XCTestCase {
         XCTAssertFalse(TimeMachineRestorePhase.reverted.needsRecovery)
     }
 
-    func testSentryTraceStoreDrainsPersistedRecoveryTrace() throws {
-        let root = try makeTemporaryDirectory()
-        let paths = TimeMachinePaths(rootURL: root, bundleIdentifier: "com.phibrowser.Mac")
-        let trace = TimeMachineRestoreRecoveryTrace(
-            status: .blocked,
-            operationID: UUID(uuidString: "00000000-0000-0000-0000-000000000602")!,
-            bundleIdentifier: "com.phibrowser.Mac",
-            phase: .dataSwapped,
-            hasStartedDestructiveSwap: true,
-            reason: "helper launch failed",
-            errorDescription: "launch failed",
-            errorType: "TimeMachineTestError"
-        )
-
-        try TimeMachineSentryTraceStore(paths: paths).append(.restoreRecovery(trace))
-        let drainedTraces = try TimeMachineSentryTraceStore(paths: paths).drain()
-
-        XCTAssertEqual(drainedTraces, [.restoreRecovery(trace)])
-        XCTAssertEqual(try TimeMachineSentryTraceStore(paths: paths).drain(), [])
-    }
-
     private func makeTemporaryDirectory() throws -> URL {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("TimeMachineCoreTests-\(UUID().uuidString)", isDirectory: true)

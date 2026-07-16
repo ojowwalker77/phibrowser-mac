@@ -3,7 +3,10 @@
 
 // Product Settings
 PRODUCT_NAME = Phi
-PRODUCT_BUNDLE_IDENTIFIER = com.ojowwalker77.PhiBrowser
+// Development builds intentionally reuse the installed Phi profile so local
+// work has the same tabs, profiles, cookies, history, and Swift-side Spaces.
+// The fork's distributable Release configuration keeps its separate identity.
+PRODUCT_BUNDLE_IDENTIFIER = com.phibrowser.Mac
 APP_ENTITLEMENTS = Resources/PhiBrowser-OpenSource.entitlements
 
 // Asset Catalog

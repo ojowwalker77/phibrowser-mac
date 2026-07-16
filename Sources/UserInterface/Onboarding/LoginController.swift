@@ -3,254 +3,83 @@
 // Use of this source code is governed by an Apache license that can be
 // found in the LICENSE file.
 
-import Foundation
 import Cocoa
-import SwiftUI
-import Auth0
-import WebKit
-import PostHog
 
-extension Notification.Name {
-    static let loginStatusRefreshCompleted = Notification.Name("LoginStatusRefreshCompleted")
-}
-
-class LoginController {
+/// Owns the optional, entirely local first-run experience.
+///
+/// Phi no longer has an authenticated account lifecycle. The browser always
+/// runs with one local account, while onboarding is only a lightweight setup
+/// flow for layout, browser-data import, and password-manager guidance.
+final class OnboardingController {
     enum Phase: Int {
-        case login = 0
-        case setName
-        case setTheme
+        case layoutSelection = 0
         case importData
-        case layoutSelection
         case passwordManager
         case done
     }
 
-    private let appPhaseKey = PhiPreferences.phiLoginPhase.rawValue
-    private let accountPhaseKey = AccountUserDefaults.DefaultsKey.loginPhase.rawValue
-    
-    var phase: Phase {
-        set {
-            if newValue == .login {
-                appPhase = .login
-                return
-            }
+    static let shared = OnboardingController()
 
-            appPhase = .done
-            currentAccount()?.userDefaults.set(newValue.rawValue, forKey: accountPhaseKey)
-        }
-        get {
-            if appPhase == .login {
-                if let account = currentAccount() {
-                    return accountPhase(for: account)
-                }
-                return .login
-            }
-
-            guard let account = currentAccount() else {
-                return .login
-            }
-
-            return accountPhase(for: account)
-        }
-    }
-
-    static let shared = LoginController()
-    let auth0Manager = AuthManager.shared
-    private(set) var acctiveAccount: Account?
-    var loginWindowController: OnboardingWindowController?
+    private let phaseKey = "PhiOnboardingPhase"
+    private(set) var windowController: OnboardingWindowController?
     private var closeObserver: NSObjectProtocol?
-    
+
     private init() {}
-    
+
     deinit {
-        if let closeObserver = closeObserver {
+        if let closeObserver {
             NotificationCenter.default.removeObserver(closeObserver)
         }
     }
-    
-    @MainActor
-    func showLoginWindow() {
-        AppLogDebug("🔐 [Login] showLoginWindow called")
 
-        if loginWindowController == nil {
-            loginWindowController = OnboardingWindowController()
-            AppLogDebug("🔐 [Login] Creating new LoginWindowController")
-        } else {
-            AppLogDebug("🔐 [Login] Reusing existing LoginWindowController")
-        }
-
-        loginWindowController?.window?.makeKeyAndOrderFront(nil)
-        loginWindowController?.window?.center()
-        closeObserver = NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: loginWindowController?.window, queue: nil) { [weak self] _ in
-            AppLogDebug("🔐 [Login] Login window will close notification received")
-            self?.auth0Manager.cancelOngoingWebAuthentication()
-            self?.loginWindowController = nil
-        }
-        AppLogDebug("🔐 [Login] Login window displayed")
-    }
-
-    /// Returns `true` when onboarding still needs to be shown.
-    @MainActor
-    func orderFrontLoginWindowIfNeeded() -> Bool {
-        let hasRecoverableSession = auth0Manager.hasRecoverableLoginSession()
-        return LoginWindowGate.shouldShowLoginWindow(
-            hasRecoverableSession: hasRecoverableSession,
-            accountPhase: hasRecoverableSession ? phase : nil
-        )
-    }
-    
-    func isLoggedin() -> Bool {
-        guard auth0Manager.hasRecoverableLoginSession() else {
-            return false
-        }
-
-        return phase == .done
-    }
-    
-    func refreshLoginStatusOnLaunching() {
-        Task { @MainActor in
-            await AuthManager.shared.refreshAuthStatus()
-            if let credentials = auth0Manager.currentCredentials {
-                initAccountIfNeeded(credentials)
-            } else if let storedUserInfo = auth0Manager.storedUserInfo() {
-                initAcoountWithUserInfo(storedUserInfo)
-            }
-
-            let hasRecoverableSession = auth0Manager.hasRecoverableLoginSession()
-            if !LoginWindowGate.shouldShowLoginWindow(
-                hasRecoverableSession: hasRecoverableSession,
-                accountPhase: hasRecoverableSession ? phase : nil
-            ) {
-                closeLoginWindow()
-            }
-            NotificationCenter.default.post(name: .loginStatusRefreshCompleted, object: nil)
-        }
-    }
-    
-    func initAccountIfNeeded(_ credentials: Credentials) {
-        AppLogDebug("🔐 [Login] initAccountIfNeeded called")
-        let user = AuthManager.retriveUserInfo(from: credentials)
-        let userID = user.sub ?? Account.defaultUid
-        AppLogDebug("🔐 [Login] Retrieved user info - userID: \(userID), name: \(user.name ?? "nil"), email: \(user.email ?? "nil")")
-
-        // Restore PostHog identity for returning users — covers session
-        // recovery on launch, where no explicit login event fires.
-        if let sub = user.sub {
-            PostHogSDK.shared.identify(sub)
-        }
-
-        if let current = AccountController.shared.account {
-            AppLogDebug("🔐 [Login] Current account exists: \(current.userID)")
-            if current.userID == userID {
-                return
-            }
-            AppLogDebug("🔐 [Login] Different user, replacing account")
-        } else {
-            AppLogDebug("🔐 [Login] No current account, creating new one")
-        }
-        
-        AccountController.shared.account = Account(userID: userID, userInfo: user)
-        if appPhase == .login {
-            appPhase = .done
-        }
-        _ = currentAccount().map(accountPhase(for:))
-        AppLogInfo("🔐 [Login] Account created and set for user: \(userID)")
-    }
-
-    
-    func initAcoountWithUserInfo(_ userInfo: UserInfo) {
-        if let current = AccountController.shared.account,
-           current.userID == userInfo.sub {
-            return
-        } else {
-            AccountController.shared.account = Account(userID: userInfo.sub, userInfo: .init(userInfo))
-            if appPhase == .login {
-                appPhase = .done
-            }
-            _ = currentAccount().map(accountPhase(for:))
-        }
-    }
-    
-    @MainActor
-    func closeLoginWindow() {
-        loginWindowController?.window?.close()
-        loginWindowController = nil
-    }
-    
-    @MainActor
-    func loginWithAuth0(with window: NSWindow? = nil, onWebViewCreated: ((WKWebView) -> Void)? = nil) async -> Credentials? {
-        AppLogDebug("🔐 [Login] Logging in with default flow")
-        let result = await auth0Manager.login()
-        switch result {
-        case .success(let credentials):
-            return await MainActor.run {
-                initAccountIfNeeded(credentials)
-                return credentials
-            }
-        case .failure(let error):
-            AppLogError("🔐 [Login] ❌ Login failed: \(error.localizedDescription)")
-        }
-        return nil
-    }
-
-    private var appPhase: Phase {
+    var phase: Phase {
         get {
-            let rawValue = UserDefaults.standard.integer(forKey: appPhaseKey)
-            return rawValue == Phase.login.rawValue ? .login : .done
+            guard UserDefaults.standard.object(forKey: phaseKey) != nil else {
+                // Existing DMG users already completed the legacy onboarding.
+                // Sharing its profile should not force them through setup again.
+                if UserDefaults.standard.integer(forKey: PhiPreferences.phiLoginPhase.rawValue) == 6 {
+                    return .done
+                }
+                return .layoutSelection
+            }
+            return Phase(rawValue: UserDefaults.standard.integer(forKey: phaseKey)) ?? .layoutSelection
         }
         set {
-            let rawValue = newValue == .login ? Phase.login.rawValue : Phase.done.rawValue
-            UserDefaults.standard.set(rawValue, forKey: appPhaseKey)
+            UserDefaults.standard.set(newValue.rawValue, forKey: phaseKey)
         }
     }
 
-    private func currentAccount() -> Account? {
-        if let account = AccountController.shared.account {
-            return account
-        }
+    var isComplete: Bool { phase == .done }
 
-        if auth0Manager.hasRecoverableLoginSession(),
-           let credentials = auth0Manager.currentCredentials {
-            initAccountIfNeeded(credentials)
-            return AccountController.shared.account
-        }
-
-        if auth0Manager.hasRecoverableLoginSession(),
-           let storedUserInfo = auth0Manager.storedUserInfo() {
-            initAcoountWithUserInfo(storedUserInfo)
-            return AccountController.shared.account
-        }
-
-        return nil
+    @MainActor
+    func showIfNeeded() {
+        guard !isComplete else { return }
+        show()
     }
 
-    private func accountPhase(for account: Account) -> Phase {
-        if let storedPhase = storedAccountPhase(for: account) {
-            return storedPhase
+    @MainActor
+    func show() {
+        if windowController == nil {
+            windowController = OnboardingWindowController()
         }
 
-        account.userDefaults.set(Phase.setName.rawValue, forKey: accountPhaseKey)
-        return .setName
+        guard let window = windowController?.window else { return }
+        window.makeKeyAndOrderFront(nil)
+        window.center()
+        NSApp.activate(ignoringOtherApps: true)
+
+        closeObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.willCloseNotification,
+            object: window,
+            queue: nil
+        ) { [weak self] _ in
+            self?.windowController = nil
+        }
     }
 
-    private func storedAccountPhase(for account: Account) -> Phase? {
-        guard account.userDefaults.object(forKey: accountPhaseKey) != nil else {
-            return nil
-        }
-
-        let rawValue = account.userDefaults.integer(forKey: accountPhaseKey)
-        return Phase(rawValue: rawValue)
-    }
-}
-
-struct LoginWindowGate {
-    static func shouldShowLoginWindow(
-        hasRecoverableSession: Bool,
-        accountPhase: LoginController.Phase?
-    ) -> Bool {
-        guard hasRecoverableSession else {
-            return true
-        }
-        return accountPhase != .done
+    @MainActor
+    func close() {
+        windowController?.close()
+        windowController = nil
     }
 }

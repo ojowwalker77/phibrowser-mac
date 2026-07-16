@@ -8,7 +8,16 @@ import SwiftUI
 
 // MARK: - NSImage Tinting Extension
 
-public extension NSImage {}
+public extension NSImage {
+    func tinted(with color: NSColor) -> NSImage {
+        guard let image = copy() as? NSImage else { return self }
+        image.lockFocus()
+        color.set()
+        NSRect(origin: .zero, size: image.size).fill(using: .sourceAtop)
+        image.unlockFocus()
+        return image
+    }
+}
 
 // MARK: - ThemedImage
 

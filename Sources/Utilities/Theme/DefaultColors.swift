@@ -7,8 +7,8 @@ import AppKit
 
 public enum DefaultColors {
     public static let themeColor = ColorPair(
-        light: NSColor(hex: 0x3AA4D5),
-        dark: NSColor(hex: 0x1E7099)
+        light: NSColor(hex: 0x71717A),
+        dark: NSColor(hex: 0x71717A)
     )
     
     public static let extensionActonColor = ColorPair(
@@ -17,63 +17,63 @@ public enum DefaultColors {
     )
     
     public static let themeColorOnHover = ColorPair(
-        light: NSColor(hex: 0x248AB9),
-        dark: NSColor(hex: 0x368CB7)
+        light: NSColor(hex: 0x52525B),
+        dark: NSColor(hex: 0xA1A1AA)
     )
     
     public static let textPrimary = ColorPair(
-        light: .black.withAlphaComponent(0.85),
-        dark: .white.withAlphaComponent(0.8)
+        light: NSColor(hex: 0x292724),
+        dark: NSColor(hex: 0xE6E4E1)
     )
     
     public static let textPrimaryStrong = ColorPair(
-        light: .black.withAlphaComponent(1),
-        dark: .white.withAlphaComponent(1)
+        light: NSColor(hex: 0x171615),
+        dark: NSColor(hex: 0xF5F3F0)
     )
     
     public static let textSecondary = ColorPair(
-        light: NSColor(white: 0.4, alpha: 1),
-        dark: NSColor(white: 0.7, alpha: 1)
+        light: NSColor(hex: 0x6B6965),
+        dark: NSColor(hex: 0x9C9A96)
     )
     
     public static let textTertiary = ColorPair(
-        light: NSColor(white: 0, alpha: 0.3),
-        dark: NSColor(white: 1, alpha: 0.3)
+        light: NSColor(hex: 0x9C9A96),
+        dark: NSColor(hex: 0x6B6965)
     )
     
     public static let windowOverlayBackground = ColorPair(
-        light: NSColor(hex: 0xCCCCCC, alpha: ThemeDefaults.overlayLightOpacity),
-        dark:  NSColor(hex: 0x0B2938, alpha: ThemeDefaults.overlayDarkOpacity)
+        light: NSColor(hex: 0xF2F0EC),
+        dark: NSColor(hex: 0x171717)
     )
     
     public static let windowBackground = ColorPair(
-        light:  NSColor(hex: 0xEAEAEA),
-        dark: NSColor(hex: 0x252525)
+        light: NSColor(hex: 0xE9E6E1),
+        dark: NSColor(hex: 0x0A0A0A)
     )
     
     public static let settingItemBackground = ColorPair(
-        light:  NSColor.black.withAlphaComponent(0.02),
-        dark: NSColor.white.withAlphaComponent(0.02)
+        light: NSColor.black.withAlphaComponent(0.04),
+        dark: NSColor.white.withAlphaComponent(0.04)
     )
     
     public static let sidebarTabSelectedBackground = ColorPair(
-        light: NSColor(white: 1, alpha: 1),
-        dark: NSColor(white: 0, alpha: 0.3)
+        light: NSColor.black.withAlphaComponent(0.08),
+        dark: NSColor.white.withAlphaComponent(0.08)
     )
     
     public static let sidebarTabHoveredBackground = ColorPair(
-        light: NSColor(white: 0, alpha: 0.04),
-        dark: NSColor(white: 1, alpha: 0.04)
+        light: NSColor.black.withAlphaComponent(0.05),
+        dark: NSColor.white.withAlphaComponent(0.05)
     )
     
     public static let border = ColorPair(
-        light: NSColor(white: 0, alpha:0.08),
-        dark: NSColor(white: 1, alpha:0.08)
+        light: NSColor.black.withAlphaComponent(0.10),
+        dark: NSColor.white.withAlphaComponent(0.07)
     )
     
     public static let separator = ColorPair(
-        light: NSColor.black.withAlphaComponent(0.06),
-        dark: NSColor.white.withAlphaComponent(0.06)
+        light: NSColor.black.withAlphaComponent(0.08),
+        dark: NSColor.white.withAlphaComponent(0.07)
     )
     
     public static func colorPair(for role: ColorRole) -> ColorPair {

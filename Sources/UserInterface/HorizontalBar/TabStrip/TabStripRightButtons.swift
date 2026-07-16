@@ -14,16 +14,6 @@ struct TabStripRightButtons: View {
     let onCardEntryTap: () -> Void
     let onSearchTabsTap: (NSView?) -> Void
 
-    // Organize-tabs is unavailable when AI is disabled, in incognito windows,
-    // or when there are too few eligible tabs. `@AppStorage` keeps the AI toggle
-    // reactive.
-    @AppStorage(PhiPreferences.AISettings.phiAIEnabled.rawValue)
-    private var phiAIEnabled: Bool = PhiPreferences.AISettings.phiAIEnabled.defaultValue
-
-    /// `BrowserState` isn't an `ObservableObject`, so the eligible page count is
-    /// mirrored from the `$normalTabs` publisher via `onReceive`.
-    @State private var eligibleTabCount: Int
-
     init(
         cardManager: NotificationCardManager,
         browserState: BrowserState,
@@ -34,8 +24,6 @@ struct TabStripRightButtons: View {
         self.browserState = browserState
         self.onCardEntryTap = onCardEntryTap
         self.onSearchTabsTap = onSearchTabsTap
-        _eligibleTabCount = State(
-            initialValue: FarringdonOrganizer.eligibleTabCount(in: browserState.normalTabs))
     }
 
     var body: some View {
@@ -50,17 +38,9 @@ struct TabStripRightButtons: View {
                     )
             }
 
-            if showFarringdonButton {
-                TabStripFarringdonButton(eligibleTabCount: eligibleTabCount)
-            }
-
             TabStripSearchTabsButton(action: onSearchTabsTap)
         }
-        .onReceive(browserState.$normalTabs.receive(on: DispatchQueue.main)) { tabs in
-            eligibleTabCount = FarringdonOrganizer.eligibleTabCount(in: tabs)
-        }
         .animation(.spring(response: 0.3, dampingFraction: 0.7), value: showCardEntry)
-        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: showFarringdonButton)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
 //        .offset(y: -4) // Visual alignment adjustment
         .ignoresSafeArea()
@@ -70,95 +50,6 @@ struct TabStripRightButtons: View {
         cardManager.latestCard != nil
     }
 
-    private var showFarringdonButton: Bool {
-        FarringdonOrganizer.canOrganizeTabs(
-            phiAIEnabled: phiAIEnabled,
-            isIncognito: browserState.isIncognito,
-            eligibleTabCount: eligibleTabCount
-        )
-    }
-}
-
-/// "Organize tabs with AI" (Farringdon) button for the horizontal tab strip,
-/// shown next to the search button. Triggers the same focused-window organize run
-/// as the sidebar broom and loops its Lottie animation while a run is in progress
-/// (driven by the shared `.farringdonOrganizeDidStart` /
-/// `.farringdonOrganizeDidFinish` events).
-private struct TabStripFarringdonButton: View {
-    let eligibleTabCount: Int
-
-    @StateObject private var lottieState = LottieAnimationViewState()
-    @State private var isOrganizing = false
-    @State private var organizeStartedAt: Date?
-    @State private var anchorView: NSView?
-
-    private let buttonSize: CGFloat = 24
-    private static let safetyTimeout: TimeInterval = 8.0
-
-    private let animationConfig = LottieAnimationViewConfig(
-        animationName: "broom",
-        size: CGSize(width: 24, height: 24),
-        hoverBackgroundColor: Color.sidebarTabHovered,
-        cornerRadius: 6,
-        animationTrigger: .manual,
-        themedTintColor: .custom(light: .black, dark: .white),
-        loopMode: .loop
-    )
-
-    private var label: String {
-        NSLocalizedString(
-            "Organize tabs with AI",
-            comment: "Organize Tabs - Button tooltip and accessibility label")
-    }
-
-    var body: some View {
-        LottieAnimationView(config: animationConfig, state: lottieState) {
-            guard !isOrganizing else { return }
-            FarringdonOrganizer.organizeFocusedWindow(eligibleTabCount: eligibleTabCount)
-        }
-        .frame(width: buttonSize, height: buttonSize)
-        .background(
-            TabStripAnchorReader { view in
-                self.anchorView = view
-            }
-        )
-        .help(label)
-        .accessibilityLabel(Text(label))
-        .onReceive(NotificationCenter.default.publisher(for: .farringdonOrganizeDidStart)) { _ in
-            // Only the window that triggered the run (the key window) animates.
-            guard anchorView?.window?.isKeyWindow == true else { return }
-            startAnimation()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .farringdonOrganizeDidFinish)) { _ in
-            stopAnimation()
-        }
-    }
-
-    private func startAnimation() {
-        guard !isOrganizing else { return }
-        isOrganizing = true
-        organizeStartedAt = Date()
-        lottieState.triggerAnimation()
-        // Stop even if the completion signal never arrives.
-        DispatchQueue.main.asyncAfter(deadline: .now() + Self.safetyTimeout) {
-            stopAnimation()
-        }
-    }
-
-    private func stopAnimation() {
-        guard isOrganizing else { return }
-
-        // Complete at least one full playback even when the organize run finishes immediately.
-        let elapsed = organizeStartedAt.map { Date().timeIntervalSince($0) }
-            ?? BroomAnimation.minimumPlaybackDuration
-        let remaining = max(0, BroomAnimation.minimumPlaybackDuration - elapsed)
-        DispatchQueue.main.asyncAfter(deadline: .now() + remaining) {
-            guard isOrganizing else { return }
-            isOrganizing = false
-            organizeStartedAt = nil
-            lottieState.stopAnimation()
-        }
-    }
 }
 
 private struct TabStripSearchTabsButton: View {

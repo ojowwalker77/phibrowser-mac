@@ -16,7 +16,7 @@ protocol MemoryUsageReporting: AnyObject {
 final class MemoryUsageMonitor {
     static let shared = MemoryUsageMonitor(
         sampler: ProcessMemorySampler(),
-        reporter: SentryMemoryUsageReporter()
+        reporter: LocalMemoryUsageReporter()
     )
 
     private let sampler: MemoryUsageSampling
@@ -120,8 +120,8 @@ final class MemoryUsageMonitor {
     }
 }
 
-private final class SentryMemoryUsageReporter: MemoryUsageReporting {
+private final class LocalMemoryUsageReporter: MemoryUsageReporting {
     func reportMemoryThresholdExceeded(snapshot: MemoryUsageSnapshot) {
-        SentryService.captureMemoryThresholdExceeded(snapshot: snapshot)
+        AppLogWarn("[MemoryMonitor] Resident memory exceeded \(snapshot.thresholdBytes) bytes")
     }
 }
