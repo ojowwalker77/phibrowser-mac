@@ -11,3 +11,4 @@ CR_PRODUCT_DIR_NAME = ${PRODUCT_BUNDLE_IDENTIFIER}
 URL_SCHEME = https:/
 // Note: ${APPCAST_PATH} is defined in each configuration file and will be expanded when SUFEED_URL is used
 SUFEED_URL = ${URL_SCHEME}/ota.phibrowser.com/${APPCAST_PATH}/PhiBrowserMacUpdate.xml
+SPARKLE_PUBLIC_KEY = eu4wYg6JQMROgPO7MjCHhVSZ+hcmjAEqmc1gecvGWSA=

@@ -3,15 +3,18 @@
 
 // Product Settings
 PRODUCT_NAME = Phi
-PRODUCT_BUNDLE_IDENTIFIER = com.phibrowser.Mac
-APP_ENTITLEMENTS = Resources/PhiBrowser.entitlements
+PRODUCT_BUNDLE_IDENTIFIER = com.ojowwalker77.PhiBrowser
+APP_ENTITLEMENTS = Resources/PhiBrowser-OpenSource.entitlements
 
 // Asset Catalog
 ASSETCATALOG_COMPILER_APPICON_NAME = PhiIcon
 
-// Sparkle Update Feed
-APPCAST_PATH = mac-public/appcast
+// Fork-owned Sparkle update channel.
+SUFEED_URL = ${URL_SCHEME}/github.com/ojowwalker77/phibrowser-mac/releases/latest/download/appcast.xml
+SPARKLE_PUBLIC_KEY = 1kxlIDM9JRvNTJ2dEzLpQJIwnxKIxCYXp6Nd4QebPAw=
 
 // Build Settings for Release
 SWIFT_COMPILATION_MODE = wholemodule
-// SWIFT_OPTIMIZATION_LEVEL = -O
+SWIFT_OPTIMIZATION_LEVEL = -O
+ARCHS = arm64
+ONLY_ACTIVE_ARCH = NO

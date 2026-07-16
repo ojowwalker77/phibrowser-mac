@@ -1,0 +1,43 @@
+name: Build Fork
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-fork-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build Apple Silicon app
+    runs-on: macos-26
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download verified Phi Framework
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PHI_FRAMEWORK_VERSION: ${{ vars.PHI_FRAMEWORK_VERSION || 'v2.2.0' }}
+        run: ./script/fetch_phi_framework.sh
+
+      - name: Build fork release configuration
+        run: |
+          xcodebuild \
+            -project Phi.xcodeproj \
+            -scheme PhiBrowser-release \
+            -configuration Release \
+            -destination 'generic/platform=macOS' \
+            -derivedDataPath "$RUNNER_TEMP/DerivedData" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            build

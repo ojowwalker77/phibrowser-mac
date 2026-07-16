@@ -40,6 +40,11 @@ Free for macOS on Apple Silicon: [phibrowser.com](https://phibrowser.com)
 5. Select the `PhiBrowser-OpenSource` scheme.
 6. Build.
 
+For this fork, `./script/build_and_run.sh --verify` downloads and verifies the
+framework when needed, builds the app, launches it, and confirms that the
+process started. Signed and notarized releases are documented in
+[`RELEASING.md`](RELEASING.md).
+
 ## Contributing
 
 Contributions are welcome. Found a bug, have an idea, or want to add a feature? Open an issue first. To contribute code, send a PR with a clear description of the change and the motivation behind it.

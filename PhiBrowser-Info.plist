@@ -80,7 +80,7 @@
 	<key>SUFeedURL</key>
 	<string>$(SUFEED_URL)</string>
 	<key>SUPublicEDKey</key>
-	<string>eu4wYg6JQMROgPO7MjCHhVSZ+hcmjAEqmc1gecvGWSA=</string>
+	<string>$(SPARKLE_PUBLIC_KEY)</string>
 	<key>SUScheduledCheckInterval</key>
 	<integer>7200</integer>
 	<key>NSBluetoothAlwaysUsageDescription</key>

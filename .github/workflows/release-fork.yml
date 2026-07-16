@@ -1,0 +1,236 @@
+name: Release Fork
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release version without the v prefix (for example 0.1.0)
+        required: true
+        type: string
+      framework_version:
+        description: phibrowser-framework release tag
+        required: false
+        default: v2.2.0
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-fork
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Sign, notarize, and publish
+    runs-on: macos-26
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve release metadata
+        id: release
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+          INPUT_FRAMEWORK_VERSION: ${{ inputs.framework_version }}
+          DEFAULT_FRAMEWORK_VERSION: ${{ vars.PHI_FRAMEWORK_VERSION }}
+        run: |
+          if [[ "$GITHUB_EVENT_NAME" == "push" ]]; then
+            version="${GITHUB_REF_NAME#v}"
+          else
+            version="$INPUT_VERSION"
+          fi
+
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Version must be stable semantic versioning: X.Y.Z" >&2
+            exit 1
+          fi
+
+          framework_version="${INPUT_FRAMEWORK_VERSION:-${DEFAULT_FRAMEWORK_VERSION:-v2.2.0}}"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=v$version" >> "$GITHUB_OUTPUT"
+          echo "framework_version=$framework_version" >> "$GITHUB_OUTPUT"
+
+      - name: Verify required secrets
+        env:
+          CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: |
+          for name in CERTIFICATE_P12 CERTIFICATE_PASSWORD APPLE_API_KEY APPLE_API_KEY_ID APPLE_API_ISSUER SPARKLE_PRIVATE_KEY; do
+            if [[ -z "${!name}" ]]; then
+              echo "Missing required secret: $name" >&2
+              exit 1
+            fi
+          done
+
+      - name: Download verified Phi Framework
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PHI_FRAMEWORK_VERSION: ${{ steps.release.outputs.framework_version }}
+        run: ./script/fetch_phi_framework.sh
+
+      - name: Import Developer ID certificate
+        env:
+          CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+        run: |
+          certificate_path="$RUNNER_TEMP/developer-id.p12"
+          keychain_path="$RUNNER_TEMP/release-signing.keychain-db"
+          keychain_password="$(openssl rand -base64 36)"
+
+          printf '%s' "$CERTIFICATE_P12" | base64 --decode > "$certificate_path"
+          security create-keychain -p "$keychain_password" "$keychain_path"
+          security set-keychain-settings -lut 21600 "$keychain_path"
+          security unlock-keychain -p "$keychain_password" "$keychain_path"
+          security import "$certificate_path" -k "$keychain_path" \
+            -P "$CERTIFICATE_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$keychain_password" "$keychain_path"
+          security list-keychains -d user -s "$keychain_path"
+          security default-keychain -d user -s "$keychain_path"
+          security find-identity -v -p codesigning "$keychain_path"
+
+      - name: Archive signed app
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+          TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+        run: |
+          xcodebuild \
+            -project Phi.xcodeproj \
+            -scheme PhiBrowser-release \
+            -configuration Release \
+            -destination 'generic/platform=macOS' \
+            -derivedDataPath "$RUNNER_TEMP/DerivedData" \
+            -archivePath "$RUNNER_TEMP/Phi.xcarchive" \
+            MARKETING_VERSION="$VERSION" \
+            CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER" \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY='Developer ID Application' \
+            DEVELOPMENT_TEAM="$TEAM_ID" \
+            CODE_SIGNING_ALLOWED=YES \
+            CODE_SIGNING_REQUIRED=YES \
+            PROVISIONING_PROFILE_SPECIFIER= \
+            archive
+
+      - name: Re-sign Chromium helpers and verify bundle
+        env:
+          TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+        run: |
+          app="$RUNNER_TEMP/Phi.xcarchive/Products/Applications/Phi.app"
+          identity="Developer ID Application: Jonatas Walker ($TEAM_ID)"
+          ./script/sign_phi_bundle.sh \
+            "$app" \
+            "$identity" \
+            "$GITHUB_WORKSPACE/Resources/PhiBrowser-OpenSource.entitlements"
+
+          codesign -dv --verbose=4 "$app" 2>&1 | grep -E 'Identifier=|Authority=|TeamIdentifier=|Runtime Version'
+
+      - name: Notarize and package
+        id: package
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: |
+          app="$RUNNER_TEMP/Phi.xcarchive/Products/Applications/Phi.app"
+          dist="$RUNNER_TEMP/dist"
+          notarization_zip="$RUNNER_TEMP/Phi-notarization.zip"
+          api_key_path="$RUNNER_TEMP/AuthKey_${APPLE_API_KEY_ID}.p8"
+          sparkle_key_path="$RUNNER_TEMP/sparkle-private-key"
+          update_zip="Phi-Browser-${VERSION}-arm64.zip"
+          dmg_name="Phi-Browser-${VERSION}-arm64.dmg"
+
+          mkdir -p "$dist" "$RUNNER_TEMP/dmg-root" "$RUNNER_TEMP/appcast"
+          printf '%s' "$APPLE_API_KEY" > "$api_key_path"
+          printf '%s' "$SPARKLE_PRIVATE_KEY" > "$sparkle_key_path"
+          chmod 600 "$api_key_path" "$sparkle_key_path"
+
+          ditto -c -k --keepParent "$app" "$notarization_zip"
+          xcrun notarytool submit "$notarization_zip" \
+            --key "$api_key_path" \
+            --key-id "$APPLE_API_KEY_ID" \
+            --issuer "$APPLE_API_ISSUER" \
+            --wait
+
+          xcrun stapler staple "$app"
+          xcrun stapler validate "$app"
+          spctl --assess --type execute --verbose=4 "$app"
+
+          ditto -c -k --keepParent "$app" "$dist/$update_zip"
+          ditto "$app" "$RUNNER_TEMP/dmg-root/Phi.app"
+          hdiutil create \
+            -volname "Phi Browser" \
+            -srcfolder "$RUNNER_TEMP/dmg-root" \
+            -ov -format UDZO \
+            "$dist/$dmg_name"
+
+          xcrun notarytool submit "$dist/$dmg_name" \
+            --key "$api_key_path" \
+            --key-id "$APPLE_API_KEY_ID" \
+            --issuer "$APPLE_API_ISSUER" \
+            --wait
+          xcrun stapler staple "$dist/$dmg_name"
+          xcrun stapler validate "$dist/$dmg_name"
+
+          ditto "$dist/$update_zip" "$RUNNER_TEMP/appcast/$update_zip"
+          sparkle_bin="$(find "$RUNNER_TEMP/DerivedData/SourcePackages/artifacts/sparkle" -type d -path '*/Sparkle/bin' -print -quit)"
+          if [[ -z "$sparkle_bin" ]]; then
+            echo "Could not locate Sparkle release tools." >&2
+            exit 1
+          fi
+
+          "$sparkle_bin/generate_appcast" \
+            --ed-key-file "$sparkle_key_path" \
+            --download-url-prefix "https://github.com/${GITHUB_REPOSITORY}/releases/download/v${VERSION}/" \
+            --maximum-deltas 0 \
+            -o "$dist/appcast.xml" \
+            "$RUNNER_TEMP/appcast"
+
+          shasum -a 256 "$dist/$update_zip" "$dist/$dmg_name" "$dist/appcast.xml"
+          echo "dist=$dist" >> "$GITHUB_OUTPUT"
+          echo "zip=$update_zip" >> "$GITHUB_OUTPUT"
+          echo "dmg=$dmg_name" >> "$GITHUB_OUTPUT"
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Phi-Browser-${{ steps.release.outputs.version }}
+          path: |
+            ${{ steps.package.outputs.dist }}/${{ steps.package.outputs.zip }}
+            ${{ steps.package.outputs.dist }}/${{ steps.package.outputs.dmg }}
+            ${{ steps.package.outputs.dist }}/appcast.xml
+          if-no-files-found: error
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.release.outputs.tag }}
+          VERSION: ${{ steps.release.outputs.version }}
+          DIST: ${{ steps.package.outputs.dist }}
+          ZIP_NAME: ${{ steps.package.outputs.zip }}
+          DMG_NAME: ${{ steps.package.outputs.dmg }}
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" \
+              "$DIST/$ZIP_NAME" "$DIST/$DMG_NAME" "$DIST/appcast.xml" \
+              --clobber
+          else
+            gh release create "$TAG" \
+              "$DIST/$ZIP_NAME" "$DIST/$DMG_NAME" "$DIST/appcast.xml" \
+              --target "$GITHUB_SHA" \
+              --title "Phi Browser $VERSION" \
+              --generate-notes
+          fi
