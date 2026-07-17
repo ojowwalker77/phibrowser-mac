@@ -23,7 +23,7 @@ struct FaviconConfiguration {
 
     static let noCornerRadius = FaviconConfiguration(cornerRadius: 0)
 
-    /// Path prefixes for internal scheme URLs (`phi://` or `chrome://`) that should
+    /// Path prefixes for internal scheme URLs (`lua://`, legacy `phi://`, or `chrome://`) that should
     /// display the default Phi favicon instead of fetching a remote icon.
     static let defaultFaviconPathPrefixes: [String] = [
         "newtab",
@@ -38,7 +38,9 @@ struct FaviconConfiguration {
         if str.isLocalUrlString { return true }
 
         let path: Substring
-        if str.hasPrefix("phi://") {
+        if str.hasPrefix("lua://") {
+            path = str.dropFirst("lua://".count)
+        } else if str.hasPrefix("phi://") {
             path = str.dropFirst("phi://".count)
         } else if str.hasPrefix("chrome://") {
             path = str.dropFirst("chrome://".count)

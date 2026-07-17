@@ -44,8 +44,8 @@ extension AppController {
     @MainActor
     @objc func importUserDataFromBackup(_ sender: Any?) {
         let confirm = NSAlert()
-        confirm.messageText = NSLocalizedString("Import Phi User Data?", comment: "Debug import user data - Confirmation alert title before replacing Phi user data from zip")
-        confirm.informativeText = NSLocalizedString("This replaces the Phi user data folder with the archive and restarts Phi. Save your work first.", comment: "Debug import user data - Confirmation alert body warning data replacement and relaunch")
+        confirm.messageText = NSLocalizedString("Import Lua User Data?", comment: "Debug import user data - Confirmation alert title before replacing browser user data from zip")
+        confirm.informativeText = NSLocalizedString("This replaces the Lua browser data with the archive and restarts Lua. Save your work first.", comment: "Debug import user data - Confirmation alert body warning data replacement and relaunch")
         confirm.alertStyle = .warning
         confirm.addButton(withTitle: NSLocalizedString("Import...", comment: "Debug import user data - Alert button to open file picker for zip backup"))
         confirm.addButton(withTitle: NSLocalizedString("Cancel", comment: "Debug import user data - Alert button to cancel importing user data"))
@@ -58,7 +58,7 @@ extension AppController {
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
         panel.allowedContentTypes = [.zip]
-        panel.title = NSLocalizedString("Select Phi User Data Backup", comment: "Debug import user data - NSOpenPanel title for choosing a Phi user data zip")
+        panel.title = NSLocalizedString("Select Lua User Data Backup", comment: "Debug import user data - NSOpenPanel title for choosing a browser user data zip")
 
         guard panel.runModal() == .OK, let zipURL = panel.url else {
             return
@@ -136,7 +136,7 @@ extension AppController {
     private func promptBackupBeforeClearingPhiUserData() -> PhiUserDataBackupPromptResult {
         let alert = NSAlert()
         alert.messageText = NSLocalizedString("Back Up User Data First?", comment: "Debug clear data - Alert title asking whether to export Phi user data before clearing")
-        alert.informativeText = NSLocalizedString("You can save a zip of your Phi user data folder before local files are removed and the app quits.", comment: "Debug clear data - Alert body explaining optional zip backup before clearing user data")
+        alert.informativeText = NSLocalizedString("You can save a zip of your Lua browser data before local files are removed and the app quits.", comment: "Debug clear data - Alert body explaining optional zip backup before clearing user data")
         alert.alertStyle = .informational
         alert.addButton(withTitle: NSLocalizedString("Backup...", comment: "Debug clear data - Alert button to open the save panel for a Phi user data zip"))
         alert.addButton(withTitle: NSLocalizedString("Skip Backup", comment: "Debug clear data - Alert button to clear data without creating a backup zip"))
@@ -158,8 +158,8 @@ extension AppController {
 
         if !fm.fileExists(atPath: phiPath) {
             let alert = NSAlert()
-            alert.messageText = NSLocalizedString("No Phi User Data to Back Up", comment: "Debug clear data - Alert title when the Phi data folder is missing before backup")
-            alert.informativeText = NSLocalizedString("The Phi user data folder was not found. Continuing will still remove other local application data and quit.", comment: "Debug clear data - Alert body when Phi folder is missing; clearing will still proceed for other locations")
+            alert.messageText = NSLocalizedString("No Lua User Data to Back Up", comment: "Debug clear data - Alert title when browser data is missing before backup")
+            alert.informativeText = NSLocalizedString("The Lua browser data folder was not found. Continuing will still remove other local application data and quit.", comment: "Debug clear data - Alert body when browser data is missing; clearing will still proceed for other locations")
             alert.alertStyle = .informational
             alert.addButton(withTitle: NSLocalizedString("OK", comment: "Generic - OK button to dismiss an alert"))
             alert.runModal()
@@ -170,7 +170,7 @@ extension AppController {
         panel.canCreateDirectories = true
         panel.allowedContentTypes = [.zip]
         panel.nameFieldStringValue = defaultPhiUserDataBackupFileName()
-        panel.title = NSLocalizedString("Back Up Phi User Data", comment: "Debug clear data - NSSavePanel title for saving Phi user data directory as zip")
+        panel.title = NSLocalizedString("Back Up Lua User Data", comment: "Debug clear data - NSSavePanel title for saving browser user data as zip")
         panel.prompt = NSLocalizedString("Save", comment: "Debug clear data - NSSavePanel confirm button title when saving Phi user data backup zip")
 
         guard panel.runModal() == .OK, let destinationZIP = panel.url else {
@@ -195,9 +195,9 @@ extension AppController {
     }
 
     private func defaultPhiUserDataBackupFileName() -> String {
-        let rawBase = AccountController.shared.account?.userID ?? "Phi"
+        let rawBase = AccountController.shared.account?.userID ?? "Lua"
         let sanitized = Self.sanitizedBackupFileNameComponent(rawBase)
-        let fallbackSlug = "Phi"
+        let fallbackSlug = "Lua"
         let resolvedSlug: String
         if sanitized.isEmpty {
             resolvedSlug = fallbackSlug
@@ -205,7 +205,7 @@ extension AppController {
             resolvedSlug = sanitized
         }
         let userSegment: String?
-        if resolvedSlug.caseInsensitiveCompare("Phi") == .orderedSame {
+        if resolvedSlug.caseInsensitiveCompare("Lua") == .orderedSame {
             userSegment = nil
         } else {
             userSegment = resolvedSlug
@@ -218,9 +218,9 @@ extension AppController {
         formatter.dateFormat = "yyyyMMdd"
         let dateString = formatter.string(from: Date())
         if let userSegment {
-            return "Phi-\(userSegment)-data-\(dateString).zip"
+            return "Lua-\(userSegment)-data-\(dateString).zip"
         }
-        return "Phi-data-\(dateString).zip"
+        return "Lua-data-\(dateString).zip"
     }
 
     @MainActor

@@ -19,7 +19,7 @@
     "· %@" : {
 
     },
-    "“%@” already exists and isn’t a link created by Phi Browser. Replace it with a link to this app’s bundled skill?" : {
+    "“%@” already exists and isn’t a link created by Lua. Replace it with a link to this app’s bundled skill?" : {
       "comment" : "Developer settings - Skill overwrite prompt body"
     },
     "@%@" : {
@@ -144,7 +144,7 @@
         }
       }
     },
-    "%@ can now use the phi-browser skill. If it isn’t already on, enable remote debugging above and relaunch so the skill can connect." : {
+    "%@ can now use the lua-browser skill. If it isn’t already on, enable remote debugging above and relaunch so the skill can connect." : {
       "comment" : "Developer settings - Skill install success body; %@ is the agent name"
     },
     "%@ tab group, %d tabs, collapsed" : {
@@ -237,7 +237,7 @@
       "comment" : "Footer button in URL rules editor"
     },
     "Add skill to…" : {
-      "comment" : "Developer settings - Dropdown button installing the phi-browser skill for an agent"
+      "comment" : "Developer settings - Dropdown button installing the lua-browser skill for an agent"
     },
     "Add Split to Bookmark" : {
       "comment" : "Tab context menu - Save both panes of the split as a bookmark folder"
@@ -270,7 +270,7 @@
       "comment" : "View menu - Toggle that automatically switches to the Space of an operating agent"
     },
     "Agent skill" : {
-      "comment" : "Developer settings - phi-browser skill section title"
+      "comment" : "Developer settings - lua-browser skill section title"
     },
     "AI conversations will be closed and all connected Connectors will be disconnected." : {
       "comment" : "AI settings - Alert message explaining consequences of disabling AI features"
@@ -809,8 +809,8 @@
     "Empty" : {
       "comment" : "Bookmarks menu - Disabled placeholder item shown when a bookmark folder has no child bookmarks\nSearch Tabs - Empty bookmark folder placeholder\nSearch Tabs - Empty bookmark menu placeholder"
     },
-    "Enable AI features in Phi Browser" : {
-      "comment" : "AI settings - Master toggle to enable or disable all AI features in Phi Browser"
+    "Enable AI features in Lua" : {
+      "comment" : "AI settings - Master toggle to enable or disable all AI features in Lua"
     },
     "Enable External Data Connectors" : {
       "comment" : "AI settings - Toggle to enable external data connectors"
@@ -1013,8 +1013,8 @@
     "Install on Quit" : {
       "comment" : "Sparkle update window - Install downloaded update on quit button"
     },
-    "Install the phi-browser skill" : {
-      "comment" : "Developer settings - Title for installing the phi-browser agent skill"
+    "Install the lua-browser skill" : {
+      "comment" : "Developer settings - Title for installing the lua-browser agent skill"
     },
     "Install Update" : {
       "comment" : "Sparkle update window - Install update button"
@@ -1088,8 +1088,8 @@
     "Linking..." : {
       "comment" : "Phi Link - Custom bot linking text"
     },
-    "Links the skill bundled in this app into an AI coding agent’s skills folder so it can drive Phi over the DevTools Protocol. Requires Node 22+; enable remote debugging above so it can connect." : {
-      "comment" : "Developer settings - Explanation for the phi-browser skill installer"
+    "Links the skill bundled in this app into an AI coding agent’s skills folder so it can drive Lua over the DevTools Protocol. Requires Node 22+; enable remote debugging above so it can connect." : {
+      "comment" : "Developer settings - Explanation for the lua-browser skill installer"
     },
     "Loading image…" : {
       "comment" : "Image preview loading"
@@ -1481,10 +1481,10 @@
     "Remote debugging" : {
       "comment" : "Developer settings - Remote debugging section title"
     },
-    "Remote debugging starts after Phi Browser restarts." : {
+    "Remote debugging starts after Lua restarts." : {
       "comment" : "Developer settings - Relaunch prompt body when enabling remote debugging"
     },
-    "Remote debugging stops after Phi Browser restarts." : {
+    "Remote debugging stops after Lua restarts." : {
       "comment" : "Developer settings - Relaunch prompt body when disabling remote debugging"
     },
     "Remove" : {
@@ -1769,7 +1769,7 @@
     "This action cannot be undone." : {
       "comment" : "Bookmark multi-selection delete confirmation irreversible warning"
     },
-    "This build doesn’t include the phi-browser skill resources. Rebuild Phi Browser and try again." : {
+    "This build doesn’t include the lua-browser skill resources. Rebuild Lua and try again." : {
       "comment" : "Developer settings - Skill install failure body when the resource is missing"
     },
     "This replaces the Phi user data folder with the archive and restarts Phi. Save your work first." : {

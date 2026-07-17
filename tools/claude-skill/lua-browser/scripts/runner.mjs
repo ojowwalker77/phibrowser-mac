@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Copyright 2026 Phinomenon Inc.
 //
-// phi-browser heredoc runner: reads a script from stdin and executes it with
+// lua-browser heredoc runner: reads a script from stdin and executes it with
 // all helpers in scope. Usage:
 //   node runner.mjs <<'EOF'
 //   const task = await ensureAgentSpace('my task')
@@ -13,7 +13,7 @@
 // the first connect.
 if (typeof WebSocket === 'undefined') {
   console.error(
-    `phi-browser: Node >= 22 required (global WebSocket missing; ` +
+    `lua-browser: Node >= 22 required (global WebSocket missing; ` +
     `running ${process.version})`)
   process.exit(2)
 }
@@ -27,7 +27,7 @@ const { __dispose, ...surface } = await import('./lib/helpers.mjs')
 // a script run from that directory would.
 const { createRequire } = await import('node:module')
 const { join } = await import('node:path')
-surface.require = createRequire(join(process.cwd(), '__phi-heredoc__.mjs'))
+surface.require = createRequire(join(process.cwd(), '__lua-heredoc__.mjs'))
 
 // A killed round (Bash-tool timeout, Ctrl-C) should still flip the Space's
 // busy badge back to idle — best effort, the default handler would just die.
@@ -42,7 +42,7 @@ process.stdin.setEncoding('utf8')
 for await (const chunk of process.stdin) source += chunk
 
 if (!source.trim()) {
-  console.error('phi-browser: empty script on stdin')
+  console.error('lua-browser: empty script on stdin')
   process.exit(2)
 }
 
@@ -55,7 +55,7 @@ try {
   const fn = new AsyncFunction(...names, source)
   await fn(...values)
 } catch (err) {
-  console.error(`phi-browser error: ${err?.message || err}`)
+  console.error(`lua-browser error: ${err?.message || err}`)
   // A few stack frames locate the failing line inside the heredoc (the
   // script compiles as an anonymous async function, so frames read
   // "<anonymous>:LINE"). Skip the message line already printed above.

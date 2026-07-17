@@ -1,69 +1,92 @@
-# Phi Browser
+# Lua Browser
 
-**A local-first, native Chromium browser for macOS.**
+**A calm, local-first Chromium browser built as a native macOS app.**
 
-This fork of Phi is built as a real macOS app with AppKit, SwiftUI, and an embedded Chromium framework. It starts without an account, keeps browser state locally, and focuses on the core browsing experience.
-
-> **Download** (free, macOS): [phibrowser.com](https://phibrowser.com) · If this is your kind of thing, a ⭐ helps a lot.
-
-<!-- TODO (Alpha): drop a screenshot or short demo gif here. It roughly triples how many visitors star. -->
+Lua combines an AppKit and SwiftUI interface with an embedded Chromium
+framework. It starts without an account, keeps browser state local, and
+focuses on the core browsing experience.
 
 ## What it includes
 
-- **No required account.** Launch directly into the browser with a local profile.
-- **Focused first run.** Choose a layout, import data from another browser, and configure password-manager support.
-- **Native macOS interface.** AppKit and SwiftUI provide windows, sidebars, settings, and system integration.
-- **Chromium compatibility.** Tabs, profiles, extensions, downloads, bookmarks, history, and developer tools use the embedded Chromium framework.
-- **Spaces and layouts.** Organize tabs into Spaces and choose the density that fits your workflow.
-- **No AI feature layer.** Chat, agents, browser memory, connectors, AI tab organization, and their background services are not part of this fork.
+- No required account
+- Native macOS windows, sidebars, settings, and system integration
+- Chromium tabs, profiles, extensions, downloads, bookmarks, and DevTools
+- Spaces for organizing tabs and profiles
+- An optional local CDP skill for supervised browser automation
 
-## Why open source
-
-A browser sees everything you do, so you should be able to read the code that runs it. The macOS client is Apache-2.0 and the Chromium framework layer lives separately.
-
-## Download
-
-Free for macOS on Apple Silicon: [phibrowser.com](https://phibrowser.com)
+Inherited Phi account, connector, rollback, crash-help, and update services
+are intentionally disconnected. Account and connector calls are disabled by
+default; development endpoints must be supplied explicitly with
+`LUA_ACCOUNT_BASE_URL` and `LUA_CONNECTOR_BASE_URL`. Until Lua owns compatible
+services, those account-backed surfaces should be treated as unavailable.
 
 ## Build from source
 
-### Requirements
-- Mac with Apple chip
-- Xcode 26+
-- A local copy of `Phi Framework.framework`
+Requirements: Apple Silicon Mac, Xcode 26 or newer, GitHub CLI, and access to
+the pinned `Phi Framework.framework` release.
 
-### Steps
-1. Check out this repository.
-2. Download the latest `Phi Framework` from [phibrowser/phibrowser-framework](https://github.com/phibrowser/phibrowser-framework/releases).
-3. Place `Phi Framework.framework` into the root `Frameworks/` directory.
-4. Open `Phi.xcodeproj` in Xcode and let Swift Package Manager resolve dependencies.
-5. Select the `PhiBrowser-OpenSource` scheme.
-6. Build.
+```bash
+./script/bootstrap
+./script/run
+```
 
-For this fork, `./script/build_and_run.sh --verify` downloads and verifies the
-framework when needed, builds the app, launches it, and confirms that the
-process started. Signed and notarized releases are documented in
-[`RELEASING.md`](RELEASING.md).
+The shared repository commands are:
 
-### Development profile
+- `./script/bootstrap` — fetch and verify the pinned framework dependency
+- `./script/run` — build and launch Lua
+- `./script/check` — run unit tests
+- `./script/verify` — build Release and validate the app bundle
+- `./script/release-preflight X.Y.Z` — validate release identity and inputs
 
-The `PhiBrowser-OpenSource` configuration intentionally uses the installed
-Phi app's `com.phibrowser.Mac` data directory. Local builds therefore have the
-same profiles, cookies, history, tabs, and Spaces as the DMG build. The run
-script quits any running Phi process immediately before launching the local
-app because Chromium profiles must never have two writers. Quit the local build
-before reopening `/Applications/Phi.app`.
+## Framework boundary
 
-The distributable `Release` configuration remains isolated under the fork's
-`com.ojowwalker77.PhiBrowser` identifier. Passwords or passkeys protected by
-the upstream Developer ID may still be unavailable to an ad-hoc local build.
+Lua's native client is Apache-2.0, but it still requires the separately
+distributed prebuilt `Phi Framework.framework`. Version `v2.2.0` and its
+SHA-256 are pinned in `script/fetch_phi_framework.sh`. The framework name,
+bridge types, and `PhiAgentSpace` protocol are binary ABI names, not product
+branding.
 
-## Contributing
+The framework is currently downloaded from
+`phibrowser/phibrowser-framework`. Lua does not redistribute or mirror that
+binary because redistribution rights have not been confirmed. This is an
+explicit external supply-chain dependency; the project does not claim full
+upstream independence until an authorized owner-controlled build exists.
 
-Contributions are welcome. Found a bug, have an idea, or want to add a feature? Open an issue first. To contribute code, send a PR with a clear description of the change and the motivation behind it.
+### Privacy blocker in the embedded framework
 
-We welcome bug reports, feature requests, documentation improvements, and pull requests.
+The pinned framework binary also embeds an upstream Sentry Crashpad minidump
+upload URL, upstream help/feedback URLs, and Phi product annotations. Lua
+passes Chromium's `--disable-crash-reporter` switch as a source-owned
+mitigation, but that has not been runtime-verified against this prebuilt
+framework. Therefore a crash may still attempt traffic to upstream
+infrastructure even though Lua's source-owned account, rollback, crash-help,
+and updater endpoints have been removed. This remains an unresolved privacy
+and operational dependency.
 
-## License
+`script/framework-endpoint-allowlist.txt` records the exact audited strings;
+release smoke fails if the binary adds another upstream endpoint. The allowlist
+is disclosure, not approval. Lua cannot claim complete upstream independence
+until the framework can be rebuilt with owner-controlled crash reporting or
+crash uploads disabled.
 
-Apache License 2.0. See [LICENSE](LICENSE).
+## Identity migration
+
+The app is displayed as **Lua** and uses `dev.jow.LuaBrowser`. Release builds
+temporarily keep Chromium data in the previous fork profile directory,
+`com.ojowwalker77.PhiBrowser`, so an update does not strand tabs, profiles,
+cookies, or history. Debug, development, Canary, Performance, and test builds
+use isolated Lua profile directories and must never touch the release profile.
+The old `phi://` URL scheme remains accepted temporarily alongside canonical
+`lua://` links. macOS permissions and keychain items tied to the former bundle
+identifier may require reapproval.
+
+## Contributing and releases
+
+Open pull requests against `main`. Releases are immutable `vX.Y.Z` tags from
+commits that passed the required `Quality` check. See
+[`RELEASING.md`](RELEASING.md) for signing and notarization requirements.
+
+## License and attribution
+
+Apache License 2.0. See [`LICENSE`](LICENSE). Existing copyright notices,
+third-party credits, and framework ABI names are intentionally preserved.

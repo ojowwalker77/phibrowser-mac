@@ -279,7 +279,7 @@ private struct DefaultBrowserSettingRow: View {
     var body: some View {
         GeneralRowView(title: NSLocalizedString("Default browser", comment: "General settings - Default browser row title")) {
             if isDefaultBrowser {
-                Text(NSLocalizedString("Phi is your default browser", comment: "General settings - Default browser status"))
+                Text(NSLocalizedString("Lua is your default browser", comment: "General settings - Default browser status"))
                     .font(.system(size: 12))
                     .themedForeground(.textSecondary)
             } else {

@@ -5,7 +5,7 @@
 
 import Foundation
 struct DeeplinkHandler {
-    static let nativeLinkPrefix = "phi://native"
+    static let nativeLinkPrefixes: Set<String> = ["lua://native", "phi://native"]
     /// Returns whether the URL should be handled by native code.
     static func shouldHandle(_ url: URL) -> Bool {
         guard let scheme = url.scheme,
@@ -13,7 +13,7 @@ struct DeeplinkHandler {
             return false
         }
         let prefix = "\(scheme)://\(host)".lowercased()
-        return prefix == nativeLinkPrefix.lowercased()
+        return nativeLinkPrefixes.contains(prefix)
     }
     
     @discardableResult
@@ -75,7 +75,7 @@ extension DeeplinkHandler {
         return path == Action.openPage().path
     }
 
-    /// Opens a native page from a `phi://native/openpage?...` deeplink.
+    /// Opens a native page from a `lua://native/openpage?...` deeplink.
     static func handleOpenPage(_ url: URL) -> Bool {
         guard isOpenPage(url) else { return false }
         guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {

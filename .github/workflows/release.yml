@@ -1,4 +1,4 @@
-name: Release Fork
+name: Release Lua Browser
 
 on:
   push:
@@ -6,8 +6,8 @@ on:
       - 'v*.*.*'
   workflow_dispatch:
     inputs:
-      version:
-        description: Release version without the v prefix (for example 0.1.0)
+      tag:
+        description: Existing stable tag to publish (for example v0.1.0)
         required: true
         type: string
       framework_version:
@@ -15,12 +15,16 @@ on:
         required: false
         default: v2.2.0
         type: string
+      framework_sha256:
+        description: Required SHA-256 when framework_version is not v2.2.0
+        required: false
+        type: string
 
 permissions:
   contents: write
 
 concurrency:
-  group: release-fork
+  group: release-lua-browser
   cancel-in-progress: false
 
 jobs:
@@ -38,51 +42,77 @@ jobs:
       - name: Resolve release metadata
         id: release
         env:
-          INPUT_VERSION: ${{ inputs.version }}
+          INPUT_TAG: ${{ inputs.tag }}
           INPUT_FRAMEWORK_VERSION: ${{ inputs.framework_version }}
+          INPUT_FRAMEWORK_SHA256: ${{ inputs.framework_sha256 }}
           DEFAULT_FRAMEWORK_VERSION: ${{ vars.PHI_FRAMEWORK_VERSION }}
+          DEFAULT_FRAMEWORK_SHA256: ${{ vars.PHI_FRAMEWORK_SHA256 }}
         run: |
           if [[ "$GITHUB_EVENT_NAME" == "push" ]]; then
-            version="${GITHUB_REF_NAME#v}"
+            tag="$GITHUB_REF_NAME"
           else
-            version="$INPUT_VERSION"
+            tag="$INPUT_TAG"
           fi
 
-          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "Version must be stable semantic versioning: X.Y.Z" >&2
+          if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Tag must use stable semantic versioning: vX.Y.Z" >&2
             exit 1
           fi
+          version="${tag#v}"
 
           framework_version="${INPUT_FRAMEWORK_VERSION:-${DEFAULT_FRAMEWORK_VERSION:-v2.2.0}}"
+          framework_sha256="${INPUT_FRAMEWORK_SHA256:-$DEFAULT_FRAMEWORK_SHA256}"
+          if [[ "$framework_version" != "v2.2.0" && ! "$framework_sha256" =~ ^[0-9a-f]{64}$ ]]; then
+            echo "A pinned framework_sha256 is required for $framework_version." >&2
+            exit 1
+          fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "tag=v$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "framework_version=$framework_version" >> "$GITHUB_OUTPUT"
+          echo "framework_sha256=$framework_sha256" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout verified release tag
+        env:
+          TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          git fetch origin main "$TAG"
+          git rev-parse --verify "refs/tags/$TAG^{commit}"
+          git merge-base --is-ancestor "$TAG" origin/main || {
+            echo "$TAG is not contained in origin/main." >&2
+            exit 1
+          }
+          git checkout --detach "$TAG"
+
+      - name: Validate release source
+        run: ./script/release-preflight "${{ steps.release.outputs.version }}"
 
       - name: Verify required secrets
         env:
-          CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+          CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
           CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
-          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY_P8 }}
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
-          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER_ID }}
+          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
         run: |
-          for name in CERTIFICATE_P12 CERTIFICATE_PASSWORD APPLE_API_KEY APPLE_API_KEY_ID APPLE_API_ISSUER SPARKLE_PRIVATE_KEY; do
+          for name in CERTIFICATE_P12 CERTIFICATE_PASSWORD APPLE_API_KEY APPLE_API_KEY_ID APPLE_API_ISSUER TEAM_ID SPARKLE_PRIVATE_KEY; do
             if [[ -z "${!name}" ]]; then
               echo "Missing required secret: $name" >&2
               exit 1
             fi
           done
 
-      - name: Download verified Phi Framework
+      - name: Download pinned Phi Framework dependency
         env:
-          GH_TOKEN: ${{ github.token }}
           PHI_FRAMEWORK_VERSION: ${{ steps.release.outputs.framework_version }}
+          PHI_FRAMEWORK_SHA256: ${{ steps.release.outputs.framework_sha256 }}
+          PHI_FRAMEWORK_URL: ${{ vars.PHI_FRAMEWORK_URL }}
         run: ./script/fetch_phi_framework.sh
 
       - name: Import Developer ID certificate
         env:
-          CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+          CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
           CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
         run: |
           certificate_path="$RUNNER_TEMP/developer-id.p12"
@@ -104,7 +134,7 @@ jobs:
       - name: Archive signed app
         env:
           VERSION: ${{ steps.release.outputs.version }}
-          TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           xcodebuild \
             -project Phi.xcodeproj \
@@ -112,7 +142,7 @@ jobs:
             -configuration Release \
             -destination 'generic/platform=macOS' \
             -derivedDataPath "$RUNNER_TEMP/DerivedData" \
-            -archivePath "$RUNNER_TEMP/Phi.xcarchive" \
+            -archivePath "$RUNNER_TEMP/Lua.xcarchive" \
             MARKETING_VERSION="$VERSION" \
             CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER" \
             CODE_SIGN_STYLE=Manual \
@@ -125,9 +155,9 @@ jobs:
 
       - name: Re-sign Chromium helpers and verify bundle
         env:
-          TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
-          app="$RUNNER_TEMP/Phi.xcarchive/Products/Applications/Phi.app"
+          app="$RUNNER_TEMP/Lua.xcarchive/Products/Applications/Lua.app"
           identity="Developer ID Application: Jonatas Walker ($TEAM_ID)"
           ./script/sign_phi_bundle.sh \
             "$app" \
@@ -140,18 +170,18 @@ jobs:
         id: package
         env:
           VERSION: ${{ steps.release.outputs.version }}
-          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY_P8 }}
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
-          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER_ID }}
           SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
         run: |
-          app="$RUNNER_TEMP/Phi.xcarchive/Products/Applications/Phi.app"
+          app="$RUNNER_TEMP/Lua.xcarchive/Products/Applications/Lua.app"
           dist="$RUNNER_TEMP/dist"
-          notarization_zip="$RUNNER_TEMP/Phi-notarization.zip"
+          notarization_zip="$RUNNER_TEMP/Lua-notarization.zip"
           api_key_path="$RUNNER_TEMP/AuthKey_${APPLE_API_KEY_ID}.p8"
           sparkle_key_path="$RUNNER_TEMP/sparkle-private-key"
-          update_zip="Phi-Browser-${VERSION}-arm64.zip"
-          dmg_name="Phi-Browser-${VERSION}-arm64.dmg"
+          update_zip="Lua-Browser-${VERSION}-arm64.zip"
+          dmg_name="Lua-Browser-${VERSION}-arm64.dmg"
 
           mkdir -p "$dist" "$RUNNER_TEMP/dmg-root" "$RUNNER_TEMP/appcast"
           printf '%s' "$APPLE_API_KEY" > "$api_key_path"
@@ -170,9 +200,9 @@ jobs:
           spctl --assess --type execute --verbose=4 "$app"
 
           ditto -c -k --keepParent "$app" "$dist/$update_zip"
-          ditto "$app" "$RUNNER_TEMP/dmg-root/Phi.app"
+          ditto "$app" "$RUNNER_TEMP/dmg-root/Lua.app"
           hdiutil create \
-            -volname "Phi Browser" \
+            -volname "Lua Browser" \
             -srcfolder "$RUNNER_TEMP/dmg-root" \
             -ov -format UDZO \
             "$dist/$dmg_name"
@@ -199,7 +229,10 @@ jobs:
             -o "$dist/appcast.xml" \
             "$RUNNER_TEMP/appcast"
 
-          shasum -a 256 "$dist/$update_zip" "$dist/$dmg_name" "$dist/appcast.xml"
+          (
+            cd "$dist"
+            shasum -a 256 "$update_zip" "$dmg_name" appcast.xml > SHA256SUMS.txt
+          )
           echo "dist=$dist" >> "$GITHUB_OUTPUT"
           echo "zip=$update_zip" >> "$GITHUB_OUTPUT"
           echo "dmg=$dmg_name" >> "$GITHUB_OUTPUT"
@@ -207,11 +240,12 @@ jobs:
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Phi-Browser-${{ steps.release.outputs.version }}
+          name: Lua-Browser-${{ steps.release.outputs.version }}
           path: |
             ${{ steps.package.outputs.dist }}/${{ steps.package.outputs.zip }}
             ${{ steps.package.outputs.dist }}/${{ steps.package.outputs.dmg }}
             ${{ steps.package.outputs.dist }}/appcast.xml
+            ${{ steps.package.outputs.dist }}/SHA256SUMS.txt
           if-no-files-found: error
 
       - name: Publish GitHub Release
@@ -225,12 +259,32 @@ jobs:
         run: |
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" \
-              "$DIST/$ZIP_NAME" "$DIST/$DMG_NAME" "$DIST/appcast.xml" \
+              "$DIST/$ZIP_NAME" "$DIST/$DMG_NAME" "$DIST/appcast.xml" "$DIST/SHA256SUMS.txt" \
               --clobber
           else
             gh release create "$TAG" \
-              "$DIST/$ZIP_NAME" "$DIST/$DMG_NAME" "$DIST/appcast.xml" \
-              --target "$GITHUB_SHA" \
-              --title "Phi Browser $VERSION" \
+              "$DIST/$ZIP_NAME" "$DIST/$DMG_NAME" "$DIST/appcast.xml" "$DIST/SHA256SUMS.txt" \
+              --verify-tag \
+              --title "Lua Browser $VERSION" \
               --generate-notes
           fi
+
+      - name: Verify published artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.release.outputs.tag }}
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          published="$RUNNER_TEMP/published"
+          mkdir -p "$published"
+          gh release download "$TAG" --dir "$published" \
+            --pattern "Lua-Browser-${VERSION}-arm64.zip" \
+            --pattern "Lua-Browser-${VERSION}-arm64.dmg" \
+            --pattern appcast.xml \
+            --pattern SHA256SUMS.txt
+          (
+            cd "$published"
+            shasum -a 256 -c SHA256SUMS.txt
+          )
+          grep -q "https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/Lua-Browser-${VERSION}-arm64.zip" \
+            "$published/appcast.xml"

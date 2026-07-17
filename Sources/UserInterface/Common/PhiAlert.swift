@@ -833,7 +833,7 @@ extension PhiAlert where Icon == EmptyView, AlertContent == EmptyView, Actions =
     static func runQuitAlert(relativeTo sourceWindow: NSWindow? = nil) -> Bool {
         let configuration = PhiAlertAppKitConfiguration(
             title:  NSLocalizedString(
-                "Are you sure you want to quit Phi?",
+                "Are you sure you want to quit Lua?",
                 comment: "Quit confirmation title"
             ),
             message: NSLocalizedString(
@@ -911,7 +911,7 @@ extension PhiAlert where Icon == EmptyView, AlertContent == EmptyView, Actions =
 #Preview("Short Copy - One Button") {
     let configuration = PhiAlertAppKitConfiguration(
         title: "Update complete",
-        message: "Phi is ready to use.",
+        message: "Lua is ready to use.",
         icon: .phiAlertIcon,
         primaryAction: PhiAlertAppKitAction(
             "OK",
@@ -930,7 +930,7 @@ extension PhiAlert where Icon == EmptyView, AlertContent == EmptyView, Actions =
 
 #Preview("Figma Layout - Three Buttons") {
     let configuration = PhiAlertAppKitConfiguration(
-        title: "A new version of Phi is available",
+        title: "A new version of Lua is available",
         message: "Install it now to get the latest improvements.",
         icon: .phiAlertIcon,
         leadingAction: PhiAlertAppKitAction(
@@ -958,8 +958,8 @@ extension PhiAlert where Icon == EmptyView, AlertContent == EmptyView, Actions =
 
 #Preview("Medium Copy - Two Buttons") {
     let configuration = PhiAlertAppKitConfiguration(
-        title: "Quit Phi?",
-        message: "Are you sure you want to quit Phi? Any unsaved changes may be lost.",
+        title: "Quit Lua?",
+        message: "Are you sure you want to quit Lua? Any unsaved changes may be lost.",
         style: .critical,
         secondaryAction: PhiAlertAppKitAction(
             "Cancel",
@@ -1013,7 +1013,7 @@ extension PhiAlert where Icon == EmptyView, AlertContent == EmptyView, Actions =
 
 #Preview("Dark Mode - White Icon") {
     let configuration = PhiAlertAppKitConfiguration(
-        title: "Quit Phi?",
+        title: "Quit Lua?",
         message: "The alert icon should render white when the window uses its dark appearance.",
         secondaryAction: PhiAlertAppKitAction(
             "Cancel",

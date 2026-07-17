@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+DERIVED_DATA="${DERIVED_DATA:-$ROOT_DIR/.derivedData-check}"
+
+"$ROOT_DIR/script/bootstrap"
+xcodebuild test \
+  -project "$ROOT_DIR/Phi.xcodeproj" \
+  -scheme PhiBrowser-OpenSource \
+  -configuration OpenSource \
+  -destination 'platform=macOS,arch=arm64' \
+  -derivedDataPath "$DERIVED_DATA" \
+  -only-testing:PhiBrowserTests \
+  CODE_SIGNING_ALLOWED=NO \
+  CODE_SIGNING_REQUIRED=NO

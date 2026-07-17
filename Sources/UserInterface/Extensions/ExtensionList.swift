@@ -117,7 +117,7 @@ struct ExtensionList<Manager: ExtensionManagerProtocol>: View {
                     .padding(.horizontal, 12)
 
                 ManageExtensionsButton {
-                    let url = URLProcessor.processUserInput("phi://extensions")
+                    let url = URLProcessor.processUserInput("lua://extensions")
                     MainBrowserWindowControllersManager.shared.activeWindowController?.browserState.createTab(url)
                     onRequestDismiss?()
                 }
@@ -204,7 +204,7 @@ struct ExtensionList<Manager: ExtensionManagerProtocol>: View {
 
     private func shouldShowSecuritySection(for rawURLString: String) -> Bool {
         let lowercased = rawURLString.lowercased()
-        return !lowercased.hasPrefix("chrome://") && !lowercased.hasPrefix("phi://")
+        return !lowercased.hasPrefix("chrome://") && !lowercased.hasPrefix("lua://") && !lowercased.hasPrefix("phi://")
     }
     
     private var gridContent: some View {

@@ -25,23 +25,28 @@ struct AgentAvatarImagePayload {
 
 class APIClient {
     static let shared = APIClient()
-    private let accountBaseURL = "https://account.phibrowser.com"
-    private let connectorBaseURL = "https://ai.phibrowser.com/data"
+    // Lua does not inherit the upstream account or connector services. These
+    // features remain unavailable unless an owner-controlled endpoint is
+    // supplied explicitly for development.
+    private let accountBaseURL = ProcessInfo.processInfo.environment["LUA_ACCOUNT_BASE_URL"]
+    private let connectorBaseURL = ProcessInfo.processInfo.environment["LUA_CONNECTOR_BASE_URL"]
     private let token = ""
 
-    func oauthNativeFinishedRedirect(provider: String, result: String) -> String {
-        guard var components = URLComponents(string: "\(accountBaseURL)/oauth/native-finished") else {
-            return "\(accountBaseURL)/oauth/native-finished"
-        }
+    func oauthNativeFinishedRedirect(provider: String, result: String) throws -> String {
+        var components = URLComponents(
+            url: try accountURL("/oauth/native-finished"),
+            resolvingAgainstBaseURL: false
+        )!
         components.queryItems = [
             URLQueryItem(name: "provider", value: provider),
             URLQueryItem(name: "result", value: result),
         ]
-        return components.url?.absoluteString ?? "\(accountBaseURL)/oauth/native-finished"
+        guard let url = components.url else { throw APIError.invalidResponse }
+        return url.absoluteString
     }
 
     func getAccountProfile() async throws -> Response<Profile> {
-        let url = URL(string: "\(accountBaseURL)/api/auth/profile")!
+        let url = try accountURL("/api/auth/profile")
         var request = URLRequest(url: url)
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
 
@@ -59,7 +64,7 @@ class APIClient {
     }
 
     func updateProfile(updates: UpdateProfileRequest) async throws -> Response<UpdateProfileResponse> {
-        let url = URL(string: "\(accountBaseURL)/api/auth/profile")!
+        let url = try accountURL("/api/auth/profile")
         var request = URLRequest(url: url)
         request.httpMethod = "PUT"
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
@@ -244,7 +249,7 @@ class APIClient {
     
     /// Get user's activation information and invitation details
     func getActivationInfo() async throws -> Response<ActivationInfo> {
-        let url = URL(string: "\(accountBaseURL)/api/auth/invitation-details")!
+        let url = try accountURL("/api/auth/invitation-details")
         var request = URLRequest(url: url)
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         
@@ -263,7 +268,7 @@ class APIClient {
     
     /// Get user's invitation quota information
     func getInviteQuota() async throws -> Response<InviteQuota> {
-        let url = URL(string: "\(accountBaseURL)/api/auth/invite-quota")!
+        let url = try accountURL("/api/auth/invite-quota")
         var request = URLRequest(url: url)
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         
@@ -282,7 +287,7 @@ class APIClient {
 
     /// Get user's invitation codes
     func getInvitationCodes() async throws -> Response<[InvitationCode]> {
-        let url = URL(string: "\(accountBaseURL)/api/auth/invitation-codes")!
+        let url = try accountURL("/api/auth/invitation-codes")
         var request = URLRequest(url: url)
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         
@@ -301,7 +306,7 @@ class APIClient {
     
     /// Create a new invitation code
     func createInvitationCode(request: CreateInvitationCodeRequest) async throws -> Response<InvitationCode> {
-        let url = URL(string: "\(accountBaseURL)/api/auth/invitation-codes")!
+        let url = try accountURL("/api/auth/invitation-codes")
         var urlRequest = URLRequest(url: url)
         urlRequest.httpMethod = "POST"
         urlRequest.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
@@ -325,7 +330,7 @@ class APIClient {
     
     /// Get details of a specific invitation code
     func getInvitationCodeById(codeId: Int) async throws -> Response<InvitationCode> {
-        let url = URL(string: "\(accountBaseURL)/api/auth/invitation-codes/\(codeId)")!
+        let url = try accountURL("/api/auth/invitation-codes/\(codeId)")
         var request = URLRequest(url: url)
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         
@@ -344,7 +349,7 @@ class APIClient {
     
     /// Deactivate an invitation code
     func deactivateInvitationCode(codeId: Int) async throws -> Response<String> {
-        let url = URL(string: "\(accountBaseURL)/api/auth/invitation-codes/\(codeId)")!
+        let url = try accountURL("/api/auth/invitation-codes/\(codeId)")
         var request = URLRequest(url: url)
         request.httpMethod = "DELETE"
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
@@ -364,7 +369,7 @@ class APIClient {
     
     /// Get or create default invitation code
     func getDefaultInvitationCode() async throws -> Response<InvitationCode> {
-        let url = URL(string: "\(accountBaseURL)/api/auth/invitation-codes/default")!
+        let url = try accountURL("/api/auth/invitation-codes/default")
         var request = URLRequest(url: url)
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
 
@@ -383,7 +388,7 @@ class APIClient {
 
     /// Validate an invitation code during account activation
     func validateInvite(request: InviteValidationRequest) async throws -> Response<InviteValidationResponse> {
-        let url = URL(string: "\(accountBaseURL)/api/invite/validate")!
+        let url = try accountURL("/api/invite/validate")
         var urlRequest = URLRequest(url: url)
         urlRequest.httpMethod = "POST"
         urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -409,7 +414,7 @@ class APIClient {
     // MARK: - Connector APIs
 
     func getOAuthConnections() async throws -> Response<GetOAuthConnectionsResponse> {
-        let url = URL(string: "\(accountBaseURL)/api/auth/oauth/connections")!
+        let url = try accountURL("/api/auth/oauth/connections")
         var request = URLRequest(url: url)
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
@@ -428,9 +433,10 @@ class APIClient {
     }
 
     func getOAuthAuthorization(provider: String, successRedirect: String? = nil, failureRedirect: String? = nil) async throws -> Response<GetOAuthAuthorizationResponse> {
-        guard var components = URLComponents(string: "\(accountBaseURL)/api/auth/oauth/authorize/\(provider)") else {
-            throw APIError.invalidResponse
-        }
+        guard var components = URLComponents(
+            url: try accountURL("/api/auth/oauth/authorize/\(provider)"),
+            resolvingAgainstBaseURL: false
+        ) else { throw APIError.invalidResponse }
         var queryItems: [URLQueryItem] = []
         if let successRedirect {
             queryItems.append(URLQueryItem(name: "success_redirect", value: successRedirect))
@@ -462,7 +468,7 @@ class APIClient {
     
     /// Create or update a user source
     func createUserSource(request: CreateUserSourceRequest) async throws -> AirbyteResponse<String> {
-        let url = URL(string: "\(connectorBaseURL)/create-or-update-source")!
+        let url = try connectorURL("/create-or-update-source")
         var urlRequest = URLRequest(url: url)
         urlRequest.httpMethod = "POST"
         urlRequest.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
@@ -486,7 +492,7 @@ class APIClient {
     
     /// Get OAuth consent URL for a connector
     func getConsentUrl(request: GetConsentUrlRequest) async throws -> AirbyteResponse<GetConsentUrlResponse> {
-        let url = URL(string: "\(connectorBaseURL)/oauth/consent-url")!
+        let url = try connectorURL("/oauth/consent-url")
         var urlRequest = URLRequest(url: url)
         urlRequest.httpMethod = "POST"
         urlRequest.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
@@ -510,7 +516,7 @@ class APIClient {
     
     /// Complete OAuth flow for a connector
     func completeOAuth(request: CompleteOAuthRequest) async throws -> AirbyteResponse<CompleteOAuthResponse> {
-        let url = URL(string: "\(connectorBaseURL)/oauth/complete-oauth")!
+        let url = try connectorURL("/oauth/complete-oauth")
         var urlRequest = URLRequest(url: url)
         urlRequest.httpMethod = "POST"
         urlRequest.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
@@ -534,7 +540,7 @@ class APIClient {
     
     /// Create a connection for a source
     func createConnection(request: CreateConnectionRequest) async throws -> AirbyteResponse<String> {
-        let url = URL(string: "\(connectorBaseURL)/create-connection")!
+        let url = try connectorURL("/create-connection")
         var urlRequest = URLRequest(url: url)
         urlRequest.httpMethod = "POST"
         urlRequest.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
@@ -557,7 +563,7 @@ class APIClient {
     }
     
     func deleteOAuthToken(provider: String) async throws -> Response<DeleteOAuthTokenResponse> {
-        let url = URL(string: "\(accountBaseURL)/api/auth/oauth/tokens/\(provider)")!
+        let url = try accountURL("/api/auth/oauth/tokens/\(provider)")
         var urlRequest = URLRequest(url: url)
         urlRequest.httpMethod = "DELETE"
         urlRequest.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
@@ -585,7 +591,7 @@ class APIClient {
             throw APIError.invalidRequest(message: "Feedback V2 presign supports at most five attachments per request")
         }
 
-        let url = URL(string: "\(accountBaseURL)/api/auth/feedback/v2/attachments/presign")!
+        let url = try accountURL("/api/auth/feedback/v2/attachments/presign")
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
@@ -631,7 +637,7 @@ class APIClient {
             throw APIError.invalidRequest(message: "Feedback V2 submit supports at most five attachments")
         }
 
-        let url = URL(string: "\(accountBaseURL)/api/auth/feedback/v2/submit")!
+        let url = try accountURL("/api/auth/feedback/v2/submit")
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
@@ -643,6 +649,48 @@ class APIClient {
             throw APIError.serverError(message: response.message)
         }
         return response
+    }
+
+    private func accountURL(_ path: String) throws -> URL {
+        try Self.configuredURL(
+            baseURL: accountBaseURL,
+            path: path,
+            service: "Lua account services",
+            environmentVariable: "LUA_ACCOUNT_BASE_URL"
+        )
+    }
+
+    private func connectorURL(_ path: String) throws -> URL {
+        try Self.configuredURL(
+            baseURL: connectorBaseURL,
+            path: path,
+            service: "Lua connector services",
+            environmentVariable: "LUA_CONNECTOR_BASE_URL"
+        )
+    }
+
+    private static func configuredURL(
+        baseURL: String?,
+        path: String,
+        service: String,
+        environmentVariable: String
+    ) throws -> URL {
+        guard let baseURL,
+              var components = URLComponents(string: baseURL),
+              components.scheme == "https" || components.scheme == "http",
+              components.host != nil else {
+            throw APIError.serviceUnavailable(
+                service: service,
+                configuration: environmentVariable
+            )
+        }
+
+        let basePath = components.path.hasSuffix("/")
+            ? String(components.path.dropLast())
+            : components.path
+        components.path = basePath + path
+        guard let url = components.url else { throw APIError.invalidResponse }
+        return url
     }
 
     private func executeAccountJSONRequest<T: Codable>(_ request: URLRequest) async throws -> Response<T> {
@@ -666,4 +714,22 @@ enum APIError: Error {
     case httpError(statusCode: Int)
     case decodingError
     case serverError(message: String)
+    case serviceUnavailable(service: String, configuration: String)
+}
+
+extension APIError: LocalizedError {
+    var errorDescription: String? {
+        switch self {
+        case .serviceUnavailable(let service, let configuration):
+            return "\(service) are unavailable in this build. Configure an owner-controlled endpoint with \(configuration)."
+        case .invalidRequest(let message), .serverError(let message):
+            return message
+        case .httpError(let statusCode):
+            return "The service returned HTTP \(statusCode)."
+        case .invalidResponse:
+            return "The service returned an invalid response."
+        case .decodingError:
+            return "The service response could not be decoded."
+        }
+    }
 }

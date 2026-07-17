@@ -145,11 +145,11 @@ class LocalStore {
         Task { @MainActor in
             let alert = NSAlert()
             alert.messageText = NSLocalizedString(
-                "Update Phi to Open Local Data",
+                "Update Lua to Open Local Data",
                 comment: "Local store compatibility alert - title when the local database was opened by a newer app version"
             )
             alert.informativeText = NSLocalizedString(
-                "This version of Phi cannot open local browser data that was updated by a newer version. Install the latest Phi version and try again.",
+                "This version of Lua cannot open local browser data that was updated by a newer version. Install the latest Lua version and try again.",
                 comment: "Local store compatibility alert - body when a newer app is required to read local data"
             )
             alert.alertStyle = .warning

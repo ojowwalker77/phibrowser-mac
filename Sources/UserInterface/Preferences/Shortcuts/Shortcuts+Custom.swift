@@ -311,8 +311,8 @@ extension CommandWrapper {
     
     private static let presentationOverrides: [CommandWrapper: Presentation] = [
         .IDC_OPTIONS: .init(title: "Settings", keywords: ["preferences", "options", "config"]),
-        .IDC_HIDE_APP: .init(title: "Hide Phi", keywords: ["hide", "application"]),
-        .IDC_EXIT: .init(title: "Quit Phi", keywords: ["quit", "exit"]),
+        .IDC_HIDE_APP: .init(title: "Hide Lua", keywords: ["hide", "application"]),
+        .IDC_EXIT: .init(title: "Quit Lua", keywords: ["quit", "exit"]),
         .IDC_CLEAR_BROWSING_DATA: .init(title: "Clear Browsing Data", keywords: ["clear data", "privacy"]),
         .IDC_NEW_TAB: .init(title: "New Tab", keywords: ["tab", "open tab"]),
         .IDC_NEW_WINDOW: .init(title: "New Window", keywords: ["window"]),
@@ -339,7 +339,7 @@ extension CommandWrapper {
         .IDC_SHOW_DOWNLOADS: .init(title: "Downloads", keywords: ["downloads"]),
         .IDC_TAB_SEARCH: .init(title: "Tab Search", keywords: ["search tabs"]),
         .IDC_FEEDBACK: .init(title: "Send Feedback", keywords: ["feedback", "support"]),
-        .IDC_HELP_PAGE_VIA_MENU: .init(title: "Phi Help", keywords: ["help", "docs"]),
+        .IDC_HELP_PAGE_VIA_MENU: .init(title: "Lua Help", keywords: ["help", "docs"]),
         .IDC_MANAGE_EXTENSIONS: .init(title: "Extensions", keywords: ["extensions"]),
         .IDC_WINDOW_PIN_TAB: .init(title: "Pin Tab", keywords: ["pintab"]),
         .IDC_WINDOW_GROUP_TAB: .init(title: "Group Tab", keywords: ["grouptab"]),

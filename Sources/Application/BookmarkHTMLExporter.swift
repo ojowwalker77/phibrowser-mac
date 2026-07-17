@@ -91,7 +91,7 @@ enum BookmarkHTMLExporter {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "yyyy-MM-dd"
-        return "Phi-Bookmarks-\(segment)-\(formatter.string(from: date)).html"
+        return "Lua-Bookmarks-\(segment)-\(formatter.string(from: date)).html"
     }
 
     /// Escapes text for use in HTML body text and double-quoted attributes.

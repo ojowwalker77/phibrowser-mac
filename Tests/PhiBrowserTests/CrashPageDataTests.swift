@@ -27,7 +27,7 @@ final class CrashPageDataTests: XCTestCase {
             "helpLinkLabel": "Learn more",
             "errorCodeText": errorCodeText,
             "tips": tips,
-            "helpLinkUrl": "https://phibrowser.com/help/",
+            "helpLinkUrl": "https://github.com/ojowwalker77/phibrowser-mac/issues",
             "showFeedbackButton": NSNumber(value: showFeedback),
             "isRepeatedlyCrashing": NSNumber(value: showFeedback),
             "errorCode": NSNumber(value: 11),
@@ -43,7 +43,7 @@ final class CrashPageDataTests: XCTestCase {
         XCTAssertEqual(data.buttonLabel, "Reload")
         XCTAssertEqual(data.helpLinkLabel, "Learn more")
         XCTAssertEqual(data.errorCodeText, "Error code: SIGSEGV")
-        XCTAssertEqual(data.helpLinkUrl, "https://phibrowser.com/help/")
+        XCTAssertEqual(data.helpLinkUrl, "https://github.com/ojowwalker77/phibrowser-mac/issues")
         XCTAssertEqual(data.errorCode, 11)
         XCTAssertEqual(data.kind, 1)
         XCTAssertEqual(data.terminationStatus, 2)

@@ -118,7 +118,12 @@
 
                 // Build the minimal Chromium argv for the embedded launch.
                 NSMutableArray<NSString *> *arguments = [NSMutableArray array];
-                [arguments addObject:@"Phi"];
+                [arguments addObject:@"Lua"];
+                // The prebuilt framework still embeds an upstream Crashpad
+                // endpoint. Chromium recognizes this switch as the local
+                // source-owned mitigation; the binary remains a disclosed
+                // privacy boundary until Lua can rebuild the framework.
+                [arguments addObject:@"--disable-crash-reporter"];
 
 #if DEBUG || NIGHTLY_BUILD
                 [arguments addObject:@"--phi-ai-debug"];

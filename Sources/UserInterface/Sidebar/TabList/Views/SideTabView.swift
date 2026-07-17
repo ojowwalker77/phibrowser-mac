@@ -94,8 +94,8 @@ struct SideTabView: View {
         SideTabView(
             model: {
                 let vm = TabViewModel()
-                vm.title = "PhiBrowser"
-                vm.url = "https://phibrowser.com"
+                vm.title = "Lua Browser"
+                vm.url = "https://github.com/ojowwalker77/phibrowser-mac"
                 vm.isActive = true
                 return vm
             }()

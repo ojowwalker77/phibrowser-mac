@@ -251,7 +251,7 @@ extension AppController {
 
         let marketingWithChannel = marketingVersion
 
-        let name = "Phi /\(buildVersion) \(marketingWithChannel) (\(localeStr)); MacOS/\(osVersion);"
+        let name = "Lua /\(buildVersion) \(marketingWithChannel) (\(localeStr)); MacOS/\(osVersion);"
         clientString = name
         return name
     }

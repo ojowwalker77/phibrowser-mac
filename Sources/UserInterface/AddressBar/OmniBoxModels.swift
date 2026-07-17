@@ -390,7 +390,7 @@ extension String {
         lowercased.hasPrefix("ftp://") ||
         lowercased.hasPrefix("file://") ||
         lowercased.hasPrefix("chrome://") ||
-        lowercased.hasPrefix("phi://")
+        lowercased.hasPrefix("lua://") || lowercased.hasPrefix("phi://")
     }
     
     func urlScheme() -> String? {

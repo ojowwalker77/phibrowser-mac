@@ -121,9 +121,9 @@ final class PhiBrowserTests: XCTestCase {
     }
 
     func testBookmarkMenuContentBuilderAddsBookmarkThisTabAndRecursiveBookmarks() {
-        let rootBookmark = Bookmark(title: "Phi", url: "https://phibrowser.com")
+        let rootBookmark = Bookmark(title: "Lua", url: "https://example.com")
         let folder = Bookmark(folderTitle: "Favorites")
-        let childBookmark = Bookmark(title: "Docs", url: "https://docs.phibrowser.com")
+        let childBookmark = Bookmark(title: "Docs", url: "https://example.com/docs")
         folder.addChild(childBookmark)
         let target = BookmarkMenuTestTarget()
 
@@ -159,7 +159,7 @@ final class PhiBrowserTests: XCTestCase {
             NSLocalizedString("Export Bookmarks...", comment: "Bookmarks menu - Menu item to export the current Space's bookmarks to an HTML file")
         )
         XCTAssertTrue(menu.items.dropFirst(4).first?.isSeparatorItem == true)
-        XCTAssertEqual(menu.items.dropFirst(5).map(\.title), ["Phi", "Favorites"])
+        XCTAssertEqual(menu.items.dropFirst(5).map(\.title), ["Lua", "Favorites"])
         XCTAssertEqual(menu.items.last?.submenu?.items.map(\.title), ["Docs"])
     }
 
@@ -283,14 +283,14 @@ final class PhiBrowserTests: XCTestCase {
     func testOmniBoxSearchCoordinatorSuppressesOnlyTheNextAutomaticSearchAfterPrefill() {
         let coordinator = OmniBoxSearchCoordinator()
 
-        coordinator.prepareForPrefilledOpen(text: "https://phibrowser.com", minInputLength: 1)
+        coordinator.prepareForPrefilledOpen(text: "https://example.com", minInputLength: 1)
 
         XCTAssertFalse(
-            coordinator.shouldPerformAutomaticSearch(for: "https://phibrowser.com", minInputLength: 1),
+            coordinator.shouldPerformAutomaticSearch(for: "https://example.com", minInputLength: 1),
             "Prefilling the current tab URL should not immediately trigger a duplicate automatic search."
         )
         XCTAssertTrue(
-            coordinator.shouldPerformAutomaticSearch(for: "https://phibrowser.com/path", minInputLength: 1),
+            coordinator.shouldPerformAutomaticSearch(for: "https://example.com/path", minInputLength: 1),
             "Only the next automatic search should be suppressed so later edits still update suggestions."
         )
     }

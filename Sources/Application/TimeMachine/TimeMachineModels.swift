@@ -151,7 +151,7 @@ struct TimeMachineBackupRecord: Codable, Equatable, Identifiable {
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = timeZone
         formatter.dateFormat = "yyyy.M.d"
-        return "Phi \(rollbackVersion) (\(rollbackBuild)) on \(formatter.string(from: createdAt))"
+        return "Lua \(rollbackVersion) (\(rollbackBuild)) on \(formatter.string(from: createdAt))"
     }
 }
 

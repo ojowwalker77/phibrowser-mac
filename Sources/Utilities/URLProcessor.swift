@@ -16,8 +16,10 @@ public struct URLProcessor {
             return trimmedText
         } else if trimmedText.hasPrefix("chrome://") || trimmedText.hasPrefix("about://") {
             return trimmedText
-        } else if trimmedText.hasPrefix("phi://") {
-            return trimmedText.replacingOccurrences(of: "phi://", with: "chrome://")
+        } else if trimmedText.hasPrefix("lua://") || trimmedText.hasPrefix("phi://") {
+            return trimmedText
+                .replacingOccurrences(of: "lua://", with: "chrome://")
+                .replacingOccurrences(of: "phi://", with: "chrome://")
         } else if isURL(trimmedText) {
             return "https://\(trimmedText)"
         } else {
@@ -45,6 +47,7 @@ public struct URLProcessor {
            trimmedText.hasPrefix("https://") ||
            trimmedText.hasPrefix("chrome://") ||
            trimmedText.hasPrefix("about://") ||
+           trimmedText.hasPrefix("lua://") ||
            trimmedText.hasPrefix("phi://") {
             return true
         }
@@ -73,7 +76,7 @@ public struct URLProcessor {
     static func phiBrandEnsuredUrlString(_ string: String) -> String {
         guard string.hasPrefix("chrome://") else { return string }
         let startIndex = string.index(string.startIndex, offsetBy: "chrome://".count)
-        return "phi://" + string[startIndex...]
+        return "lua://" + string[startIndex...]
     }
 
     private static func normalizedForOriginNavigation(_ rawURL: String) -> String? {

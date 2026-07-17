@@ -46,9 +46,10 @@
 		</dict>
 		<dict>
 			<key>CFBundleURLName</key>
-			<string>Phi</string>
+			<string>Lua Browser</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
+				<string>lua</string>
 				<string>phi</string>
 				<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
 			</array>
@@ -100,9 +101,9 @@
 	<key>NSCameraUsageDescription</key>
 	<string>Websites may use your camera for features on their site.</string>
 	<key>NSDesktopFolderUsageDescription</key>
-	<string>Access to &quot;Desktop&quot; is required to make files accessible from Phi.</string>
+	<string>Access to &quot;Desktop&quot; is required to make files accessible from Lua.</string>
 	<key>NSDownloadsFolderUsageDescription</key>
-	<string>Access to &quot;Downloads&quot; is required for downloading files from the web and to make files accessible from Phi.</string>
+	<string>Access to &quot;Downloads&quot; is required for downloading files from the web and to make files accessible from Lua.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Websites may use your location for features on their site.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>

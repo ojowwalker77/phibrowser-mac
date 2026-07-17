@@ -877,12 +877,12 @@ enum PhiSparkleUpdateWindowMode {
         switch self {
         case .available:
             return NSLocalizedString(
-                "A new version of Phi is available",
+                "A new version of Lua is available",
                 comment: "Sparkle update window - Title"
             )
         case .readyToInstall:
             return NSLocalizedString(
-                "A new version of Phi is ready to install",
+                "A new version of Lua is ready to install",
                 comment: "Sparkle update window - Ready to install title"
             )
         }

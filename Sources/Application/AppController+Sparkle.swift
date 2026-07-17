@@ -128,7 +128,7 @@ extension AppController {
     static let checkForUpdateItemTag = 50001
     
     func updateCheckForUpdateMenuItem() {
-        guard let menu = NSApp.mainMenu?.item(withTitle: "Phi")?.submenu else { return }
+        guard let menu = NSApp.mainMenu?.item(withTitle: "Lua")?.submenu else { return }
         guard let item = menu.item(withTag: Self.checkForUpdateItemTag) else { return }
         
         func setupBadgeView(title: String, badge: String) {

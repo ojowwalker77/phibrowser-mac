@@ -1,0 +1,88 @@
+name: Quality
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: quality-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PHI_FRAMEWORK_VERSION: v2.2.0
+
+jobs:
+  check:
+    name: Quality / Check
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate scripts
+        run: |
+          bash -n \
+            script/bootstrap \
+            script/build_and_run.sh \
+            script/build_performance.sh \
+            script/check \
+            script/fetch_phi_framework.sh \
+            script/release-preflight \
+            script/run \
+            script/sign_phi_bundle.sh \
+            script/verify
+      - name: Unit tests
+        env:
+          DERIVED_DATA: ${{ runner.temp }}/DerivedData-check
+        run: ./script/check
+
+  macos-build:
+    name: Quality / macOS build
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Bootstrap pinned framework
+        run: ./script/bootstrap
+      - name: Build Release without signing
+        run: |
+          xcodebuild build \
+            -project Phi.xcodeproj \
+            -scheme PhiBrowser-release \
+            -configuration Release \
+            -destination 'generic/platform=macOS' \
+            -derivedDataPath "$RUNNER_TEMP/DerivedData-build" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO
+
+  release-smoke:
+    name: Quality / Release smoke
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify release bundle
+        env:
+          DERIVED_DATA: ${{ runner.temp }}/DerivedData-verify
+        run: ./script/verify
+
+  quality:
+    name: Quality
+    if: always()
+    needs: [check, macos-build, release-smoke]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require every quality lane
+        env:
+          CHECK_RESULT: ${{ needs.check.result }}
+          BUILD_RESULT: ${{ needs.macos-build.result }}
+          SMOKE_RESULT: ${{ needs.release-smoke.result }}
+        run: |
+          [[ "$CHECK_RESULT" == success ]]
+          [[ "$BUILD_RESULT" == success ]]
+          [[ "$SMOKE_RESULT" == success ]]

@@ -53,7 +53,7 @@ final class NewTabViewController: NSViewController {
         let tf = NSTextField()
         tf.stringValue = browserState.isIncognito
             ? NSLocalizedString("Incognito", comment: "Incognito label in the native new tab page")
-            : NSLocalizedString("Phi", comment: "Brand label in the native new tab page")
+            : NSLocalizedString("Lua", comment: "Brand label in the native new tab page")
         tf.font = NSFont(name: "IvyPrestoHeadline-Light", size: 21)
         tf.isEditable = false
         tf.isBordered = false

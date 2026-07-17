@@ -68,7 +68,6 @@
 		3777EEF42FC4442700C85E41 /* FloatingNewTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3777EEF32FC4442700C85E41 /* FloatingNewTabView.swift */; };
 		377D210F2F51986900A68BE5 /* WebContentContainerViewController+FloatingSidebar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 377D210E2F51986900A68BE5 /* WebContentContainerViewController+FloatingSidebar.swift */; };
 		377D21EC2F52C67300A68BE5 /* WebContentAddressBarMenu.swift in Sources */ = {isa = PBXBuildFile; fileRef = 377D21EB2F52C67300A68BE5 /* WebContentAddressBarMenu.swift */; };
-		3787811F2FE942E40028969F /* TimeMachineRollbackPolicy.json in Resources */ = {isa = PBXBuildFile; fileRef = 3787811E2FE942E40028969F /* TimeMachineRollbackPolicy.json */; };
 		378AFF262F78D6780016B334 /* ivy-presto-display-semi-bold.otf in Copy Fonts */ = {isa = PBXBuildFile; fileRef = 378AFF242F78D6530016B334 /* ivy-presto-display-semi-bold.otf */; };
 		378AFF622F78E5EA0016B334 /* BrowserThemeContext.swift in Sources */ = {isa = PBXBuildFile; fileRef = 378AFF612F78E5EA0016B334 /* BrowserThemeContext.swift */; };
 		37A000022FEA000000000001 /* PhiSparkleUserDriver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37A000012FEA000000000001 /* PhiSparkleUserDriver.swift */; };
@@ -122,7 +121,7 @@
 		37EA23AC2F6C010C00D3C4A9 /* Dependencies in Frameworks */ = {isa = PBXBuildFile; productRef = B02BEB612E3B2D5900E5859A /* Dependencies */; };
 		37EA25EF2F6D5A5A00D3C4A9 /* CommonMessageRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37EA25EE2F6D5A5A00D3C4A9 /* CommonMessageRouter.swift */; };
 		37EECF222F0F623A0022A176 /* EmbeddedChatViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37EECF212F0F623A0022A176 /* EmbeddedChatViewController.swift */; };
-		37F574482F7A7C5D00879867 /* PhiIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = 37F574472F7A7C5D00879867 /* PhiIcon.icon */; };
+		37F574482F7A7C5D00879867 /* LuaIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = 37F574472F7A7C5D00879867 /* LuaIcon.icon */; };
 		37FA01012FDA000100000001 /* LocalStoreCompatibilityManifest.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37FA01112FDA000100000001 /* LocalStoreCompatibilityManifest.swift */; };
 		37FA01022FDA000100000002 /* LocalStoreBackupPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37FA01122FDA000100000002 /* LocalStoreBackupPolicy.swift */; };
 		37FA01032FDA000100000003 /* LocalStoreCompatibilityConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37FA01132FDA000100000003 /* LocalStoreCompatibilityConfiguration.swift */; };
@@ -532,7 +531,6 @@
 		3777EEF32FC4442700C85E41 /* FloatingNewTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FloatingNewTabView.swift; sourceTree = "<group>"; };
 		377D210E2F51986900A68BE5 /* WebContentContainerViewController+FloatingSidebar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "WebContentContainerViewController+FloatingSidebar.swift"; sourceTree = "<group>"; };
 		377D21EB2F52C67300A68BE5 /* WebContentAddressBarMenu.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebContentAddressBarMenu.swift; sourceTree = "<group>"; };
-		3787811E2FE942E40028969F /* TimeMachineRollbackPolicy.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = TimeMachineRollbackPolicy.json; sourceTree = "<group>"; };
 		378AFF242F78D6530016B334 /* ivy-presto-display-semi-bold.otf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "ivy-presto-display-semi-bold.otf"; sourceTree = "<group>"; };
 		378AFF612F78E5EA0016B334 /* BrowserThemeContext.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserThemeContext.swift; sourceTree = "<group>"; };
 		37A000012FEA000000000001 /* PhiSparkleUserDriver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhiSparkleUserDriver.swift; sourceTree = "<group>"; };
@@ -590,7 +588,7 @@
 		37E9E91E2FC84DEA00815832 /* TabDataModelSchemaV6.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TabDataModelSchemaV6.swift; sourceTree = "<group>"; };
 		37EA25EE2F6D5A5A00D3C4A9 /* CommonMessageRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommonMessageRouter.swift; sourceTree = "<group>"; };
 		37EECF212F0F623A0022A176 /* EmbeddedChatViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmbeddedChatViewController.swift; sourceTree = "<group>"; };
-		37F574472F7A7C5D00879867 /* PhiIcon.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = PhiIcon.icon; sourceTree = "<group>"; };
+		37F574472F7A7C5D00879867 /* LuaIcon.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = LuaIcon.icon; sourceTree = "<group>"; };
 		37FA01112FDA000100000001 /* LocalStoreCompatibilityManifest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalStoreCompatibilityManifest.swift; sourceTree = "<group>"; };
 		37FA01122FDA000100000002 /* LocalStoreBackupPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalStoreBackupPolicy.swift; sourceTree = "<group>"; };
 		37FA01132FDA000100000003 /* LocalStoreCompatibilityConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalStoreCompatibilityConfiguration.swift; sourceTree = "<group>"; };
@@ -714,7 +712,7 @@
 		B025870D2E430305001B08FC /* MainSplitViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainSplitViewController.swift; sourceTree = "<group>"; };
 		B02587112E43038B001B08FC /* Tab.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Tab.swift; sourceTree = "<group>"; };
 		B02BEB632E3B2F5A00E5859A /* Package.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = Package.swift; path = PackageCollection/Package.swift; sourceTree = "<group>"; };
-		B0C469482E3B10E1007F0C7A /* Phi.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Phi.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		B0C469482E3B10E1007F0C7A /* Lua.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Lua.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		B0C4694D2E3B10E2007F0C7A /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		B0C469522E3B10E2007F0C7A /* PhiBrowser.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = PhiBrowser.entitlements; sourceTree = "<group>"; };
 		B0C469572E3B10E2007F0C7A /* PhiBrowserTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = PhiBrowserTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -1519,7 +1517,7 @@
 		B0C469492E3B10E1007F0C7A /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				B0C469482E3B10E1007F0C7A /* Phi.app */,
+				B0C469482E3B10E1007F0C7A /* Lua.app */,
 				54A200122FE1000000000012 /* PhiTimeMachineInstaller */,
 				B0C469572E3B10E2007F0C7A /* PhiBrowserTests.xctest */,
 				B0C469612E3B10E2007F0C7A /* PhiBrowserUITests.xctest */,
@@ -1540,9 +1538,8 @@
 				B0C469522E3B10E2007F0C7A /* PhiBrowser.entitlements */,
 				E10000000000000000000001 /* PhiBrowser-OpenSource.entitlements */,
 				37DEADB82F5FCDBC00129429 /* PhiBrowser-Canary.entitlements */,
-				37F574472F7A7C5D00879867 /* PhiIcon.icon */,
+				37F574472F7A7C5D00879867 /* LuaIcon.icon */,
 				CC5C51F52FB5C5560044D255 /* credits.html */,
-				3787811E2FE942E40028969F /* TimeMachineRollbackPolicy.json */,
 			);
 			path = Resources;
 			sourceTree = "<group>";
@@ -2116,7 +2113,7 @@
 				CC293E452E8A7BD4009FECA5 /* Dependencies */,
 			);
 			productName = PhiBrowser;
-			productReference = B0C469482E3B10E1007F0C7A /* Phi.app */;
+			productReference = B0C469482E3B10E1007F0C7A /* Lua.app */;
 			productType = "com.apple.product-type.application";
 		};
 		B0C469562E3B10E2007F0C7A /* PhiBrowserTests */ = {
@@ -2222,11 +2219,10 @@
 			buildActionMask = 2147483647;
 			files = (
 				CDA11ED500000000000000B1 /* claude-skill in Resources */,
-				37F574482F7A7C5D00879867 /* PhiIcon.icon in Resources */,
+				37F574482F7A7C5D00879867 /* LuaIcon.icon in Resources */,
 				B0C4694E2E3B10E2007F0C7A /* Assets.xcassets in Resources */,
 				3765817B2EE963AD00D3E031 /* Localizable.xcstrings in Resources */,
 				CC5C51F62FB5C5560044D255 /* credits.html in Resources */,
-				3787811F2FE942E40028969F /* TimeMachineRollbackPolicy.json in Resources */,
 				CD11000B0000000000000001 /* Emoji/emoji-catalog.json in Resources */,
 				8EC502152F67AF7F00CE7338 /* DownloadSafety.xcstrings in Resources */,
 			);
@@ -2887,7 +2883,7 @@
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_VERSION = 5.0;
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Phi Canary.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Phi Canary";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Lua Canary.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Lua Canary";
 			};
 			name = "Debug-Canary";
 		};
@@ -3030,7 +3026,7 @@
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_VERSION = 5.0;
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Phi Canary.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Phi Canary";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Lua Canary.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Lua Canary";
 			};
 			name = "Release-Canary";
 		};
@@ -3177,7 +3173,7 @@
 		B0C4696C2E3B10E2007F0C7A /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = PhiIcon;
+				ASSETCATALOG_COMPILER_APPICON_NAME = LuaIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_ENTITLEMENTS = "$(APP_ENTITLEMENTS)";
@@ -3229,7 +3225,7 @@
 		B0C4696D2E3B10E2007F0C7A /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = PhiIcon;
+				ASSETCATALOG_COMPILER_APPICON_NAME = LuaIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_ENTITLEMENTS = "$(APP_ENTITLEMENTS)";
@@ -3290,7 +3286,7 @@
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_VERSION = 5.0;
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Phi.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Phi";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Lua.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Lua";
 			};
 			name = Debug;
 		};
@@ -3310,7 +3306,7 @@
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_VERSION = 5.0;
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Phi.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Phi";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Lua.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Lua";
 			};
 			name = Release;
 		};
@@ -3417,7 +3413,7 @@
 		E10000000000000000000003 /* OpenSource */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = PhiIcon;
+				ASSETCATALOG_COMPILER_APPICON_NAME = LuaIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGNING_ALLOWED = NO;
@@ -3484,7 +3480,7 @@
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_VERSION = 5.0;
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Phi.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Phi";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Lua.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Lua";
 			};
 			name = OpenSource;
 		};
@@ -3559,7 +3555,7 @@
 		F10000000000000000000003 /* Performance */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = PhiIcon;
+				ASSETCATALOG_COMPILER_APPICON_NAME = LuaIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGNING_ALLOWED = NO;
@@ -3625,7 +3621,7 @@
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_VERSION = 5.0;
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Phi.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Phi";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Lua.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Lua";
 			};
 			name = Performance;
 		};

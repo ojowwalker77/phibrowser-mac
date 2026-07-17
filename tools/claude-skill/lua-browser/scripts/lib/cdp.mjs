@@ -1,8 +1,8 @@
 // Copyright 2026 Phinomenon Inc.
 //
-// Minimal dependency-free CDP client for Phi Browser (Node >= 22, global
+// Minimal dependency-free CDP client for Lua Browser (Node >= 22, global
 // WebSocket). Connects to the browser-target websocket advertised in the
-// DevToolsActivePort file of Phi's user data directory.
+// DevToolsActivePort file of Lua's user data directory.
 
 import { existsSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
@@ -10,6 +10,9 @@ import { join } from 'node:path'
 
 const CANDIDATE_DIRS = [
   process.env.PHI_USER_DATA_DIR,
+  join(homedir(), 'Library/Application Support/dev.jow.LuaBrowser'),
+  join(homedir(), 'Library/Application Support/dev.jow.LuaBrowser.Development'),
+  join(homedir(), 'Library/Application Support/com.ojowwalker77.PhiBrowser'),
   join(homedir(), 'Library/Application Support/com.phibrowser.canary.Mac'),
   join(homedir(), 'Library/Application Support/com.phibrowser.Mac'),
 ].filter(Boolean)
@@ -29,8 +32,8 @@ export function readActivePort() {
   throw new Error(
     'DevToolsActivePort not found. Enable the CDP endpoint first (see ' +
     'references/install.md):\n' +
-    '  defaults write com.phibrowser.canary.Mac PhiRemoteDebuggingPort -int 0\n' +
-    'then relaunch Phi Browser.')
+    '  defaults write dev.jow.LuaBrowser PhiRemoteDebuggingPort -int 0\n' +
+    'then relaunch Lua.')
 }
 
 export async function verifyEndpoint(port) {
@@ -41,8 +44,8 @@ export async function verifyEndpoint(port) {
     return await res.json()
   } catch (err) {
     throw new Error(
-      `Phi Browser CDP endpoint on port ${port} is not responding ` +
-      `(stale DevToolsActivePort after a crash?). Relaunch Phi Browser. ` +
+      `Lua Browser CDP endpoint on port ${port} is not responding ` +
+      `(stale DevToolsActivePort after a crash?). Relaunch Lua. ` +
       `[${err.message}]`)
   }
 }

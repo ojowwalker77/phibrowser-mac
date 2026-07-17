@@ -330,7 +330,7 @@ extension AppController {
         alert.addButton(withTitle: "Cancel")
 
         let textField = NSTextField(frame: NSRect(x: 0, y: 0, width: 300, height: 24))
-        textField.stringValue = "phi://native/openpage?page=settings"
+        textField.stringValue = "lua://native/openpage?page=settings"
         textField.placeholderString = "Input deeplink to trigger"
         alert.accessoryView = textField
         

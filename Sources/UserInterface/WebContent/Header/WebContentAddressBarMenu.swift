@@ -152,7 +152,7 @@ final class WebContentAddressBarMenuPresenter {
                 keyEquivalent: ""
             )
             let manageTarget = MenuActionTarget {
-                let url = URLProcessor.processUserInput("phi://extensions")
+                let url = URLProcessor.processUserInput("lua://extensions")
                 browserState?.createTab(url)
             }
             actionTargets.append(manageTarget)
@@ -406,6 +406,6 @@ final class WebContentAddressBarMenuPresenter {
 
     private static func shouldShowSecuritySection(for rawURLString: String) -> Bool {
         let lowercased = rawURLString.lowercased()
-        return !lowercased.hasPrefix("chrome://") && !lowercased.hasPrefix("phi://")
+        return !lowercased.hasPrefix("chrome://") && !lowercased.hasPrefix("lua://") && !lowercased.hasPrefix("phi://")
     }
 }

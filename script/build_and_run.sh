@@ -4,9 +4,9 @@ set -euo pipefail
 MODE="${1:-run}"
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DERIVED_DATA="$ROOT_DIR/.derivedData"
-APP_NAME="Phi"
-APP_BUNDLE="$DERIVED_DATA/Build/Products/OpenSource/Phi.app"
-BUNDLE_ID="com.phibrowser.Mac"
+APP_NAME="Lua"
+APP_BUNDLE="$DERIVED_DATA/Build/Products/OpenSource/Lua.app"
+BUNDLE_ID="dev.jow.LuaBrowser.Development"
 
 "$ROOT_DIR/script/fetch_phi_framework.sh"
 
@@ -22,8 +22,9 @@ xcodebuild \
   CODE_SIGNING_REQUIRED=NO \
   build
 
-stop_running_phi() {
-  # The OpenSource build shares the installed app's Chromium and Swift data.
+stop_running_lua() {
+  # The development build uses an isolated profile. Still keep one writer per
+  # profile so repeated local launches cannot race each other.
   # Chromium profiles are single-writer: never launch either app while another
   # Phi process still owns the profile lock.
   pkill -x "$APP_NAME" >/dev/null 2>&1 || true
@@ -33,12 +34,12 @@ stop_running_phi() {
     fi
     sleep 0.1
   done
-  echo "Phi is still running; quit it before launching the shared development profile." >&2
+  echo "Lua is still running; quit it before launching the shared development profile." >&2
   return 1
 }
 
 open_app() {
-  stop_running_phi
+  stop_running_lua
   /usr/bin/open -n "$APP_BUNDLE"
 }
 
@@ -47,12 +48,12 @@ case "$MODE" in
     open_app
     ;;
   --debug|debug)
-    stop_running_phi
-    lldb -- "$APP_BUNDLE/Contents/MacOS/Phi"
+    stop_running_lua
+    lldb -- "$APP_BUNDLE/Contents/MacOS/Lua"
     ;;
   --logs|logs)
     open_app
-    /usr/bin/log stream --info --style compact --predicate 'process == "Phi"'
+    /usr/bin/log stream --info --style compact --predicate 'process == "Lua"'
     ;;
   --telemetry|telemetry)
     open_app

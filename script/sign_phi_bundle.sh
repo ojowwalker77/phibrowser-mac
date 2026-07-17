@@ -2,7 +2,7 @@
 set -euo pipefail
 
 if [[ $# -ne 3 ]]; then
-  echo "usage: $0 <Phi.app> <signing identity> <entitlements plist>" >&2
+  echo "usage: $0 <Lua.app> <signing identity> <entitlements plist>" >&2
   exit 2
 fi
 

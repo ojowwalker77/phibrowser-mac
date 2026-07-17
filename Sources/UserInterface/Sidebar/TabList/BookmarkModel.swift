@@ -235,7 +235,7 @@ class Bookmark: WebContentRepresentable {
         }
 
         let processedURLString: String
-        if rawURLString.hasPrefix("phi://") || URL(string: rawURLString)?.scheme == nil {
+        if rawURLString.hasPrefix("lua://") || rawURLString.hasPrefix("phi://") || URL(string: rawURLString)?.scheme == nil {
             processedURLString = URLProcessor.processUserInput(rawURLString)
         } else {
             processedURLString = rawURLString

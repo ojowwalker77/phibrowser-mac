@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+DERIVED_DATA="${DERIVED_DATA:-$ROOT_DIR/.derivedData-verify}"
+APP="$DERIVED_DATA/Build/Products/Release/Lua.app"
+
+"$ROOT_DIR/script/bootstrap"
+xcodebuild build \
+  -project "$ROOT_DIR/Phi.xcodeproj" \
+  -scheme PhiBrowser-release \
+  -configuration Release \
+  -destination 'generic/platform=macOS' \
+  -derivedDataPath "$DERIVED_DATA" \
+  CODE_SIGNING_ALLOWED=NO \
+  CODE_SIGNING_REQUIRED=NO
+
+[[ -d "$APP" ]] || { echo "Missing release app: $APP" >&2; exit 1; }
+[[ -d "$APP/Contents/Frameworks/Phi Framework.framework" ]] || {
+  echo "Lua is missing the pinned Phi Framework dependency." >&2
+  exit 1
+}
+framework="$APP/Contents/Frameworks/Phi Framework.framework"
+
+info="$APP/Contents/Info.plist"
+[[ "$(plutil -extract CFBundleName raw "$info")" == "Lua" ]] || {
+  echo "Unexpected CFBundleName." >&2
+  exit 1
+}
+[[ "$(plutil -extract CFBundleIdentifier raw "$info")" == "dev.jow.LuaBrowser" ]] || {
+  echo "Unexpected CFBundleIdentifier." >&2
+  exit 1
+}
+[[ "$(plutil -extract CrProductDirName raw "$info")" == "com.ojowwalker77.PhiBrowser" ]] || {
+  echo "Release profile continuity is not configured as expected." >&2
+  exit 1
+}
+plutil -extract CFBundleURLTypes json -o - "$info" | grep -q 'lua' || {
+  echo "The lua:// URL scheme is missing." >&2
+  exit 1
+}
+[[ -f "$APP/Contents/Resources/LuaIcon.icns" ]] || {
+  echo "LuaIcon.icns was not compiled into the app." >&2
+  exit 1
+}
+
+if grep -R -E 'ota\.phibrowser\.com|account\.phibrowser\.com|ai\.phibrowser\.com' "$APP/Contents/Resources" || \
+   strings -a "$APP/Contents/MacOS/Lua" | grep -E 'ota\.phibrowser\.com|account\.phibrowser\.com|ai\.phibrowser\.com'; then
+  echo "Packaged resources contain a forbidden upstream service endpoint." >&2
+  exit 1
+fi
+
+# The prebuilt framework is an explicit binary boundary. Its known upstream
+# endpoints are allowlisted so additions fail CI instead of silently expanding
+# the privacy surface. These entries remain blockers, not approved Lua traffic.
+audit_file="$(mktemp)"
+unexpected_file="$(mktemp)"
+trap 'rm -f "$audit_file" "$unexpected_file"' EXIT
+find "$framework" -type f -perm -111 -print0 \
+  | xargs -0 strings -a 2>/dev/null \
+  | grep -E 'phibrowser\.com|ingest\.us\.sentry\.io' \
+  | LC_ALL=C sort -u > "$audit_file"
+comm -23 "$audit_file" "$ROOT_DIR/script/framework-endpoint-allowlist.txt" > "$unexpected_file"
+if [[ -s "$unexpected_file" ]]; then
+  echo "Phi Framework contains new upstream endpoints that require privacy review:" >&2
+  cat "$unexpected_file" >&2
+  exit 1
+fi
+echo "Known blocker: Phi Framework still embeds the audited upstream endpoint allowlist."
+
+echo "Verified Lua release bundle at $APP"

@@ -608,13 +608,15 @@ extension Tab {
 
 extension String {
     var isNTP: Bool {
-        hasPrefix("chrome://newtab") || hasPrefix("phi://newtab")
+        hasPrefix("chrome://newtab") || hasPrefix("lua://newtab") || hasPrefix("phi://newtab")
     }
 
     var isLocalUrlString: Bool {
         hasPrefix("chrome://newtab") ||
+        hasPrefix("lua://newtab") ||
         hasPrefix("phi://newtab") ||
         hasPrefix("chrome://conversation") ||
+        hasPrefix("lua://skills") ||
         hasPrefix("phi://skills") ||
         hasPrefix("chrome://skills")
     }

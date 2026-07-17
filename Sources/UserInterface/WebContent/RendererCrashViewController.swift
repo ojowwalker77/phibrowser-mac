@@ -140,7 +140,7 @@ private struct RendererCrashView: View {
             "buttonLabel": "Reload",
             "helpLinkLabel": "Learn more",
             "errorCodeText": "Error code: SIGSEGV",
-            "helpLinkUrl": "https://phibrowser.com/help/",
+            "helpLinkUrl": "https://github.com/ojowwalker77/phibrowser-mac/issues",
             "showFeedbackButton": NSNumber(value: false),
             "tips": [],
         ]),
@@ -158,7 +158,7 @@ private struct RendererCrashView: View {
             "buttonLabel": "Send feedback",
             "helpLinkLabel": "Learn more",
             "errorCodeText": "",
-            "helpLinkUrl": "https://phibrowser.com/help/",
+            "helpLinkUrl": "https://github.com/ojowwalker77/phibrowser-mac/issues",
             "showFeedbackButton": NSNumber(value: true),
             "tips": [
                 "Try reloading the page.",

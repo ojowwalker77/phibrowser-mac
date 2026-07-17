@@ -25,4 +25,4 @@ xcodebuild \
   CODE_SIGNING_REQUIRED=NO \
   build
 
-echo "Performance app: $DERIVED_DATA/Build/Products/Performance/Phi.app"
+echo "Performance app: $DERIVED_DATA/Build/Products/Performance/Lua.app"

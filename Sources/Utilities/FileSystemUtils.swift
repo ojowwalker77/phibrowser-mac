@@ -5,14 +5,18 @@
 
 import Foundation
 @objc final class FileSystemUtils: NSObject {
-    static let defaultBundleId = "com.phibrowser.Mac"
+    static let defaultBundleId = "dev.jow.LuaBrowser"
     static let groupId = "group.com.phibrowser.shared"
     static let teamId = "87DQ3HMK5G"
     static let bundleId = Bundle.main.infoDictionary?[kCFBundleIdentifierKey as String] as? String ?? defaultBundleId
+    // Release temporarily points this at the previous fork directory so all
+    // browser and Swift-side state stays continuous. Development/test configs
+    // inherit their isolated bundle identifier instead.
+    static let productDirectoryName = Bundle.main.object(forInfoDictionaryKey: "CrProductDirName") as? String ?? bundleId
     @objc static func applicationSupportDirctory() -> String {
         let paths = NSSearchPathForDirectoriesInDomains(.applicationSupportDirectory, .userDomainMask, true)
         let cacheDirectory = paths[0]
-        let bundleId = bundleId
+        let bundleId = productDirectoryName
         
         return ((cacheDirectory as NSString)
             .appendingPathComponent(bundleId) as NSString) as String
@@ -21,7 +25,7 @@ import Foundation
     static func cacheDirctory() -> String {
         let paths = NSSearchPathForDirectoriesInDomains(.cachesDirectory, .userDomainMask, true)
         let cacheDirectory = paths[0]
-        let bundleId = bundleId
+        let bundleId = productDirectoryName
         
         return ((cacheDirectory as NSString)
             .appendingPathComponent(bundleId) as NSString) as String

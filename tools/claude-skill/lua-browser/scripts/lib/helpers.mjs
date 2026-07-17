@@ -225,7 +225,7 @@ export async function ensureAgentSpace(name, { profile = '', persistent = false 
       // here; reopening it (or an app relaunch) restores its window.
       throw new Error(
         `ensureAgentSpace: persistent space '${name}' has no tabs — ` +
-        'reopen it from the Space switcher (or relaunch Phi Browser), then retry')
+        'reopen it from the Space switcher (or relaunch Lua), then retry')
     }
     await phiSend('agentSpace.complete', {
       taskId: name, status: 'failure', message: 'agent window lost',

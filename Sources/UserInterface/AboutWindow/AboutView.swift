@@ -8,7 +8,7 @@ import AppKit
 
 struct AboutView: View {
     private let appName = Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String ??
-                         Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String ?? "Phi"
+                         Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String ?? "Lua"
 
     private let appVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0.0"
 
@@ -70,7 +70,7 @@ struct AboutView: View {
     /// Acknowledgements paragraph (English only); three links: Chromium name and two 'open source software' spans.
     private var acknowledgementsAttributedString: AttributedString {
         var result = AttributedString()
-        result.append(AttributedString("Phi is made possible by the "))
+        result.append(AttributedString("Lua is made possible by the "))
 
         var chromiumLink = AttributedString("Chromium")
         chromiumLink.link = Self.chromiumProjectURL

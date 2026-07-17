@@ -52,7 +52,7 @@ class SidebarViewController: NSViewController {
         let view = SidebarBottomBarSwiftUIView()
         view.onFeedbackTap = {}
         view.onBookmarkTap = { [weak self] in
-            let url = "phi://bookmarks"
+            let url = "lua://bookmarks"
             self?.state.openTab(URLProcessor.processUserInput(url))
         }
         view.onChatTap = {}

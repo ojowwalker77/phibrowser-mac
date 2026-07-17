@@ -147,7 +147,11 @@ extension AppController {
 
             } else
             
-            if menuItem.title == "Phi", let subMenu = menuItem.submenu {
+            if menuItem.title == "Lua" || menuItem.title == "Phi",
+               let subMenu = menuItem.submenu {
+                // The embedded framework may still construct the legacy app
+                // menu title. Normalize it at the native presentation edge.
+                menuItem.title = "Lua"
                 subMenu.items.removeAll { $0.tag == AppController.checkForUpdateItemTag }
 
                 for (index, item) in subMenu.items.enumerated() {
@@ -709,7 +713,7 @@ extension AppController {
             let alert = NSAlert()
             alert.messageText = NSLocalizedString("Restore Time Machine Backup?", comment: "Help menu - Time Machine restore confirmation title")
             let messageTemplate = NSLocalizedString(
-                "Phi will quit and restore %@. The current app and selected user data will be replaced.",
+                "Lua will quit and restore %@. The current app and selected user data will be replaced.",
                 comment: "Help menu - Time Machine restore confirmation body"
             )
             alert.informativeText = String(format: messageTemplate, backupTitle)
@@ -749,7 +753,7 @@ extension AppController {
                 NSApp.terminate(nil)
             case .some(.failure(let error)):
                 let messageTemplate = NSLocalizedString(
-                    "Phi could not start Time Machine restore: %@",
+                    "Lua could not start Time Machine restore: %@",
                     comment: "Help menu - Time Machine restore launch failure body"
                 )
                 presentTimeMachineRestoreFailure(String(format: messageTemplate, error.localizedDescription))
@@ -758,7 +762,7 @@ extension AppController {
             }
         } catch {
             let messageTemplate = NSLocalizedString(
-                "Phi could not read Time Machine backups: %@",
+                "Lua could not read Time Machine backups: %@",
                 comment: "Help menu - Time Machine restore catalog read failure body"
             )
             presentTimeMachineRestoreFailure(String(format: messageTemplate, error.localizedDescription))
@@ -783,7 +787,7 @@ extension AppController {
         guard hasPhi else {
             let alert = NSAlert()
             alert.messageText = NSLocalizedString("Export Logs", comment: "Help menu - Log export alert title when no log folders exist")
-            alert.informativeText = NSLocalizedString("No Phi log folder was found.", comment: "Help menu - Log export alert when the PhiLogs directory is missing")
+            alert.informativeText = NSLocalizedString("No Lua log folder was found.", comment: "Help menu - Log export alert when the browser log directory is missing")
             alert.alertStyle = .informational
             alert.addButton(withTitle: NSLocalizedString("OK", comment: "Generic - OK button to dismiss an alert"))
             alert.runModal()
@@ -1576,7 +1580,7 @@ extension AppController {
     // MARK: - Chromium Menu Actions
 
     @objc func orderFrontStandardAboutPanel(_ sender: Any?) {
-        if let existingWindow = NSApp.windows.first(where: { $0.identifier?.rawValue ?? "" == "About Phi Browser" }) {
+        if let existingWindow = NSApp.windows.first(where: { $0.identifier?.rawValue ?? "" == "About Lua Browser" }) {
             existingWindow.makeKeyAndOrderFront(nil)
             return
         }
@@ -1590,7 +1594,7 @@ extension AppController {
             backing: .buffered,
             defer: false
         )
-        window.identifier = NSUserInterfaceItemIdentifier("About Phi Browser")
+        window.identifier = NSUserInterfaceItemIdentifier("About Lua Browser")
 
         window.contentViewController = hostingController
         window.setContentSize(NSSize(width: 290, height: 180))
@@ -2022,7 +2026,7 @@ private final class TimeMachineRestoreProgressModal {
         case .launchingInstaller:
             return NSLocalizedString("Starting restore...", comment: "Time Machine restore progress stage")
         case .readyToQuit:
-            return NSLocalizedString("Restarting Phi...", comment: "Time Machine restore progress stage")
+            return NSLocalizedString("Restarting Lua...", comment: "Time Machine restore progress stage")
         }
     }
 }

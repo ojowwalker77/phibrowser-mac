@@ -1,16 +1,16 @@
-// Release-Canary Configuration for PhiBrowser Canary
+// Release-Canary Configuration for Lua Browser Canary
 #include "Shared.xcconfig"
 
 // Product Settings
-PRODUCT_NAME = Phi Canary
-PRODUCT_BUNDLE_IDENTIFIER = com.phibrowser.canary.Mac
-APP_ENTITLEMENTS = Resources/PhiBrowser-Canary.entitlements
+PRODUCT_NAME = Lua Canary
+PRODUCT_BUNDLE_IDENTIFIER = dev.jow.LuaBrowser.Canary
+APP_ENTITLEMENTS = Resources/PhiBrowser-OpenSource.entitlements
 
 // Asset Catalog
-ASSETCATALOG_COMPILER_APPICON_NAME = AppIconCanary
+ASSETCATALOG_COMPILER_APPICON_NAME = LuaIcon
 
 // Sparkle Update Feed (Canary channel)
-APPCAST_PATH = mac-nightly/appcast
+SUFEED_URL = ${URL_SCHEME}/github.com/ojowwalker77/phibrowser-mac/releases/latest/download/appcast.xml
 
 // Build Settings for Release
 SWIFT_COMPILATION_MODE = wholemodule

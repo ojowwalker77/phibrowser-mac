@@ -1,19 +1,15 @@
-// Open Source Configuration for PhiBrowser
+// Development configuration for Lua Browser
 #include "Shared.xcconfig"
 
 // Product Settings
-PRODUCT_NAME = Phi
-// Development builds intentionally reuse the installed Phi profile so local
-// work has the same tabs, profiles, cookies, history, and Swift-side Spaces.
-// The fork's distributable Release configuration keeps its separate identity.
-PRODUCT_BUNDLE_IDENTIFIER = com.phibrowser.Mac
+PRODUCT_NAME = Lua
+PRODUCT_BUNDLE_IDENTIFIER = dev.jow.LuaBrowser.Development
 APP_ENTITLEMENTS = Resources/PhiBrowser-OpenSource.entitlements
 
 // Asset Catalog
-ASSETCATALOG_COMPILER_APPICON_NAME = PhiIcon
+ASSETCATALOG_COMPILER_APPICON_NAME = LuaIcon
 
-// Fork-owned Sparkle update channel. This keeps open-source builds isolated
-// from Phi's upstream release feed and signing key.
+// Lua-owned Sparkle update channel.
 SUFEED_URL = ${URL_SCHEME}/github.com/ojowwalker77/phibrowser-mac/releases/latest/download/appcast.xml
 SPARKLE_PUBLIC_KEY = 1kxlIDM9JRvNTJ2dEzLpQJIwnxKIxCYXp6Nd4QebPAw=
 

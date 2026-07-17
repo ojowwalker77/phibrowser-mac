@@ -1,0 +1,6 @@
+frame-src chrome://webui-test https://phibrowser.com/;
+https://apis.phibrowser.com/feedback/submit
+https://o4510181852708864.ingest.us.sentry.io/api/4510181889933312/minidump/?sentry_key=25f25943199ae1e81dd0dfdf8343aac7
+https://phibrowser.com/help/
+https://phibrowser.com/release-note/
+phibrowser.com

@@ -30,6 +30,7 @@ Sparkle-bin
 .vscode
 .derivedData
 .derivedData-performance
+.derivedData-*
 .worktrees
 .cursor
 .AGENTS.md

@@ -156,6 +156,7 @@ extension Tab {
     var isLocalPage: Bool {
         guard let url = url else { return false }
         return url.hasPrefix("chrome://") ||
+        url.hasPrefix("lua://") ||
         url.hasPrefix("phi://") ||
         url.hasPrefix("chrome-extension")
     }
