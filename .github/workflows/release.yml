@@ -134,7 +134,7 @@ jobs:
       - name: Archive signed app
         env:
           VERSION: ${{ steps.release.outputs.version }}
-          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          TEAM_ID: ${{ secrets.APPLE_TEAM_ID || vars.APPLE_TEAM_ID }}
         run: |
           xcodebuild \
             -project Phi.xcodeproj \
@@ -155,7 +155,7 @@ jobs:
 
       - name: Re-sign Chromium helpers and verify bundle
         env:
-          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          TEAM_ID: ${{ secrets.APPLE_TEAM_ID || vars.APPLE_TEAM_ID }}
         run: |
           app="$RUNNER_TEMP/Lua.xcarchive/Products/Applications/Lua.app"
           identity="Developer ID Application: Jonatas Walker ($TEAM_ID)"
