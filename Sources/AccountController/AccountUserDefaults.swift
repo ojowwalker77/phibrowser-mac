@@ -7,27 +7,42 @@ import Foundation
 
 /// Account-scoped preferences persisted to a plist under `account.userDataStorage/defaults`.
 final class AccountUserDefaults {
+    enum PersistencePolicy {
+        case immediate
+        case coalesced
+    }
+
     private let account: Account
     private let storeURL: URL
     private let queue: DispatchQueue
+    private let coalescingDelay: TimeInterval
     private var storage: [String: Any]
+    private var pendingPersistenceWorkItem: DispatchWorkItem?
     
-    init(account: Account) {
+    init(
+        account: Account,
+        storeURL: URL? = nil,
+        coalescingDelay: TimeInterval = 0.2
+    ) {
         self.account = account
         let defaultsDir = account.userDataStorage.appendingPathComponent("defaults", isDirectory: true)
-        let fileURL = defaultsDir.appendingPathComponent("account_defaults.plist")
+        let fileURL = storeURL ?? defaultsDir.appendingPathComponent("account_defaults.plist")
         self.storeURL = fileURL
         self.queue = DispatchQueue(label: "com.phibrowser.accountDefaults.\(account.userID)")
+        self.coalescingDelay = coalescingDelay
         
         do {
-            try FileManager.default.createDirectory(at: defaultsDir, withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(
+                at: fileURL.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
         } catch {
             AppLogError("Failed to create defaults directory: \(error.localizedDescription)")
         }
         
         self.storage = AccountUserDefaults.loadStore(from: fileURL)
     }
-    
+
     // MARK: - Public API (UserDefaults-like)
     func object(forKey key: String) -> Any? {
         queue.sync {
@@ -35,26 +50,27 @@ final class AccountUserDefaults {
         }
     }
     
-    func set(_ value: Any?, forKey key: String) {
+    func set(
+        _ value: Any?,
+        forKey key: String,
+        persistence: PersistencePolicy = .immediate
+    ) {
         queue.sync {
             if let value = value {
                 storage[key] = value
             } else {
                 storage.removeValue(forKey: key)
             }
-            persistLocked()
+            schedulePersistenceLocked(policy: persistence)
         }
     }
     
-    func set(_ value: Any?, forKey key: DefaultsKey) {
-        queue.sync {
-            if let value = value {
-                storage[key.rawValue] = value
-            } else {
-                storage.removeValue(forKey: key.rawValue)
-            }
-            persistLocked()
-        }
+    func set(
+        _ value: Any?,
+        forKey key: DefaultsKey,
+        persistence: PersistencePolicy = .immediate
+    ) {
+        set(value, forKey: key.rawValue, persistence: persistence)
     }
     
     func removeObject(forKey key: String) {
@@ -111,6 +127,17 @@ final class AccountUserDefaults {
     func removeAll() {
         queue.sync {
             storage.removeAll()
+            schedulePersistenceLocked(policy: .immediate)
+        }
+    }
+
+    /// Persists every in-memory change before returning. Lifecycle owners call
+    /// this when a deferred geometry write cannot safely remain pending.
+    func flush() {
+        queue.sync {
+            guard pendingPersistenceWorkItem != nil else { return }
+            pendingPersistenceWorkItem?.cancel()
+            pendingPersistenceWorkItem = nil
             persistLocked()
         }
     }
@@ -125,6 +152,24 @@ final class AccountUserDefaults {
         } catch {
             AppLogError("Failed to load account defaults: \(error.localizedDescription)")
             return [:]
+        }
+    }
+
+    private func schedulePersistenceLocked(policy: PersistencePolicy) {
+        pendingPersistenceWorkItem?.cancel()
+        pendingPersistenceWorkItem = nil
+
+        switch policy {
+        case .immediate:
+            persistLocked()
+        case .coalesced:
+            let workItem = DispatchWorkItem { [weak self] in
+                guard let self else { return }
+                self.pendingPersistenceWorkItem = nil
+                self.persistLocked()
+            }
+            pendingPersistenceWorkItem = workItem
+            queue.asyncAfter(deadline: .now() + coalescingDelay, execute: workItem)
         }
     }
     
@@ -201,7 +246,11 @@ extension AccountUserDefaults {
         guard width > 0 else {
             return
         }
-        set(Double(width), forKey: DefaultsKey.lastKnownSidebarWidth.rawValue)
+        set(
+            Double(width),
+            forKey: DefaultsKey.lastKnownSidebarWidth.rawValue,
+            persistence: .coalesced
+        )
     }
 
     /// Snapshot of the per-Space theme override map. Returns an empty

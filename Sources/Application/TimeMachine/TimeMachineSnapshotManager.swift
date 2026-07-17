@@ -76,6 +76,12 @@ struct TimeMachineSnapshotManager {
     }
 
     func prepareBackupIfNeeded(currentVersion: String, currentBuild: Int) throws -> TimeMachineBackupRecord? {
+        let interval = PerformanceSignposts.begin(
+            "timeMachine.backup",
+            metadata: "version=\(currentVersion) build=\(currentBuild)"
+        )
+        defer { interval.end() }
+
         guard let policy = try policyLoader.loadPolicy() else {
             AppLogDebug("[TimeMachine] No rollback policy found; skipping backup.")
             return nil

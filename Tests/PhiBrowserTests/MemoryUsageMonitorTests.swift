@@ -150,6 +150,45 @@ final class MemoryUsageMonitorTests: XCTestCase {
         XCTAssertEqual(snapshot?.rootPid, getpid())
         XCTAssertTrue(snapshot?.processes.contains { $0.pid == getpid() } == true)
         XCTAssertGreaterThan(snapshot?.totalResidentBytes ?? 0, 0)
+        XCTAssertGreaterThan(snapshot?.rootPhysicalFootprintBytes ?? 0, 0)
+    }
+
+    func testSnapshotUsesFootprintAndReportsTypedDistributions() {
+        let gibibyte: UInt64 = 1024 * 1024 * 1024
+        let snapshot = MemoryUsageSnapshot(
+            capturedAt: Date(timeIntervalSince1970: 1_713_600_000),
+            rootPid: 10,
+            physicalMemoryBytes: 16 * gibibyte,
+            thresholdBytes: 4 * gibibyte,
+            processes: [
+                ProcessMemoryInfo(
+                    pid: 10,
+                    ppid: 1,
+                    name: "Phi",
+                    path: nil,
+                    residentBytes: 2 * gibibyte,
+                    physicalFootprintBytes: 3 * gibibyte,
+                    processType: .browser
+                ),
+                ProcessMemoryInfo(
+                    pid: 11,
+                    ppid: 10,
+                    name: "Phi Helper (Renderer)",
+                    path: nil,
+                    residentBytes: gibibyte,
+                    physicalFootprintBytes: 2 * gibibyte,
+                    processType: .renderer
+                )
+            ]
+        )
+
+        XCTAssertEqual(snapshot.totalResidentBytes, 3 * gibibyte)
+        XCTAssertEqual(snapshot.totalPhysicalFootprintBytesEstimate, 5 * gibibyte)
+        XCTAssertEqual(snapshot.monitoringBytes, 5 * gibibyte)
+        XCTAssertEqual(snapshot.rootPhysicalFootprintBytes, 3 * gibibyte)
+        XCTAssertEqual(snapshot.physicalFootprintByProcessType[.renderer]?.count, 1)
+        XCTAssertEqual(snapshot.physicalFootprintByProcessType[.renderer]?.p95Bytes, 2 * gibibyte)
+        XCTAssertTrue(snapshot.exceedsThreshold)
     }
 
     func testSentryContextUsesStablePayloadShape() {

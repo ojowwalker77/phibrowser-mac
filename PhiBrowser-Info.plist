@@ -58,6 +58,18 @@
 	<string>144.0.7559.102</string>
 	<key>CrProductDirName</key>
 	<string>$(CR_PRODUCT_DIR_NAME)</string>
+	<key>PhiBuildConfiguration</key>
+	<string>$(PHI_BUILD_CONFIGURATION)</string>
+	<key>PhiBuildArchitecture</key>
+	<string>$(ARCHS)</string>
+	<key>PhiBuildRevision</key>
+	<string>$(PHI_BUILD_REVISION)</string>
+	<key>PhiEnableTestability</key>
+	<string>$(ENABLE_TESTABILITY)</string>
+	<key>PhiFrameworkVersion</key>
+	<string>$(PHI_FRAMEWORK_VERSION)</string>
+	<key>PhiSwiftOptimizationLevel</key>
+	<string>$(SWIFT_OPTIMIZATION_LEVEL)</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>14.0</string>
 	<key>LSRequiresNativeExecution</key>

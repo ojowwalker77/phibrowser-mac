@@ -133,11 +133,9 @@ final class TabGroupChipMosaicView: NSView {
     /// cache for free. Avoids re-decoding the same favicon bytes
     /// on every layout pass / appearance change.
     ///
-    /// Growth is bounded by the number of distinct favicon
-    /// payloads the user encounters; favicons are small (typically
-    /// <2 KB) and uncached on session end (held only by this
-    /// view), so unbounded growth is not a practical concern for
-    /// v1. Revisit if profiling shows memory pressure.
+    /// The cache is trimmed to the current four-cell working set on every
+    /// configure pass so reused group chips cannot accumulate old decoded
+    /// favicon payloads for the lifetime of the view.
     private var decodedCache: [Data: CGImage] = [:]
 
     // MARK: - State (set by configure)
@@ -186,6 +184,8 @@ final class TabGroupChipMosaicView: NSView {
     func configure(memberFavicons: [Data?], memberCount: Int) {
         self.memberFavicons = memberFavicons
         self.memberCount = memberCount
+        let activePayloads = Set(memberFavicons.compactMap { $0 })
+        decodedCache = decodedCache.filter { activePayloads.contains($0.key) }
         applyAppearance()
         needsLayout = true
     }

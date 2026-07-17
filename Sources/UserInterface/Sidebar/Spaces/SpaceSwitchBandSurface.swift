@@ -35,11 +35,6 @@ protocol SpaceSwitchBandSurface: NSViewController {
     /// slide — and the edge bounce clips to it.
     var spaceSwitchBandContainer: NSView { get }
 
-    /// Ramps the surface's per-Space tint in lockstep with the push-in
-    /// slide. The floating panel has no dedicated tint layer (its themed
-    /// background follows the window theme ramp `performSwap` drives) and
-    /// no-ops.
-    func rampSpaceTint(fromHex: String?, toHex: String?, duration: TimeInterval)
 }
 
 extension SpaceSwitchBandSurface {
@@ -55,8 +50,8 @@ extension SpaceSwitchBandSurface {
 
     /// Content-only snapshot of `spaceSwitchBandFrame`. The themed backdrop
     /// lives behind `spaceSwitchBandContainer`, so it is NOT captured here —
-    /// the band image carries a transparent background and the ramping
-    /// backdrop shows through during the slide. Renders even while the host
+    /// the band image carries a transparent background and the themed backdrop
+    /// shows through during the slide. Renders even while the host
     /// window is off-screen, since AppKit layout/`cacheDisplay` is
     /// independent of window visibility.
     func snapshotSpaceSwitchBand() -> NSImage? {

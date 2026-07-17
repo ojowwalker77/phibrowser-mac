@@ -104,6 +104,7 @@ import Settings
     func applicationWillTerminate(_ notification: Notification) {
         coldOpenURLForwardWorkItem?.cancel()
         coldOpenURLForwardWorkItem = nil
+        AccountController.shared.account?.userDefaults.flush()
         AppLogInfo("-------applicationWillTerminate----")
         MemoryUsageMonitor.shared.stop()
         if let chromiumBridge {

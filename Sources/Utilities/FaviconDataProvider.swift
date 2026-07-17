@@ -86,9 +86,27 @@ final class ProfileScopedFaviconRepository {
 
     private let fetcher: any ProfileScopedFaviconFetching
     private let memoryCache = NSCache<NSString, NSData>()
+    private var memoryPressureObserver: NSObjectProtocol?
 
     init(fetcher: any ProfileScopedFaviconFetching) {
         self.fetcher = fetcher
+        memoryCache.totalCostLimit = 32 * 1024 * 1024
+        memoryCache.countLimit = 4_000
+        memoryPressureObserver = NotificationCenter.default.addObserver(
+            forName: .phiMemoryPressure,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.memoryCache.removeAllObjects()
+            }
+        }
+    }
+
+    deinit {
+        if let memoryPressureObserver {
+            NotificationCenter.default.removeObserver(memoryPressureObserver)
+        }
     }
 
     @discardableResult
@@ -161,7 +179,11 @@ final class ProfileScopedFaviconRepository {
 
     private func store(_ data: Data, for request: ProfileScopedFaviconRequest) {
         guard let cacheKey = request.cacheKey else { return }
-        memoryCache.setObject(data as NSData, forKey: cacheKey as NSString)
+        memoryCache.setObject(
+            data as NSData,
+            forKey: cacheKey as NSString,
+            cost: data.count
+        )
     }
 
     private static var placeholderImage: NSImage {

@@ -70,28 +70,6 @@ class SidebarViewController: NSViewController {
         return view
     }()
 
-    /// Per-Space tint painted behind the tab area — the active Space's
-    /// `colorHex` fading from the top of the sidebar to clear at the bottom.
-    /// During a vertical-layout Space switch this gradient ramps to the new
-    /// color in step with the content-band push-in (see
-    /// `SpaceManager.performVerticalSidebarPushIn`); because it sits behind
-    /// `mainStackView` it shows through the band's transparent snapshot as it
-    /// slides. Re-resolved when the slot's `activeSpaceId` changes or the
-    /// underlying Space is recolored.
-    private let spaceTintGradientLayer: CAGradientLayer = {
-        let layer = CAGradientLayer()
-        layer.startPoint = CGPoint(x: 0.5, y: 0)
-        layer.endPoint = CGPoint(x: 0.5, y: 1)
-        return layer
-    }()
-
-    private lazy var spaceTintBackgroundView: NSView = {
-        let view = NSView()
-        view.wantsLayer = true
-        view.layer?.addSublayer(spaceTintGradientLayer)
-        return view
-    }()
-    
     /// Container above the bottom bar for transient notification content.
     private lazy var notificationContainerView: NSView = {
         let view = NSView()
@@ -220,17 +198,6 @@ class SidebarViewController: NSViewController {
         updateChatButtonVisibility()
         updateMemoryButtonVisibility()
         updateSidebarContentActivation()
-        updateSpaceTintGradient()
-    }
-
-    override func viewDidLayout() {
-        super.viewDidLayout()
-        // CAGradientLayer is a sublayer (not the host layer), so it doesn't
-        // pick up the host view's autoresizing — sync the frame each pass.
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        spaceTintGradientLayer.frame = spaceTintBackgroundView.bounds
-        CATransaction.commit()
     }
     
     override func viewWillAppear() {
@@ -362,15 +329,6 @@ class SidebarViewController: NSViewController {
     // MARK: - Setup
     
     private func setupStackView() {
-        // Added before mainStackView so it stays behind every stack item.
-        // The ColoredVisualEffectView's own `colorView` is already pinned
-        // at the back by NSVisualEffectView.commonInit, so the tint sits
-        // between the theme fill (below) and the content stack (above).
-        view.addSubview(spaceTintBackgroundView)
-        spaceTintBackgroundView.snp.makeConstraints { make in
-            make.edges.equalToSuperview()
-        }
-
         view.addSubview(mainStackView)
         mainStackView.snp.makeConstraints { make in
             make.edges.equalToSuperview()
@@ -547,159 +505,9 @@ class SidebarViewController: NSViewController {
             }
             .store(in: &cancellables)
 
-        // Mirror the SpacesStripView fallback chain so the gradient still
-        // resolves before MainBrowserWindowController has wired up its slot.
-        let slot = state.windowController?.slot ?? SpaceManager.shared.keySlot
-        slot?.$activeSpaceId
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in self?.updateSpaceTintGradient() }
-            .store(in: &cancellables)
-
-        SpaceManager.shared.$spaces
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in self?.updateSpaceTintGradient() }
-            .store(in: &cancellables)
-    }
-
-    /// Recompute the tint gradient from the active Space's `colorHex` and
-    /// cross-fade to it over the layout's swap-animation duration (see
-    /// `PhiPreferences.GeneralSettings.loadSwitchSpaceAnimationDuration`).
-    /// Initial paint before any prior colors are set is forced instant —
-    /// animating from nothing to the first colors causes a visible flash.
-    private func updateSpaceTintGradient() {
-        // A vertical Space-switch push-in drives the tint ramp explicitly via
-        // `rampSpaceTint`; the slot-observation that calls this fires a runloop
-        // later and would otherwise remove that in-flight ramp (snapping the
-        // background to the target color). Defer to the explicit ramp while it
-        // runs.
-        guard !isRampingSpaceTint else { return }
-        let slot = state.windowController?.slot ?? SpaceManager.shared.keySlot
-        let spaceId = slot?.activeSpaceId
-        let colorHex: String?
-        if let spaceId,
-           let space = SpaceManager.shared.spaces.first(where: { $0.spaceId == spaceId }) {
-            colorHex = space.colorHex
-        } else {
-            colorHex = nil
-        }
-        let newColors = spaceTintColors(forHex: colorHex)
-        let oldColors = spaceTintGradientLayer.colors as? [CGColor]
-        let duration = PhiPreferences.GeneralSettings.loadSwitchSpaceAnimationDuration()
-
-        guard let oldColors, duration > 0 else {
-            CATransaction.begin()
-            CATransaction.setDisableActions(true)
-            spaceTintGradientLayer.colors = newColors
-            CATransaction.commit()
-            return
-        }
-
-        // Drive the cross-fade with an explicit CABasicAnimation so the
-        // duration is exactly the configured value rather than the default
-        // implicit-action timing (~0.25s) that CAGradientLayer would otherwise
-        // use. Model value is set first with actions disabled so the explicit
-        // animation is the only thing the user sees.
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        spaceTintGradientLayer.colors = newColors
-        CATransaction.commit()
-
-        spaceTintGradientLayer.removeAnimation(forKey: "spaceTintColors")
-        let animation = CABasicAnimation(keyPath: "colors")
-        animation.fromValue = oldColors
-        animation.toValue = newColors
-        animation.duration = duration
-        animation.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-        animation.isRemovedOnCompletion = true
-        spaceTintGradientLayer.add(animation, forKey: "spaceTintColors")
-    }
-
-    /// The two-stop tint colors for a Space `colorHex`.
-    ///
-    /// The per-Space tint is disabled so the sidebar keeps its pre-Spaces
-    /// appearance (plain visual-effect material, no colored wash). Always
-    /// returns clear; switch the stops back to the active color at 22% alpha
-    /// fading to transparent to re-enable it.
-    private func spaceTintColors(forHex hex: String?) -> [CGColor] {
-        return [NSColor.clear.cgColor, NSColor.clear.cgColor]
     }
 
     // MARK: - Space-switch push-in support
-
-    /// True while `rampSpaceTint` owns the tint animation, so the
-    /// slot-observation update (`updateSpaceTintGradient`) doesn't clobber it.
-    private var isRampingSpaceTint = false
-    private var tintRampTimer: Timer?
-
-    /// Ramps the tint gradient from `fromHex` to `toHex` over `duration`, in
-    /// lockstep with the push-in slide, so the background visibly transitions
-    /// from the source Space's color to the target's *during* the slide rather
-    /// than jumping at the end.
-    ///
-    /// Driven by a per-frame timer that sets the gradient's MODEL color each
-    /// tick. A plain `CABasicAnimation` only updates the layer's presentation
-    /// value, which the host `NSVisualEffectView` snaps back to the model when
-    /// it re-composites its material — so the interpolation was never visible.
-    /// Writing the model each frame (the same approach the horizontal window
-    /// slide uses) is immune to that. `.common` run-loop mode keeps it ticking
-    /// during modal tracking.
-    func rampSpaceTint(fromHex: String?, toHex: String?, duration: TimeInterval) {
-        tintRampTimer?.invalidate()
-        tintRampTimer = nil
-        spaceTintGradientLayer.removeAnimation(forKey: "spaceTintColors")
-
-        let from = (fromHex.map { NSColor(hexString: $0) } ?? .clear).usingColorSpace(.sRGB) ?? .clear
-        let to = (toHex.map { NSColor(hexString: $0) } ?? .clear).usingColorSpace(.sRGB) ?? .clear
-
-        guard duration > 0 else {
-            setSpaceTintBase(to)
-            return
-        }
-
-        isRampingSpaceTint = true
-        setSpaceTintBase(from)
-        let start = CACurrentMediaTime()
-        let timer = Timer(timeInterval: 1.0 / 60.0, repeats: true) { [weak self] t in
-            guard let self else { t.invalidate(); return }
-            let progress = min(1.0, (CACurrentMediaTime() - start) / duration)
-            let eased: CGFloat = progress < 0.5
-                ? 2 * progress * progress
-                : 1 - pow(-2 * progress + 2, 2) / 2
-            self.setSpaceTintBase(self.lerpColor(from, to, eased))
-            if progress >= 1.0 {
-                t.invalidate()
-                self.tintRampTimer = nil
-                self.isRampingSpaceTint = false
-            }
-        }
-        RunLoop.main.add(timer, forMode: .common)
-        tintRampTimer = timer
-    }
-
-    /// Sets the gradient model to the two-stop tint for `base` with implicit
-    /// animation disabled (the timer supplies the motion).
-    ///
-    /// The per-Space tint is disabled to preserve the pre-Spaces sidebar look,
-    /// so this always paints clear regardless of `base`; restore the 0.22/0
-    /// alpha stops here (and in `spaceTintColors`) to bring the wash back.
-    private func setSpaceTintBase(_ base: NSColor) {
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        spaceTintGradientLayer.colors = [
-            NSColor.clear.cgColor,
-            NSColor.clear.cgColor
-        ]
-        CATransaction.commit()
-    }
-
-    private func lerpColor(_ a: NSColor, _ b: NSColor, _ t: CGFloat) -> NSColor {
-        NSColor(
-            srgbRed: a.redComponent + (b.redComponent - a.redComponent) * t,
-            green: a.greenComponent + (b.greenComponent - a.greenComponent) * t,
-            blue: a.blueComponent + (b.blueComponent - a.blueComponent) * t,
-            alpha: a.alphaComponent + (b.alphaComponent - a.alphaComponent) * t
-        )
-    }
 
     private func shouldActivateSidebarContent() -> Bool { state.layoutMode != .comfortable }
 

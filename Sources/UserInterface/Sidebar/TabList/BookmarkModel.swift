@@ -277,6 +277,12 @@ class BookmarkManager: ObservableObject {
     
     /// Lookup table for bookmark guid -> bookmark instance.
     private var bookmarkIndex: [String: Bookmark] = [:]
+
+    /// Opened-state index maintained from the bookmark objects themselves.
+    /// BrowserState reads this without recursively materializing the tree on
+    /// every tab event.
+    private(set) var openedBookmarkGuids: Set<String> = []
+    private var openedStateCancellables: [String: AnyCancellable] = [:]
     
     /// Pending bookmark guid that should enter edit mode once UI is ready.
     private var pendingEditGuid: String?
@@ -336,11 +342,34 @@ class BookmarkManager: ObservableObject {
                 bookmark.isExpanded = true
             }
         }
+        rebuildOpenedBookmarkIndex()
         
         if let pendingGuid = pendingEditGuid,
            let bookmark = bookmarkIndex[pendingGuid] {
             pendingEditGuid = nil
             NotificationCenter.default.post(name: .bookmarkStartEditing, object: bookmark)
+        }
+    }
+
+    private func rebuildOpenedBookmarkIndex() {
+        openedBookmarkGuids = Set(
+            bookmarkIndex.values.lazy.filter(\.isOpened).map(\.guid)
+        )
+        openedStateCancellables.removeAll()
+
+        for bookmark in bookmarkIndex.values {
+            let guid = bookmark.guid
+            openedStateCancellables[guid] = bookmark.$isOpened
+                .removeDuplicates()
+                .dropFirst()
+                .sink { [weak self] isOpened in
+                    guard let self else { return }
+                    if isOpened {
+                        self.openedBookmarkGuids.insert(guid)
+                    } else {
+                        self.openedBookmarkGuids.remove(guid)
+                    }
+                }
         }
     }
 

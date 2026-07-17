@@ -110,6 +110,10 @@ extension Account {
 class AccountController {
     static let shared = AccountController()
     var account: Account? {
+        willSet {
+            guard account !== newValue else { return }
+            account?.userDefaults.flush()
+        }
         didSet {
             NotificationCenter.default.post(name: .mainAccountChanged, object: account)
             /// FIXME: Chromium builds the main menu before the account exists, but shortcut overrides

@@ -2931,13 +2931,6 @@ final class SpaceWindowSlot: ObservableObject {
     /// Space name); the deferred block bails if a newer switch has bumped this.
     private var verticalSwapToken = 0
 
-    /// Per-frame timer that transitions the LEAVING window's theme to the
-    /// entering Space's theme during a vertical push-in, so the whole-window
-    /// background color ramps source -> target while the band slides. The
-    /// leaving window's theme is restored once the swap completes (it stays
-    /// the source Space's window and must look correct when next activated).
-    private var themeRampTimer: Timer?
-
     /// The transient overlay that hosts the two sidebar snapshots while a
     /// swap animates. We keep a weak reference so rapid back-to-back
     /// switches can tear down the previous overlay (otherwise it would
@@ -2959,11 +2952,10 @@ final class SpaceWindowSlot: ObservableObject {
     }
 
     /// Animation timing for the cross-Space slide. Routed through
-    /// `PhiPreferences` so the sidebar tint cross-fade in vertical layout
-    /// stays in sync with this slide — both pick up the debug override
-    /// when present.
+    /// `PhiPreferences` so the debug duration override stays authoritative.
     private static var swapAnimationDuration: TimeInterval {
-        PhiPreferences.GeneralSettings.loadSwitchSpaceAnimationDuration()
+        guard !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return 0 }
+        return PhiPreferences.GeneralSettings.loadSwitchSpaceAnimationDuration()
     }
 
     /// Grace period added past `swapAnimationDuration` before a vertical swap
@@ -3050,19 +3042,14 @@ final class SpaceWindowSlot: ObservableObject {
             }
         }
 
-        // Vertical push-in reads the leaving Space's sidebar band and color
-        // BEFORE `activeSpaceId` flips below: the SpacesStrip name and the tint
-        // gradient are bound to the shared slot, so capturing afterward would
-        // bake in the TARGET Space (the name would change before the animation
-        // and the background wouldn't transition).
+        // Vertical push-in reads the leaving Space's sidebar band BEFORE
+        // `activeSpaceId` flips below: the SpacesStrip name is bound to the
+        // shared slot, so capturing afterward would bake in the TARGET Space.
         let isVerticalSwitch = spaceId != activeSpaceId
             && !PhiPreferences.GeneralSettings.loadLayoutMode().isTraditional
         let verticalLeavingBand: NSImage? = isVerticalSwitch
             ? visibleController.flatMap { spaceSwitchSurface(of: $0).snapshotSpaceSwitchBand() }
             : nil
-        let sourceColorHex = manager.spaces.first(where: { $0.spaceId == previousSpaceId })?.colorHex
-        let targetColorHex = manager.spaces.first(where: { $0.spaceId == spaceId })?.colorHex
-
         if spaceId != activeSpaceId {
             activeSpaceId = spaceId
             manager.persistActiveSpaceId(spaceId)
@@ -3174,8 +3161,6 @@ final class SpaceWindowSlot: ObservableObject {
                         direction: direction,
                         leavingSnapshotOverride: leavingSnapshotOverride,
                         verticalLeavingBand: verticalLeavingBand,
-                        sourceColorHex: sourceColorHex,
-                        targetColorHex: targetColorHex,
                         onSwapSettled: onSwapSettled
                     )
                     visibleController = target
@@ -3259,8 +3244,6 @@ final class SpaceWindowSlot: ObservableObject {
                 previous: previous,
                 leavingBand: verticalLeavingBand,
                 direction: direction,
-                sourceColorHex: sourceColorHex,
-                targetColorHex: targetColorHex,
                 onSwapSettled: onSwapSettled
             )
             : nil
@@ -3594,8 +3577,6 @@ final class SpaceWindowSlot: ObservableObject {
         direction: SwapDirection,
         leavingSnapshotOverride: NSImage? = nil,
         verticalLeavingBand: NSImage? = nil,
-        sourceColorHex: String? = nil,
-        targetColorHex: String? = nil,
         onSwapSettled: (() -> Void)? = nil
     ) {
         guard let targetWindow = target.window else {
@@ -3620,8 +3601,7 @@ final class SpaceWindowSlot: ObservableObject {
         }
 
         // Vertical layout: the per-Space content band (pinned tabs, Spaces
-        // strip, tab list) pushes in horizontally while the sidebar tint
-        // gradient ramps to the new Space's color; the workspace (web content)
+        // strip, tab list) pushes in horizontally; the workspace (web content)
         // swaps only once the push completes. The address bar and bottom
         // toolbar stay put — they're the leaving window's live chrome, which
         // remains front for the whole animation. Horizontal layout routes
@@ -3634,8 +3614,6 @@ final class SpaceWindowSlot: ObservableObject {
                 targetWindow: targetWindow,
                 direction: direction,
                 leavingBand: verticalLeavingBand,
-                sourceColorHex: sourceColorHex,
-                targetColorHex: targetColorHex,
                 onSwapSettled: onSwapSettled
             )
             return
@@ -3654,15 +3632,14 @@ final class SpaceWindowSlot: ObservableObject {
 
     /// Vertical-layout Space switch. Keeps the LEAVING window front and slides
     /// the entering Space's sidebar content band in over the leaving band (old
-    /// pushes out one side as new enters from the other), while the leaving
-    /// window's tint gradient ramps from the source color to the target color
-    /// underneath. The window swap — and therefore the visible workspace
-    /// change — is deferred to the animation's completion, so the address bar,
+    /// pushes out one side as new enters from the other). The window swap — and
+    /// therefore the visible workspace change — is deferred to the animation's
+    /// completion, so the address bar,
     /// bottom toolbar, and web content stay on the old Space until the push
     /// finishes.
     ///
-    /// Timing matters because the SpacesStrip name and tint are bound to the
-    /// shared slot, which `activate` already flipped to the target:
+    /// Timing matters because the SpacesStrip name is bound to the shared slot,
+    /// which `activate` already flipped to the target:
     ///  - `leavingBand` is captured by `activate` BEFORE the flip, so it
     ///    carries the source Space's name/content.
     ///  - the entering band is snapshotted one runloop later, after the target
@@ -3671,9 +3648,8 @@ final class SpaceWindowSlot: ObservableObject {
     /// leaving band stands in, so the strip name never visibly changes ahead
     /// of the slide.
     ///
-    /// Both bands are content-only (transparent background) so the ramping
-    /// gradient shows through. Falls back to an instant present whenever a
-    /// precondition is missing.
+    /// Both bands are content-only (transparent background). Falls back to an
+    /// instant present whenever a precondition is missing.
     private func performVerticalSidebarPushIn(
         from previous: MainBrowserWindowController?,
         previousWindow: NSWindow?,
@@ -3681,8 +3657,6 @@ final class SpaceWindowSlot: ObservableObject {
         targetWindow: NSWindow,
         direction: SwapDirection,
         leavingBand: NSImage?,
-        sourceColorHex: String?,
-        targetColorHex: String?,
         onSwapSettled: (() -> Void)? = nil
     ) {
         // Settle any in-flight push-in or slide before starting a new one. The
@@ -3741,8 +3715,7 @@ final class SpaceWindowSlot: ObservableObject {
         // Hide the live band (its strip is flipping to the new name on the
         // shared slot) and stand a static copy of the leaving band in its place
         // so nothing visibly changes while we wait one runloop for the target's
-        // SwiftUI to commit. The tint gradient lives behind the stack, so it
-        // stays visible and ramps underneath.
+        // SwiftUI to commit.
         prevSurface.setSwitchBandContentHidden(true)
         let placeholder = NSImageView(frame: bandFrame)
         placeholder.image = leavingImage
@@ -3777,8 +3750,6 @@ final class SpaceWindowSlot: ObservableObject {
             prevSurface?.setSwitchBandContentHidden(false)
             // Restore the leaving window's own theme now that it's hidden, so
             // it shows the source Space's colors when next activated.
-            self?.themeRampTimer?.invalidate()
-            self?.themeRampTimer = nil
             prevThemeContext.setTheme(sourceTheme)
             prevThemeContext.mirrorsSharedTheme = sourceMirrors
             self?.verticalSwapCancel = nil
@@ -3813,11 +3784,9 @@ final class SpaceWindowSlot: ObservableObject {
             // The overlay's leaving half sits at rest (x=0) exactly where the
             // placeholder was, so removing the placeholder is seamless.
             placeholder.removeFromSuperview()
-            // Ramp the whole-window theme AND the sidebar tint in lockstep with
-            // the slide so the background transitions source -> target across
-            // the same window, landing on the target's colors at the swap.
+            // Ramp the whole-window theme in lockstep with the slide so the
+            // window lands on the target's colors at the swap.
             self.rampWindowTheme(prevThemeContext, from: sourceTheme, to: targetTheme, duration: duration)
-            prevSurface.rampSpaceTint(fromHex: sourceColorHex, toHex: targetColorHex, duration: duration)
             overlay.runAnimation(duration: duration) { finalize() }
         }
     }
@@ -3830,8 +3799,8 @@ final class SpaceWindowSlot: ObservableObject {
     /// behind it and that animation would play hidden. Instead we slide the
     /// band swap directly on the (already front) TARGET sidebar: the leaving
     /// Space's band — captured by `handleWindowDidBecomeKey` before the slot
-    /// flipped — pushes out as the target's own band pushes in, with the tint
-    /// ramping underneath. No window swap occurs (the target is already shown).
+    /// flipped — pushes out as the target's own band pushes in. No window swap
+    /// occurs (the target is already shown).
     ///
     /// The target's web content is already the new Space's (Chromium swapped
     /// it), so only the sidebar band animates; that's the most a post-hoc
@@ -3839,9 +3808,7 @@ final class SpaceWindowSlot: ObservableObject {
     private func performExternalVerticalSlide(
         target: MainBrowserWindowController,
         leavingBand: NSImage,
-        direction: SwapDirection,
-        sourceColorHex: String?,
-        targetColorHex: String?
+        direction: SwapDirection
     ) {
         let duration = Self.swapAnimationDuration
         let targetSidebar = target.mainSplitViewController.sidebarViewController
@@ -3857,8 +3824,7 @@ final class SpaceWindowSlot: ObservableObject {
 
         // Hide the target's live band (mid-flip to the new name on the shared
         // slot) and stand a static copy of the LEAVING band in its place so the
-        // strip doesn't pop to the new name before the slide. The tint gradient
-        // lives behind the stack and stays visible to ramp underneath.
+        // strip doesn't pop to the new name before the slide.
         targetSidebar.setSwitchBandContentHidden(true)
         let placeholder = NSImageView(frame: bandFrame)
         placeholder.image = leavingBand
@@ -3900,7 +3866,6 @@ final class SpaceWindowSlot: ObservableObject {
             targetSidebar.view.addSubview(overlay, positioned: .above, relativeTo: nil)
             self.activeSidebarOverlay = overlay
             placeholder.removeFromSuperview()
-            targetSidebar.rampSpaceTint(fromHex: sourceColorHex, toHex: targetColorHex, duration: duration)
             overlay.runAnimation(duration: duration) { finalize() }
         }
     }
@@ -3938,8 +3903,8 @@ final class SpaceWindowSlot: ObservableObject {
                 restore()
             } else {
                 // The slide landed first (cold profile, slow createBrowser):
-                // hold the landed state — tint on the target color, band
-                // empty — and give the spawn a bounded grace period.
+                // hold the landed state with an empty band and give the spawn
+                // a bounded grace period.
                 armSpawnDeadline()
             }
         }
@@ -3986,8 +3951,7 @@ final class SpaceWindowSlot: ObservableObject {
 
     /// Starts the vertical push-in for the SPAWN path at click time — before
     /// the target window exists. The slide begins against a transparent
-    /// entering band (the tint gradient underneath still ramps source →
-    /// target, so the motion reads as entering the new Space) and the real
+    /// entering band and the real
     /// band snapshot is hot-swapped into the moving overlay once the spawned
     /// window registers. Unlike the clicked push-in, the final swap is gated
     /// on the spawn too: the leaving window stays on screen through a slow
@@ -4001,8 +3965,6 @@ final class SpaceWindowSlot: ObservableObject {
         previous: MainBrowserWindowController?,
         leavingBand: NSImage?,
         direction: SwapDirection,
-        sourceColorHex: String?,
-        targetColorHex: String?,
         onSwapSettled: (() -> Void)?
     ) -> SpawnSwitchAnimation? {
         let duration = Self.swapAnimationDuration
@@ -4035,8 +3997,8 @@ final class SpaceWindowSlot: ObservableObject {
         verticalSwapToken += 1
         let token = verticalSwapToken
 
-        // Hide the live band and slide a transparent stand-in over it; the
-        // ramping tint carries the transition until the real band exists.
+        // Hide the live band and slide a transparent stand-in over it until the
+        // real band exists.
         prevSurface.setSwitchBandContentHidden(true)
         let overlay = SidebarSwapOverlay(
             frame: bandFrame,
@@ -4051,11 +4013,9 @@ final class SpaceWindowSlot: ObservableObject {
 
         // Settles the animation state on the LEAVING window; shared by both
         // resolutions below.
-        let restoreLeaving: () -> Void = { [weak self, weak prevSurface, weak overlay] in
+        let restoreLeaving: () -> Void = { [weak prevSurface, weak overlay] in
             overlay?.cancel()
             prevSurface?.setSwitchBandContentHidden(false)
-            self?.themeRampTimer?.invalidate()
-            self?.themeRampTimer = nil
             prevThemeContext.setTheme(sourceTheme)
             prevThemeContext.mirrorsSharedTheme = sourceMirrors
         }
@@ -4125,7 +4085,6 @@ final class SpaceWindowSlot: ObservableObject {
         // Ramp + slide, starting this very turn: with a placeholder entering
         // band there is nothing to wait a runloop for.
         rampWindowTheme(prevThemeContext, from: sourceTheme, to: targetTheme, duration: duration)
-        prevSurface.rampSpaceTint(fromHex: sourceColorHex, toHex: targetColorHex, duration: duration)
         overlay.runAnimation(duration: duration) { [weak handle] in
             handle?.slideSettled()
         }
@@ -4152,66 +4111,20 @@ final class SpaceWindowSlot: ObservableObject {
         }
     }
 
-    /// Per-frame interpolation of `context`'s theme from `from` to `to` over
-    /// `duration`. `BrowserThemeContext.setTheme` notifies themed views which
-    /// re-resolve their colors synchronously, but the resulting layer writes
-    /// don't animate on their own — so driving the model each frame is what
-    /// makes the whole-window color transition visible. Mirroring is disabled
-    /// for the duration so a global theme tick can't fight the ramp.
+    /// Commits the destination semantic theme once. Presentation motion stays
+    /// in the existing snapshot/layer animation; the shared theme graph is not
+    /// used as a 60 Hz animation clock.
     private func rampWindowTheme(
         _ context: BrowserThemeContext,
         from: Theme,
         to: Theme,
         duration: TimeInterval
     ) {
-        themeRampTimer?.invalidate()
-        themeRampTimer = nil
-        guard duration > 0 else {
-            context.setTheme(to)
-            return
-        }
         context.mirrorsSharedTheme = false
-        let start = CACurrentMediaTime()
-        let timer = Timer(timeInterval: 1.0 / 60.0, repeats: true) { [weak context] t in
-            guard let context else { t.invalidate(); return }
-            let progress = min(1.0, (CACurrentMediaTime() - start) / duration)
-            let eased: CGFloat = progress < 0.5
-                ? 2 * progress * progress
-                : 1 - pow(-2 * progress + 2, 2) / 2
-            context.setTheme(Self.interpolatedTheme(from: from, to: to, progress: eased))
-            if progress >= 1.0 { t.invalidate() }
-        }
-        RunLoop.main.add(timer, forMode: .common)
-        themeRampTimer = timer
-    }
-
-    /// Builds a theme whose palette is `from` blended toward `to` by
-    /// `progress`, across every `ColorRole`, for both light and dark.
-    private static func interpolatedTheme(from: Theme, to: Theme, progress: CGFloat) -> Theme {
-        let theme = Theme(id: to.id, name: to.name)
-        for role in ColorRole.allCases {
-            let f = from.colorPair(for: role)
-            let t = to.colorPair(for: role)
-            theme.setColor(
-                light: lerpColor(f.light, t.light, progress),
-                dark: lerpColor(f.dark, t.dark, progress),
-                for: role
-            )
-        }
-        return theme
-    }
-
-    private static func lerpColor(_ a: NSColor, _ b: NSColor, _ t: CGFloat) -> NSColor {
-        // Some role defaults resolve to catalog/system colors that don't expose
-        // RGBA components; if either side can't convert, snap to the target.
-        guard let ca = a.usingColorSpace(.sRGB), let cb = b.usingColorSpace(.sRGB) else {
-            return b
-        }
-        return NSColor(
-            srgbRed: ca.redComponent + (cb.redComponent - ca.redComponent) * t,
-            green: ca.greenComponent + (cb.greenComponent - ca.greenComponent) * t,
-            blue: ca.blueComponent + (cb.blueComponent - ca.blueComponent) * t,
-            alpha: ca.alphaComponent + (cb.alphaComponent - ca.alphaComponent) * t
+        context.setTheme(to)
+        PerformanceSignposts.event(
+            "space.themeCommit",
+            metadata: "from=\(from.id) to=\(to.id) duration=\(duration)"
         )
     }
 
@@ -4446,13 +4359,22 @@ final class SpaceWindowSlot: ObservableObject {
         isAnimatingWindowSlide = true
 
         let duration = Self.swapAnimationDuration
+        let switchInterval = PerformanceSignposts.begin(
+            "space.switch.warm",
+            metadata: "direction=\(direction) duration=\(duration)"
+        )
         var didFinish = false
-        var timer: Timer?
+        let animationKey = "phi.spaceWindowSlide"
+        leavingView.wantsLayer = true
+        let enteringLayers = enteringSubviews.compactMap(\.layer)
+        let leavingLayer = leavingView.layer
         let finalize: () -> Void = { [weak self, weak leavingView] in
             guard !didFinish else { return }
             didFinish = true
-            timer?.invalidate()
-            timer = nil
+            for layer in enteringLayers {
+                layer.removeAnimation(forKey: animationKey)
+            }
+            leavingLayer?.removeAnimation(forKey: animationKey)
             setEnteringTransform(0)
             leavingView?.removeFromSuperview()
             CATransaction.begin()
@@ -4461,6 +4383,7 @@ final class SpaceWindowSlot: ObservableObject {
             CATransaction.commit()
             self?.isAnimatingWindowSlide = false
             self?.windowSlideCancel = nil
+            switchInterval.end("result=settled")
             // Leaving window was ordered out before the slide began, so a
             // post-swap close is safe now. `didFinish` guards this to exactly
             // one call across the tick / cancel / duration<=0 paths.
@@ -4468,39 +4391,59 @@ final class SpaceWindowSlot: ObservableObject {
         }
         windowSlideCancel = finalize
 
-        // Drive the slide manually. CALayer's implicit animation is
-        // disabled per tick (CATransaction setDisableActions) so the
-        // duration is exactly the user-tunable preference rather than
-        // the layer's default 0.25s.
         if duration <= 0 {
             finalize()
             return
         }
 
-        let startTime = CACurrentMediaTime()
-        let easeInOut: (CGFloat) -> CGFloat = { t in
-            t < 0.5 ? 2 * t * t : 1 - pow(-2 * t + 2, 2) / 2
+        func makeTranslationAnimation(from: CGFloat, to: CGFloat) -> CAKeyframeAnimation {
+            let frameCount = max(2, Int(ceil(duration * 60)))
+            let values: [NSNumber] = (0...frameCount).map { frame in
+                let progress = CGFloat(frame) / CGFloat(frameCount)
+                let eased = progress < 0.5
+                    ? 2 * progress * progress
+                    : 1 - pow(-2 * progress + 2, 2) / 2
+                return NSNumber(value: Double(from + (to - from) * eased))
+            }
+            let animation = CAKeyframeAnimation(keyPath: "transform.translation.x")
+            animation.values = values
+            animation.keyTimes = (0...frameCount).map {
+                NSNumber(value: Double($0) / Double(frameCount))
+            }
+            animation.calculationMode = .linear
+            animation.duration = duration
+            animation.isRemovedOnCompletion = true
+            return animation
         }
 
-        let tick = Timer(timeInterval: 1.0 / 60.0, repeats: true) { [weak leavingView] t in
-            guard let leavingView else {
-                t.invalidate()
-                finalize()
-                return
-            }
-            let elapsed = CACurrentMediaTime() - startTime
-            let progress = CGFloat(min(1.0, elapsed / duration))
-            let eased = easeInOut(progress)
-            setEnteringTransform(mainStartDx * (1 - eased))
-            leavingView.frame = contentBounds.offsetBy(dx: leavingEndDx * eased, dy: 0)
-            if progress >= 1.0 {
-                finalize()
-            }
+        // Set final model-layer values before asking Core Animation to render
+        // the sampled version of the existing quadratic ease curve.
+        setEnteringTransform(0)
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        leavingLayer?.transform = CATransform3DMakeTranslation(leavingEndDx, 0, 0)
+        CATransaction.commit()
+
+        CATransaction.begin()
+        CATransaction.setCompletionBlock(finalize)
+        for layer in enteringLayers {
+            layer.add(
+                makeTranslationAnimation(from: mainStartDx, to: 0),
+                forKey: animationKey
+            )
         }
-        timer = tick
-        // `.common` so the slide keeps ticking during modal tracking
-        // (window drag, menu open) — would freeze on `.default` mode.
-        RunLoop.main.add(tick, forMode: .common)
+        leavingLayer?.add(
+            makeTranslationAnimation(from: 0, to: leavingEndDx),
+            forKey: animationKey
+        )
+        CATransaction.commit()
+
+        // AppKit can stop delivering animation completions when a window is
+        // occluded or moved between macOS Spaces. Keep the existing bounded,
+        // idempotent settlement guarantee without a per-frame main-thread timer.
+        DispatchQueue.main.asyncAfter(deadline: .now() + duration + Self.swapFinalizeFallbackMargin) {
+            finalize()
+        }
     }
 
     /// Captures `view`'s current pixels as an NSImage for the slide overlay.
@@ -4529,16 +4472,21 @@ final class SpaceWindowSlot: ObservableObject {
     /// permission prompts; revisit if Apple removes it.
     private func snapshotWindowComposite(of window: NSWindow) -> NSImage? {
         guard window.isVisible, window.windowNumber > 0 else { return nil }
-        let windowID = CGWindowID(window.windowNumber)
-        let options: CGWindowImageOption = [.boundsIgnoreFraming, .nominalResolution]
-        guard let cgImage = CGWindowListCreateImage(
-            .null,
-            .optionIncludingWindow,
-            windowID,
-            options
-        ) else { return nil }
-        let size = window.contentView?.bounds.size ?? window.frame.size
-        return NSImage(cgImage: cgImage, size: size)
+        return PerformanceSignposts.measure(
+            "window.snapshot",
+            metadata: "width=\(Int(window.frame.width)) height=\(Int(window.frame.height))"
+        ) {
+            let windowID = CGWindowID(window.windowNumber)
+            let options: CGWindowImageOption = [.boundsIgnoreFraming, .nominalResolution]
+            guard let cgImage = CGWindowListCreateImage(
+                .null,
+                .optionIncludingWindow,
+                windowID,
+                options
+            ) else { return nil }
+            let size = window.contentView?.bounds.size ?? window.frame.size
+            return NSImage(cgImage: cgImage, size: size)
+        }
     }
 
     // MARK: - Native window tab group
@@ -5930,21 +5878,17 @@ final class SpaceWindowSlot: ObservableObject {
             && previous != nil
             && previous !== controller
 
-        // Capture the leaving Space's sidebar band + Space colors BEFORE
-        // `activeSpaceId` flips below, exactly as `activate` does for a clicked
-        // switch: the SpacesStrip name and tint gradient bind to the shared
-        // slot, so capturing after the flip would bake in the TARGET Space (no
-        // color ramp, and the band would already carry the new name). Without
-        // the band the vertical push-in bails to an instant present, so a
-        // URL-rule switch would skip the animation a clicked switch shows.
+        // Capture the leaving Space's sidebar band BEFORE `activeSpaceId` flips
+        // below, exactly as `activate` does for a clicked switch: the SpacesStrip
+        // name binds to the shared slot, so capturing after the flip would bake
+        // in the TARGET Space. Without the band the vertical push-in bails to an
+        // instant present, so a URL-rule switch would skip the animation a
+        // clicked switch shows.
         let isVerticalSwitch = isExternalSwitch
             && !PhiPreferences.GeneralSettings.loadLayoutMode().isTraditional
         let verticalLeavingBand: NSImage? = isVerticalSwitch
             ? previous?.mainSplitViewController.sidebarViewController.snapshotSpaceSwitchBand()
             : nil
-        let sourceColorHex = isExternalSwitch ? manager?.spaces.first(where: { $0.spaceId == previousSpaceId })?.colorHex : nil
-        let targetColorHex = isExternalSwitch ? manager?.spaces.first(where: { $0.spaceId == spaceId })?.colorHex : nil
-
         visibleController = controller
         // Persist on every key event, not only when this slot's active
         // Space flips: the persisted value seeds the Space for windows
@@ -6000,9 +5944,7 @@ final class SpaceWindowSlot: ObservableObject {
                     performExternalVerticalSlide(
                         target: controller,
                         leavingBand: band,
-                        direction: direction,
-                        sourceColorHex: sourceColorHex,
-                        targetColorHex: targetColorHex
+                        direction: direction
                     )
                     // The band slide draws on the already-front target and
                     // swaps no windows, so unlike every other switch path
@@ -6014,9 +5956,7 @@ final class SpaceWindowSlot: ObservableObject {
                         from: previous,
                         to: controller,
                         direction: direction,
-                        verticalLeavingBand: verticalLeavingBand,
-                        sourceColorHex: sourceColorHex,
-                        targetColorHex: targetColorHex
+                        verticalLeavingBand: verticalLeavingBand
                     )
                 }
             }

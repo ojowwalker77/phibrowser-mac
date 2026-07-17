@@ -93,6 +93,7 @@ class MainBrowserWindowController: NSWindowController {
         }
 
         NotificationCenter.default.post(name: .mainBrowserWindowCreated, object: window)
+        PerformanceJourneys.observeFirstUsableWindow(window, windowId: windowId)
     }
     
     override var windowNibName: NSNib.Name? { "" }

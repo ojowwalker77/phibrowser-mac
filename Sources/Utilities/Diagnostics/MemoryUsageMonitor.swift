@@ -27,6 +27,7 @@ final class MemoryUsageMonitor {
     private let now: () -> Date
 
     private var timer: DispatchSourceTimer?
+    private var memoryPressureSource: DispatchSourceMemoryPressure?
     private var lastReportDate: Date?
     private var didDropBelowThresholdAfterReport = false
 
@@ -63,6 +64,27 @@ final class MemoryUsageMonitor {
             }
             self.timer = timer
             timer.resume()
+
+            let pressureSource = DispatchSource.makeMemoryPressureSource(
+                eventMask: [.warning, .critical],
+                queue: queue
+            )
+            pressureSource.setEventHandler { [weak self] in
+                guard let self, let pressureSource = self.memoryPressureSource else { return }
+                let event = pressureSource.data
+                PerformanceSignposts.event(
+                    "memory.pressure",
+                    metadata: "warning=\(event.contains(.warning)) critical=\(event.contains(.critical))"
+                )
+                NotificationCenter.default.post(
+                    name: .phiMemoryPressure,
+                    object: self,
+                    userInfo: ["critical": event.contains(.critical)]
+                )
+                self.sampleAndReportIfNeeded()
+            }
+            self.memoryPressureSource = pressureSource
+            pressureSource.resume()
             AppLogDebug("[MemoryMonitor] started")
         }
     }
@@ -71,6 +93,8 @@ final class MemoryUsageMonitor {
         queue.sync {
             timer?.cancel()
             timer = nil
+            memoryPressureSource?.cancel()
+            memoryPressureSource = nil
             AppLogDebug("[MemoryMonitor] stopped")
         }
     }
@@ -87,7 +111,11 @@ final class MemoryUsageMonitor {
             return
         }
         
-        AppLogDebug("current memeory usage: \(Double(snapshot.totalResidentBytes) / Double(1024 * 1024 * 1024))GB")
+        AppLogDebug(
+            "[MemoryMonitor] parentFootprint=\(snapshot.rootPhysicalFootprintBytes ?? 0) " +
+            "treeFootprintEstimate=\(snapshot.totalPhysicalFootprintBytesEstimate) " +
+            "treeRSS=\(snapshot.totalResidentBytes) processes=\(snapshot.processCount)"
+        )
         
         guard snapshot.exceedsThreshold else {
             didDropBelowThresholdAfterReport = lastReportDate != nil
@@ -100,7 +128,7 @@ final class MemoryUsageMonitor {
         }
 
         AppLogWarn(
-            "[MemoryMonitor] Memory threshold exceeded: totalResidentBytes=\(snapshot.totalResidentBytes), thresholdBytes=\(snapshot.thresholdBytes)"
+            "[MemoryMonitor] Memory threshold exceeded: monitoringBytes=\(snapshot.monitoringBytes), thresholdBytes=\(snapshot.thresholdBytes)"
         )
         reporter.reportMemoryThresholdExceeded(snapshot: snapshot)
         lastReportDate = currentDate
@@ -122,6 +150,10 @@ final class MemoryUsageMonitor {
 
 private final class LocalMemoryUsageReporter: MemoryUsageReporting {
     func reportMemoryThresholdExceeded(snapshot: MemoryUsageSnapshot) {
-        AppLogWarn("[MemoryMonitor] Resident memory exceeded \(snapshot.thresholdBytes) bytes")
+        AppLogWarn("[MemoryMonitor] Process-tree footprint estimate exceeded \(snapshot.thresholdBytes) bytes")
     }
+}
+
+extension Notification.Name {
+    static let phiMemoryPressure = Notification.Name("PhiMemoryPressure")
 }

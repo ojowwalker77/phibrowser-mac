@@ -737,12 +737,21 @@ class BrowserState {
     }
 
     func updateNormalTabs() {
-        let openedPinnedGuids = isIncognito
+        let interval = PerformanceSignposts.begin(
+            "browserState.normalTabsRebuild",
+            metadata: "tabs=\(tabs.count) splits=\(splits.count)"
+        )
+        var didPublish = false
+        defer {
+            interval.end("published=\(didPublish) normalTabs=\(normalTabs.count)")
+        }
+
+        let openedPinnedGuids: Set<String> = isIncognito
             ? []
             : Set(pinnedTabs.filter { $0.isOpenned }.compactMap { $0.guidInLocalDB })
-        let openedBookmarkGuids = isIncognito
+        let openedBookmarkGuids: Set<String> = isIncognito
             ? []
-            : Set(bookmarkManager.getAllBookmarks().filter { $0.isOpened }.map { $0.guid })
+            : bookmarkManager.openedBookmarkGuids
 
         // Tabs belonging to a split that's bound to a bookmark are
         // represented visually by the split-view bookmark cell, so hide
@@ -751,15 +760,18 @@ class BrowserState {
         // have their `guidInLocalDB` cleared in
         // `consumePendingPrimarySplit`, so the lookup goes through
         // `splitBookmarkBindings` and the `SplitGroup` ids.
-        let splitBookmarkBoundTabIds: Set<Int> = {
-            var ids: Set<Int> = []
-            for splitId in splitBookmarkBindings.values {
-                guard let group = splits.first(where: { $0.id == splitId }) else { continue }
-                ids.insert(group.primaryTabId)
-                ids.insert(group.secondaryTabId)
-            }
-            return ids
-        }()
+        var splitById: [String: SplitGroup] = [:]
+        splitById.reserveCapacity(splits.count)
+        for split in splits {
+            splitById[split.id] = split
+        }
+        var splitBookmarkBoundTabIds = Set<Int>()
+        splitBookmarkBoundTabIds.reserveCapacity(splitBookmarkBindings.count * 2)
+        for splitId in splitBookmarkBindings.values {
+            guard let group = splitById[splitId] else { continue }
+            splitBookmarkBoundTabIds.insert(group.primaryTabId)
+            splitBookmarkBoundTabIds.insert(group.secondaryTabId)
+        }
 
         let traditionalLayout = PhiPreferences.GeneralSettings.loadLayoutMode().isTraditional
         let normalTabGuids = tabs.compactMap { tab -> Int? in
@@ -767,10 +779,8 @@ class BrowserState {
                 if openedPinnedGuids.contains(localGuid) {
                     return nil
                 }
-                if !traditionalLayout {
-                    if openedBookmarkGuids.contains(localGuid) {
-                        return nil
-                    }
+                if !traditionalLayout, openedBookmarkGuids.contains(localGuid) {
+                    return nil
                 }
             }
             if tab.isPinned {
@@ -782,18 +792,17 @@ class BrowserState {
             return tab.guid
         }
         let normalTabGuidSet = Set(normalTabGuids)
-        
+
         normalTabOrder.removeAll { !normalTabGuidSet.contains($0) }
 
-        for guid in normalTabGuids where !normalTabOrder.contains(guid) {
+        var orderedGuids = Set(normalTabOrder)
+        orderedGuids.reserveCapacity(normalTabGuids.count)
+        for guid in normalTabGuids where orderedGuids.insert(guid).inserted {
             normalTabOrder.append(guid)
         }
 
         enforceSplitAdjacency()
-
-        normalTabs = normalTabOrder.compactMap { guid in
-            tabs.first { $0.guid == guid }
-        }
+        didPublish = publishNormalTabsFromCurrentOrder()
 
         if multiSelection.isActive {
             var pruned = multiSelection
@@ -815,19 +824,49 @@ class BrowserState {
     /// (every new SplitGroup). Returns true when the order changed.
     @discardableResult
     func enforceSplitAdjacency() -> Bool {
-        var changed = false
+        let orderSet = Set(normalTabOrder)
+        var primaryToSecondary: [Int: Int] = [:]
+        var secondaryToPrimary: [Int: Int] = [:]
+        primaryToSecondary.reserveCapacity(splits.count)
+        secondaryToPrimary.reserveCapacity(splits.count)
         for group in splits {
-            guard let primaryIdx = normalTabOrder.firstIndex(of: group.primaryTabId),
-                  let secondaryIdx = normalTabOrder.firstIndex(of: group.secondaryTabId) else {
+            guard orderSet.contains(group.primaryTabId),
+                  orderSet.contains(group.secondaryTabId) else { continue }
+            primaryToSecondary[group.primaryTabId] = group.secondaryTabId
+            secondaryToPrimary[group.secondaryTabId] = group.primaryTabId
+        }
+
+        var adjacentOrder: [Int] = []
+        adjacentOrder.reserveCapacity(normalTabOrder.count)
+        for guid in normalTabOrder {
+            if secondaryToPrimary[guid] != nil {
                 continue
             }
-            if secondaryIdx == primaryIdx + 1 { continue }
-            normalTabOrder.remove(at: secondaryIdx)
-            guard let anchor = normalTabOrder.firstIndex(of: group.primaryTabId) else { continue }
-            normalTabOrder.insert(group.secondaryTabId, at: anchor + 1)
-            changed = true
+            adjacentOrder.append(guid)
+            if let secondary = primaryToSecondary[guid] {
+                adjacentOrder.append(secondary)
+            }
         }
-        return changed
+
+        guard adjacentOrder != normalTabOrder else { return false }
+        normalTabOrder = adjacentOrder
+        return true
+    }
+
+    /// Rebuilds the published tab references in linear time and suppresses
+    /// no-op collection publications. Individual Tab fields remain observable
+    /// through Tab's own publishers.
+    @discardableResult
+    private func publishNormalTabsFromCurrentOrder() -> Bool {
+        var tabByGuid: [Int: Tab] = [:]
+        tabByGuid.reserveCapacity(tabs.count)
+        for tab in tabs {
+            tabByGuid[tab.guid] = tab
+        }
+        let rebuilt = normalTabOrder.compactMap { tabByGuid[$0] }
+        guard rebuilt.map(\.guid) != normalTabs.map(\.guid) else { return false }
+        normalTabs = rebuilt
+        return true
     }
     
     
@@ -2941,9 +2980,7 @@ class BrowserState {
             "[TAB_GROUPS] relocated joiner tabId=\(tabId) " +
             "from=\(currentIdx) to=\(targetIdx) token=\(token)"
         )
-        normalTabs = normalTabOrder.compactMap { guid in
-            tabs.first { $0.guid == guid }
-        }
+        publishNormalTabsFromCurrentOrder()
     }
 
     @MainActor
@@ -3188,7 +3225,6 @@ class BrowserState {
         }
         if tab.title != newTitle {
             tab.title = newTitle
-            self.tabs = tabs
         }
     }
     
@@ -3304,9 +3340,7 @@ class BrowserState {
             nativeRelationGraph.fixOpenersAfterMovingTab(guid)
         }
 
-        normalTabs = normalTabOrder.compactMap { guid in
-            tabs.first { $0.guid == guid }
-        }
+        publishNormalTabsFromCurrentOrder()
 
         // TODO(P5): verify the strip vs. normal-tabs index conversion. The
         // bridge expects a tab-strip index (pinned tabs occupy the front of
@@ -3371,9 +3405,7 @@ class BrowserState {
 
         normalTabOrder.insert(guid, at: insertIndex)
 
-        normalTabs = normalTabOrder.compactMap { guid in
-            tabs.first { $0.guid == guid }
-        }
+        publishNormalTabsFromCurrentOrder()
 
         if syncChromiumOrder {
             syncNormalTabRelativeOrderToChromium(tabId: guid)
@@ -3996,9 +4028,7 @@ class BrowserState {
 
         newOrder.insert(contentsOf: pairGuidsInOrder, at: insertIndex)
         normalTabOrder = newOrder
-        normalTabs = normalTabOrder.compactMap { guid in
-            tabs.first { $0.guid == guid }
-        }
+        publishNormalTabsFromCurrentOrder()
 
         ChromiumLauncher.sharedInstance().bridge?.moveSplit(
             group.id,

@@ -200,7 +200,9 @@ private struct SwiftUIFaviconView: View {
 
 // MARK: - Favicon Cache Utilities
 extension FaviconDataProvider {
-    struct FaviconCache {}
+    struct FaviconCache {
+        fileprivate static var memoryPressureObserver: NSObjectProtocol?
+    }
     
     static func setupCache() {
         FaviconCache.setupCache()
@@ -222,10 +224,22 @@ extension FaviconDataProvider.FaviconCache {
         guard let customCache = try? ImageCache(name: "PhiImageCache", cacheDirectoryURL: URL(filePath: diskCacheDir)) else {
             return
         }
-        customCache.memoryStorage.config.cleanInterval = 60 * 60
-        customCache.memoryStorage.config.countLimit = 10 * 1024 * 1024
+        customCache.memoryStorage.config.totalCostLimit = 64 * 1024 * 1024
+        customCache.memoryStorage.config.countLimit = 3_000
+        customCache.memoryStorage.config.expiration = .seconds(10 * 60)
+        customCache.memoryStorage.config.cleanInterval = 5 * 60
         customCache.diskStorage.config.expiration = .days(5)
         KingfisherManager.shared.cache = customCache
+
+        if memoryPressureObserver == nil {
+            memoryPressureObserver = NotificationCenter.default.addObserver(
+                forName: .phiMemoryPressure,
+                object: nil,
+                queue: .main
+            ) { _ in
+                KingfisherManager.shared.cache.clearMemoryCache()
+            }
+        }
     }
     /// Gets the cache key for a given URL
     static func cacheKey(for url: URL) -> String {

@@ -439,6 +439,11 @@ final class TabStrip: NSView, TitlebarAwareHitTestable {
 
     override func layout() {
         super.layout()
+        let layoutInterval = PerformanceSignposts.begin(
+            "tabStrip.layout",
+            metadata: "pinned=\(browserState.pinnedTabs.count) normal=\(browserState.normalTabs.count)"
+        )
+        defer { layoutInterval.end() }
         updateNormalContainerMask()
 
         let pinnedTabs = browserState.pinnedTabs

@@ -661,10 +661,4 @@ extension FloatingSidebarViewController: SpaceSwitchBandSurface {
     // strip and the tab list.
     var spaceSwitchBandViews: [NSView] { [pinnedTabsContainerView, tabList.view] }
     var spaceSwitchBandContainer: NSView { mainStackView }
-
-    func rampSpaceTint(fromHex: String?, toHex: String?, duration: TimeInterval) {
-        // The floating panel paints no per-Space tint gradient; its themed
-        // background follows the window theme ramp that the swap drives
-        // (see SpaceWindowSlot.rampWindowTheme).
-    }
 }

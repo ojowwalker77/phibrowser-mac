@@ -3,9 +3,12 @@
 // Use of this source code is governed by an Apache license that can be
 // found in the LICENSE file.
 
-import Foundation
+import AppKit
 import CocoaLumberjack
 import CocoaLumberjackSwift
+import Darwin
+import Foundation
+import os
 
 struct PhiLogging {
     static func applicationLog(maxLength length: Int) -> String? {
@@ -77,13 +80,19 @@ public func setupLogging() {
     fileLogger.maximumFileSize = 5 * 1024 * 1024
     fileLogger.logFormatter = PhiLogFormatter()
 #if DEBUG
-    DDLog.add(fileLogger, with: .all)
-    DDLog.add(consoleLogger, with: .all)
+    let logLevel: DDLogLevel = .all
 #else
-    DDLog.add(fileLogger, with: .info)
-    DDLog.add(consoleLogger, with: .info)
+    let verboseLoggingEnabled = ProcessInfo.processInfo.arguments.contains("-phiVerboseLogging")
+        || ProcessInfo.processInfo.environment["PHI_VERBOSE_LOGGING"] == "1"
+    let logLevel: DDLogLevel = verboseLoggingEnabled ? .all : .info
 #endif
+    DDLog.add(fileLogger, with: logLevel)
+    DDLog.add(consoleLogger, with: logLevel)
     PhiLoggingInstallation.didInstall = true
+    PerformanceJourneys.startAppLaunchIfNeeded()
+#if PERFORMANCE_PROFILE
+    PerformanceBuildManifest.log()
+#endif
 }
 
 /// Entry point for Objective-C (`main.m`, Chromium launcher) so logging is installed before any `AppLog*`
@@ -142,6 +151,130 @@ public func AppLogNetwork(_ method: String, url: String, statusCode: Int? = nil,
 public func AppLogPerformance(_ operation: String, duration: TimeInterval, file: StaticString = #file, function: StaticString = #function, line: UInt = #line) {
     DDLogInfo("⏱️ \(operation) took \(String(format: "%.3f", duration))s", file: file, function: function, line: line)
 }
+
+/// A typed interval handle for Instruments points-of-interest. Keep the handle
+/// with the owner of the user journey and end it when that journey settles.
+struct PerformanceInterval {
+    fileprivate let name: StaticString
+    fileprivate let state: OSSignpostIntervalState
+
+    func end(_ metadata: String = "") {
+        PerformanceSignposts.end(self, metadata: metadata)
+    }
+}
+
+/// Stable performance signposts shared by the existing diagnostics/logging
+/// layer. Logs remain useful narrative evidence; these intervals provide the
+/// duration and causal structure Instruments needs.
+enum PerformanceSignposts {
+    private static let signposter = OSSignposter(
+        subsystem: Bundle.main.bundleIdentifier ?? "com.phibrowser.Mac",
+        category: "Performance"
+    )
+
+    static func begin(_ name: StaticString, metadata: String = "") -> PerformanceInterval {
+        let state = signposter.beginInterval(name, "\(metadata, privacy: .public)")
+        return PerformanceInterval(name: name, state: state)
+    }
+
+    static func end(_ interval: PerformanceInterval, metadata: String = "") {
+        signposter.endInterval(
+            interval.name,
+            interval.state,
+            "\(metadata, privacy: .public)"
+        )
+    }
+
+    static func event(_ name: StaticString, metadata: String = "") {
+        signposter.emitEvent(name, "\(metadata, privacy: .public)")
+    }
+
+    static func measure<T>(
+        _ name: StaticString,
+        metadata: String = "",
+        operation: () throws -> T
+    ) rethrows -> T {
+        let interval = begin(name, metadata: metadata)
+        defer { interval.end() }
+        return try operation()
+    }
+}
+
+/// Cross-owner journeys whose begin/end points naturally live in different
+/// layers. This remains diagnostics-only and does not own application state.
+enum PerformanceJourneys {
+    private static var appLaunchInterval: PerformanceInterval?
+    private static var firstUsableWindowObserver: NSObjectProtocol?
+
+    static func startAppLaunchIfNeeded() {
+        guard appLaunchInterval == nil else { return }
+        appLaunchInterval = PerformanceSignposts.begin("app.firstUsableWindow")
+    }
+
+    static func observeFirstUsableWindow(_ window: NSWindow, windowId: Int) {
+        guard appLaunchInterval != nil, firstUsableWindowObserver == nil else { return }
+        if window.isKeyWindow {
+            finishAppLaunch(windowId: windowId)
+            return
+        }
+
+        firstUsableWindowObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.didBecomeKeyNotification,
+            object: nil,
+            queue: .main
+        ) { notification in
+            guard let keyWindow = notification.object as? NSWindow,
+                  let controller = keyWindow.windowController as? MainBrowserWindowController else {
+                return
+            }
+            finishAppLaunch(windowId: controller.windowId)
+        }
+    }
+
+    private static func finishAppLaunch(windowId: Int) {
+        guard let interval = appLaunchInterval else { return }
+        appLaunchInterval = nil
+        if let observer = firstUsableWindowObserver {
+            NotificationCenter.default.removeObserver(observer)
+            firstUsableWindowObserver = nil
+        }
+        interval.end("windowId=\(windowId)")
+    }
+}
+
+#if PERFORMANCE_PROFILE
+private enum PerformanceBuildManifest {
+    static func log() {
+        let info = Bundle.main.infoDictionary ?? [:]
+        let processInfo = ProcessInfo.processInfo
+        let verboseLoggingEnabled = processInfo.arguments.contains("-phiVerboseLogging")
+            || processInfo.environment["PHI_VERBOSE_LOGGING"] == "1"
+        AppLogInfo(
+            "[PerformanceBuild] revision=\(info["PhiBuildRevision"] as? String ?? "unknown") " +
+            "configuration=\(info["PhiBuildConfiguration"] as? String ?? "unknown") " +
+            "architecture=\(info["PhiBuildArchitecture"] as? String ?? systemValue("hw.machine")) " +
+            "swiftOptimization=\(info["PhiSwiftOptimizationLevel"] as? String ?? "unknown") " +
+            "testability=\(info["PhiEnableTestability"] as? String ?? "unknown") " +
+            "verboseLogging=\(verboseLoggingEnabled) " +
+            "framework=\(info["PhiFrameworkVersion"] as? String ?? "unknown") " +
+            "os=\(processInfo.operatingSystemVersionString) " +
+            "model=\(systemValue("hw.model")) physicalMemoryBytes=\(processInfo.physicalMemory)"
+        )
+    }
+
+    private static func systemValue(_ name: String) -> String {
+        var size = 0
+        guard sysctlbyname(name, nil, &size, nil, 0) == 0, size > 0 else {
+            return "unknown"
+        }
+        var value = [CChar](repeating: 0, count: size)
+        guard sysctlbyname(name, &value, &size, nil, 0) == 0 else {
+            return "unknown"
+        }
+        return String(cString: value)
+    }
+}
+#endif
 
 /// Logs a memory warning.
 public func AppLogMemoryWarning(_ message: String = "Memory warning received", file: StaticString = #file, function: StaticString = #function, line: UInt = #line) {

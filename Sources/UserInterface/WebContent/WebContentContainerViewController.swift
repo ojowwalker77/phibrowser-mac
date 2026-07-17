@@ -99,9 +99,17 @@ class WebContentContainerViewController: NSViewController {
     // Flicker fix: Pending state for tab visibility synchronization
     // =========================================================================
 
-    /// Scenario 1: Previous controller/view waiting to be cleaned up after Chromium confirms hiding.
-    /// We defer cleanup until Chromium sends previousTabReadyForCleanup notification.
-    private var pendingViewCleanup: (controller: WebContentViewController, view: NSView)?
+    private struct PendingViewCleanup {
+        let controller: WebContentViewController
+        let view: NSView
+        let switchInterval: PerformanceInterval?
+    }
+
+    /// Scenario 1: Previous controllers/views waiting to be cleaned up after
+    /// Chromium confirms hiding. Keyed by Chromium tab id so rapid A → B → C
+    /// switches cannot overwrite A while B is also awaiting confirmation.
+    private var pendingViewCleanups: [Int: PendingViewCleanup] = [:]
+    private var activeTabSwitchInterval: PerformanceInterval?
 
     /// Scenario 2: New tab controller waiting for first paint before being shown.
     /// The new controller's view is added below the current view until first paint completes.
@@ -347,8 +355,6 @@ class WebContentContainerViewController: NSViewController {
         }
         
         // Observe configuration changes
-        setupConfigObserver()
-
         // Setup status URL view
         setupStatusURLView()
     }
@@ -477,8 +483,12 @@ class WebContentContainerViewController: NSViewController {
             }
             .store(in: &cancellables)
         
-        // Listen to layout mode changes
+        // Listen only to the typed layout value this container uses. UserDefaults
+        // posts one broad notification for every key, so mapping and deduplicating
+        // here prevents unrelated settings from relaying out every browser window.
         NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)
+            .map { _ in PhiPreferences.GeneralSettings.loadLayoutMode() }
+            .removeDuplicates()
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
                 self?.updateLayoutForMode()
@@ -524,15 +534,6 @@ class WebContentContainerViewController: NSViewController {
         }
     }
     
-    private func setupConfigObserver() {
-        NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in
-                self?.updateLayoutForMode()
-            }
-            .store(in: &cancellables)
-    }
-
     override func viewDidLayout() {
         super.viewDidLayout()
         updateContentOuterBorder()
@@ -828,7 +829,17 @@ class WebContentContainerViewController: NSViewController {
         // content area until the user manually switches tabs.
         cancelPendingNewTabSwitchIfNeeded(nextTabId: tab.guid, nextIdentifier: identifier)
 
-        guard !alreadyShowingExactTab else { return }
+        guard !alreadyShowingExactTab else {
+            activeTabSwitchInterval?.end("result=revertedToVisibleTab")
+            activeTabSwitchInterval = nil
+            return
+        }
+
+        activeTabSwitchInterval?.end("result=superseded")
+        activeTabSwitchInterval = PerformanceSignposts.begin(
+            "tab.switch",
+            metadata: "windowId=\(state.windowId) tabId=\(tab.guid)"
+        )
 
         // Clear status URL when switching tabs
         state.targetURL = ""
@@ -1150,10 +1161,15 @@ class WebContentContainerViewController: NSViewController {
 
     /// Scenario 1: Switch to an already-painted tab (immediate switch, bring to front)
     private func switchToWebContentController(_ controller: WebContentViewController) {
+        cancelPendingCleanup(for: controller, result: "reactivated")
         // Flicker fix: Don't remove old view immediately, defer until Chromium confirms.
         // Save old controller/view for later cleanup.
         if let current = currentWebContentController, current !== controller {
-            pendingViewCleanup = (controller: current, view: current.view)
+            enqueuePendingCleanup(
+                controller: current,
+                switchInterval: activeTabSwitchInterval
+            )
+            activeTabSwitchInterval = nil
             // Outgoing focused VC no longer owns the split host — drop its
             // partner-crash subscription (its own observers won't re-run).
             current.cancelPartnerCrashSubscription()
@@ -1209,6 +1225,12 @@ class WebContentContainerViewController: NSViewController {
 
         // Notify Chromium that view switch is complete, it can now hide the old WebContents
         notifyViewSwitchCompleted()
+
+        if pendingViewCleanups.isEmpty {
+            activeTabSwitchInterval?.end("result=displayed")
+            activeTabSwitchInterval = nil
+        }
+        sweepMountedContentViews()
 
         // Settled successor is now painted on top — drop the close snapshot (if any).
         clearClosePlaceholder()
@@ -1309,6 +1331,8 @@ class WebContentContainerViewController: NSViewController {
     
     private func removeWebContentController(for identifier: String) {
         guard let controller = webContentControllers[identifier] else { return }
+
+        cancelPendingCleanup(for: controller, result: "tabClosed")
 
         detachSharedBookmarkBar(from: controller)
 
@@ -1412,13 +1436,14 @@ class WebContentContainerViewController: NSViewController {
     func handlePreviousTabReadyForCleanup(tabId: Int) {
         AppLogDebug("[WebContent] Received cleanup notification for tabId=\(tabId)")
 
-        guard let pending = pendingViewCleanup else {
+        guard let pending = pendingViewCleanups.removeValue(forKey: tabId) else {
             AppLogDebug("[WebContent] No pending view to cleanup")
             return
         }
 
-        guard pending.controller.associatedTab?.guid == tabId else {
-            AppLogDebug("[WebContent] Ignoring cleanup for mismatched tabId=\(tabId), pendingTabId=\(pending.controller.associatedTab?.guid ?? -1)")
+        guard pending.controller !== currentWebContentController else {
+            pending.switchInterval?.end("result=reactivatedBeforeCleanup")
+            AppLogDebug("[WebContent] Ignoring cleanup for the reactivated tabId=\(tabId)")
             return
         }
 
@@ -1427,7 +1452,8 @@ class WebContentContainerViewController: NSViewController {
         // Remove the old view and controller
         pending.view.removeFromSuperview()
         pending.controller.removeFromParent()
-        pendingViewCleanup = nil
+        pending.switchInterval?.end("result=cleaned previousTabId=\(tabId)")
+        sweepMountedContentViews()
 
         AppLogDebug("[WebContent] Cleaned up previous view after Chromium confirmation")
     }
@@ -1457,7 +1483,11 @@ class WebContentContainerViewController: NSViewController {
 
         // Save old view for cleanup (scenario 1 logic)
         if let current = currentWebContentController, current !== pending.controller {
-            pendingViewCleanup = (controller: current, view: current.view)
+            enqueuePendingCleanup(
+                controller: current,
+                switchInterval: activeTabSwitchInterval
+            )
+            activeTabSwitchInterval = nil
             current.cancelPartnerCrashSubscription()
         }
 
@@ -1485,11 +1515,75 @@ class WebContentContainerViewController: NSViewController {
         // This triggers the old tab to be hidden and cleanup flow
         notifyViewSwitchCompleted()
 
+        if pendingViewCleanups.isEmpty {
+            activeTabSwitchInterval?.end("result=displayed")
+            activeTabSwitchInterval = nil
+        }
+        sweepMountedContentViews()
+
         // New view is on top now — real first paint, or forced by the first-paint
         // timeout (successor may still be blank, accepted). Drop the close snapshot.
         clearClosePlaceholder()
 
         // AppLogDebug("[FlickerFix][Mac] ➡️ Sent confirmViewSwitchCompleted after new tab first paint")
+    }
+
+    private func enqueuePendingCleanup(
+        controller: WebContentViewController,
+        switchInterval: PerformanceInterval?
+    ) {
+        guard let tabId = controller.associatedTab?.guid else {
+            switchInterval?.end("result=missingPreviousTabIdentity")
+            controller.view.removeFromSuperview()
+            controller.removeFromParent()
+            return
+        }
+
+        if let replaced = pendingViewCleanups.updateValue(
+            PendingViewCleanup(
+                controller: controller,
+                view: controller.view,
+                switchInterval: switchInterval
+            ),
+            forKey: tabId
+        ) {
+            replaced.switchInterval?.end("result=supersededCleanup tabId=\(tabId)")
+        }
+    }
+
+    private func cancelPendingCleanup(
+        for controller: WebContentViewController,
+        result: String
+    ) {
+        guard let tabId = controller.associatedTab?.guid,
+              let pending = pendingViewCleanups[tabId],
+              pending.controller === controller else { return }
+        pendingViewCleanups.removeValue(forKey: tabId)
+        pending.switchInterval?.end("result=\(result) tabId=\(tabId)")
+    }
+
+    /// Defensive settled-state sweep. Controllers stay cached per tab, but only
+    /// the active, first-paint-pending, or Chromium-cleanup-pending views may be
+    /// mounted under this container.
+    private func sweepMountedContentViews() {
+        var protectedControllers = Set<ObjectIdentifier>()
+        if let currentWebContentController {
+            protectedControllers.insert(ObjectIdentifier(currentWebContentController))
+        }
+        if let pendingNewTabSwitch {
+            protectedControllers.insert(ObjectIdentifier(pendingNewTabSwitch.controller))
+        }
+        for pending in pendingViewCleanups.values {
+            protectedControllers.insert(ObjectIdentifier(pending.controller))
+        }
+
+        for controller in webContentControllers.values
+        where controller.parent === self
+            && !protectedControllers.contains(ObjectIdentifier(controller)) {
+            detachSharedBookmarkBar(from: controller)
+            controller.view.removeFromSuperview()
+            controller.removeFromParent()
+        }
     }
 
     // =========================================================================

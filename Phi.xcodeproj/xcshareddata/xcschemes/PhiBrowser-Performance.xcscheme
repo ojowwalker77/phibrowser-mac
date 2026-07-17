@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Scheme LastUpgradeVersion="2620" version="1.7">
+   <BuildAction parallelizeBuildables="YES" buildImplicitDependencies="YES" buildArchitectures="Automatic">
+      <BuildActionEntries>
+         <BuildActionEntry buildForTesting="NO" buildForRunning="YES" buildForProfiling="YES" buildForArchiving="YES" buildForAnalyzing="YES">
+            <BuildableReference BuildableIdentifier="primary" BlueprintIdentifier="B0C469472E3B10E1007F0C7A" BuildableName="Phi.app" BlueprintName="PhiBrowser" ReferencedContainer="container:Phi.xcodeproj"/>
+         </BuildActionEntry>
+      </BuildActionEntries>
+   </BuildAction>
+   <TestAction buildConfiguration="OpenSource" selectedDebuggerIdentifier="Xcode.DebuggerFoundation.Debugger.LLDB" selectedLauncherIdentifier="Xcode.DebuggerFoundation.Launcher.LLDB" shouldUseLaunchSchemeArgsEnv="YES" shouldAutocreateTestPlan="YES">
+      <Testables>
+         <TestableReference skipped="NO" parallelizable="NO">
+            <BuildableReference BuildableIdentifier="primary" BlueprintIdentifier="B0C469562E3B10E2007F0C7A" BuildableName="PhiBrowserTests.xctest" BlueprintName="PhiBrowserTests" ReferencedContainer="container:Phi.xcodeproj"/>
+         </TestableReference>
+      </Testables>
+   </TestAction>
+   <LaunchAction buildConfiguration="Performance" selectedDebuggerIdentifier="Xcode.DebuggerFoundation.Debugger.LLDB" selectedLauncherIdentifier="Xcode.DebuggerFoundation.Launcher.LLDB" launchStyle="0" useCustomWorkingDirectory="NO" ignoresPersistentStateOnLaunch="YES" debugDocumentVersioning="YES" debugServiceExtension="internal" allowLocationSimulation="NO">
+      <BuildableProductRunnable runnableDebuggingMode="0">
+         <BuildableReference BuildableIdentifier="primary" BlueprintIdentifier="B0C469472E3B10E1007F0C7A" BuildableName="Phi.app" BlueprintName="PhiBrowser" ReferencedContainer="container:Phi.xcodeproj"/>
+      </BuildableProductRunnable>
+   </LaunchAction>
+   <ProfileAction buildConfiguration="Performance" shouldUseLaunchSchemeArgsEnv="YES" savedToolIdentifier="" useCustomWorkingDirectory="NO" debugDocumentVersioning="YES">
+      <BuildableProductRunnable runnableDebuggingMode="0">
+         <BuildableReference BuildableIdentifier="primary" BlueprintIdentifier="B0C469472E3B10E1007F0C7A" BuildableName="Phi.app" BlueprintName="PhiBrowser" ReferencedContainer="container:Phi.xcodeproj"/>
+      </BuildableProductRunnable>
+   </ProfileAction>
+   <AnalyzeAction buildConfiguration="Performance"/>
+   <ArchiveAction buildConfiguration="Performance" revealArchiveInOrganizer="YES"/>
+</Scheme>

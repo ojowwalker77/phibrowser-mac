@@ -24,7 +24,7 @@ final class ProcessMemorySampler: MemoryUsageSampling {
     func sample() -> MemoryUsageSnapshot? {
         let rootPid = rootPidProvider()
         let processRecords = allProcessIdentifiers()
-            .compactMap { processInfo(for: $0) }
+            .compactMap { processInfo(for: $0, rootPid: rootPid) }
 
         guard processRecords.contains(where: { $0.pid == rootPid }) else {
             return nil
@@ -74,19 +74,98 @@ final class ProcessMemorySampler: MemoryUsageSampling {
             .filter { $0 > 0 }
     }
 
-    private func processInfo(for pid: pid_t) -> ProcessMemoryInfo? {
+    private func processInfo(for pid: pid_t, rootPid: pid_t) -> ProcessMemoryInfo? {
         guard let bsdInfo = bsdInfo(for: pid),
               let taskInfo = taskInfo(for: pid) else {
             return nil
         }
 
+        let name = processName(for: pid, bsdInfo: bsdInfo)
+        let path = processPath(for: pid)
+        let arguments = processArguments(for: pid)
+
         return ProcessMemoryInfo(
             pid: pid,
             ppid: pid_t(bsdInfo.pbi_ppid),
-            name: processName(for: pid, bsdInfo: bsdInfo),
-            path: processPath(for: pid),
-            residentBytes: UInt64(taskInfo.pti_resident_size)
+            name: name,
+            path: path,
+            residentBytes: UInt64(taskInfo.pti_resident_size),
+            physicalFootprintBytes: physicalFootprint(for: pid),
+            processType: processType(
+                for: pid,
+                rootPid: rootPid,
+                name: name,
+                path: path,
+                arguments: arguments
+            )
         )
+    }
+
+    private func physicalFootprint(for pid: pid_t) -> UInt64? {
+        var info = rusage_info_v4()
+        let result = withUnsafeMutablePointer(to: &info) { pointer in
+            pointer.withMemoryRebound(to: rusage_info_t?.self, capacity: 1) { rebound in
+                proc_pid_rusage(pid, RUSAGE_INFO_V4, rebound)
+            }
+        }
+        guard result == 0 else { return nil }
+        return info.ri_phys_footprint
+    }
+
+    private func processType(
+        for pid: pid_t,
+        rootPid: pid_t,
+        name: String,
+        path: String?,
+        arguments: String?
+    ) -> BrowserProcessType {
+        if pid == rootPid { return .browser }
+
+        let identity = "\(name) \(path ?? "") \(arguments ?? "")".lowercased()
+        if identity.contains("--type=renderer") || identity.contains(" renderer") {
+            return .renderer
+        }
+        if identity.contains("--type=gpu-process") || identity.contains("gpu process") {
+            return .gpu
+        }
+        if identity.contains("networkservice") || identity.contains("network service") {
+            return .network
+        }
+        if identity.contains("audioservice") || identity.contains("audio service") {
+            return .audio
+        }
+        if identity.contains("video capture") || identity.contains("video_capture") {
+            return .videoCapture
+        }
+        if identity.contains("storageservice") || identity.contains("storage service") {
+            return .storage
+        }
+        if identity.contains("--type=utility") || identity.contains("phi helper") {
+            return .utility
+        }
+        return .other
+    }
+
+    /// Reads the process argument block so Chromium helpers can be classified
+    /// by their `--type` and `--utility-sub-type` switches. Name and executable
+    /// path alone label most children only as "Phi Helper".
+    private func processArguments(for pid: pid_t) -> String? {
+        var mib = [CTL_KERN, KERN_PROCARGS2, pid]
+        var size = 0
+        guard sysctl(&mib, UInt32(mib.count), nil, &size, nil, 0) == 0, size > 0 else {
+            return nil
+        }
+
+        var buffer = [UInt8](repeating: 0, count: size)
+        let result = buffer.withUnsafeMutableBytes { bytes in
+            sysctl(&mib, UInt32(mib.count), bytes.baseAddress, &size, nil, 0)
+        }
+        guard result == 0 else { return nil }
+
+        // KERN_PROCARGS2 is argc followed by NUL-separated executable, argv,
+        // and environment strings. Classification only needs searchable text.
+        let payload = buffer.dropFirst(MemoryLayout<Int32>.size).prefix(size)
+        return String(decoding: payload.map { $0 == 0 ? 0x20 : $0 }, as: UTF8.self)
     }
 
     private func bsdInfo(for pid: pid_t) -> proc_bsdinfo? {

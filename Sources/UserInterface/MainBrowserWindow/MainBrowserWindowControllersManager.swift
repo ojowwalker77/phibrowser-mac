@@ -287,6 +287,7 @@ class MainBrowserWindowControllersManager: MainBrowserWindowLookup {
               let windowController = window.windowController as? MainBrowserWindowController else {
             return
         }
+        AccountController.shared.account?.userDefaults.flush()
         WindowThemeMessageRouter.shared.stopObservingWindow(windowId: windowController.windowId)
         OverlayToastCenter.shared.clearWindow(windowId: windowController.windowId)
         // Normal, Incognito Space, and agent-Space windows live in slots
