@@ -26,6 +26,10 @@ from a dirty or unverified source state.
 - `APPLE_TEAM_ID`
 - `SPARKLE_PRIVATE_KEY`
 
+For the first Lua release, the workflow also accepts the existing legacy
+aliases `MACOS_CERTIFICATE_P12`, `APPLE_API_KEY`, and `APPLE_API_ISSUER`.
+Migrate those values to the preferred names above before removing the aliases.
+
 `PHI_FRAMEWORK_VERSION` remains an optional repository variable. Any version
 other than the repository default also requires `PHI_FRAMEWORK_SHA256` and
 may use `PHI_FRAMEWORK_URL`. The release refuses an unpinned framework.

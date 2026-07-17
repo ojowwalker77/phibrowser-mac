@@ -88,11 +88,11 @@ jobs:
 
       - name: Verify required secrets
         env:
-          CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
+          CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 || secrets.MACOS_CERTIFICATE_P12 }}
           CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
-          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY_P8 }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY_P8 || secrets.APPLE_API_KEY }}
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
-          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER_ID || secrets.APPLE_API_ISSUER }}
           TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
         run: |
@@ -112,7 +112,7 @@ jobs:
 
       - name: Import Developer ID certificate
         env:
-          CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
+          CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 || secrets.MACOS_CERTIFICATE_P12 }}
           CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
         run: |
           certificate_path="$RUNNER_TEMP/developer-id.p12"
@@ -170,9 +170,9 @@ jobs:
         id: package
         env:
           VERSION: ${{ steps.release.outputs.version }}
-          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY_P8 }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY_P8 || secrets.APPLE_API_KEY }}
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
-          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER_ID || secrets.APPLE_API_ISSUER }}
           SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
         run: |
           app="$RUNNER_TEMP/Lua.xcarchive/Products/Applications/Lua.app"
