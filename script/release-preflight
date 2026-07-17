@@ -21,6 +21,8 @@ grep -q 'CR_PRODUCT_DIR_NAME = ${PRODUCT_BUNDLE_IDENTIFIER}' "$ROOT_DIR/Configs/
 grep -q 'PRODUCT_BUNDLE_IDENTIFIER = dev.jow.LuaBrowser.Development' "$ROOT_DIR/Configs/OpenSource.xcconfig"
 grep -q 'github.com/ojowwalker77/phibrowser-mac/releases/latest/download/appcast.xml' "$ROOT_DIR/Configs/Release.xcconfig"
 grep -q 'DEFAULT_SHA256="[0-9a-f]\{64\}"' "$ROOT_DIR/script/fetch_phi_framework.sh"
+grep -Fq 'ln -s /Applications "$RUNNER_TEMP/dmg-root/Applications"' \
+  "$ROOT_DIR/.github/workflows/release.yml"
 
 if grep -R -E 'ota\.phibrowser\.com|account\.phibrowser\.com|ai\.phibrowser\.com' \
   "$ROOT_DIR/Configs" "$ROOT_DIR/Resources" "$ROOT_DIR/Sources"; then

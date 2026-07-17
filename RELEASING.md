@@ -3,7 +3,10 @@
 Lua ships Apple Silicon ZIP and DMG artifacts as
 `Lua-Browser-<version>-arm64`. Public artifacts must be Developer ID signed,
 notarized, stapled, Gatekeeper-assessed, checksummed, and published with a
-signed Sparkle appcast. There is no unsigned public-release fallback.
+signed Sparkle appcast. The DMG must contain both `Lua.app` and an
+`Applications` symlink so installation is an ordinary drag-and-drop flow. The
+release workflow mounts the generated DMG and verifies that layout before
+notarization. There is no unsigned public-release fallback.
 
 ## Publish a version
 

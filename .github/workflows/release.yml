@@ -201,11 +201,25 @@ jobs:
 
           ditto -c -k --keepParent "$app" "$dist/$update_zip"
           ditto "$app" "$RUNNER_TEMP/dmg-root/Lua.app"
+          ln -s /Applications "$RUNNER_TEMP/dmg-root/Applications"
           hdiutil create \
             -volname "Lua Browser" \
             -srcfolder "$RUNNER_TEMP/dmg-root" \
             -ov -format UDZO \
             "$dist/$dmg_name"
+
+          verify_mount="$RUNNER_TEMP/dmg-verify"
+          mkdir -p "$verify_mount"
+          hdiutil attach -readonly -nobrowse -mountpoint "$verify_mount" "$dist/$dmg_name"
+          layout_ok=1
+          [[ -d "$verify_mount/Lua.app" ]] || layout_ok=0
+          [[ -L "$verify_mount/Applications" ]] || layout_ok=0
+          [[ "$(readlink "$verify_mount/Applications" 2>/dev/null || true)" == /Applications ]] || layout_ok=0
+          hdiutil detach "$verify_mount"
+          if [[ "$layout_ok" != 1 ]]; then
+            echo "DMG must contain Lua.app and an Applications symlink." >&2
+            exit 1
+          fi
 
           xcrun notarytool submit "$dist/$dmg_name" \
             --key "$api_key_path" \
