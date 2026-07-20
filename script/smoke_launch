@@ -65,7 +65,7 @@ print_crash_diagnostics() {
       >"$debugger_log" 2>&1 &
     debugger_pid=$!
 
-    for _ in {1..60}; do
+    for _ in {1..240}; do
       if ! kill -0 "$debugger_pid" 2>/dev/null; then
         wait "$debugger_pid" 2>/dev/null || true
         cat "$debugger_log" >&2
