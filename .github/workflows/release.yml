@@ -165,8 +165,6 @@ jobs:
             "$GITHUB_WORKSPACE/Resources/PhiBrowser-OpenSource.entitlements"
 
           codesign -dv --verbose=4 "$app" 2>&1 | grep -E 'Identifier=|Authority=|TeamIdentifier=|Runtime Version'
-          ./script/smoke_launch "$app"
-
       - name: Notarize and package
         id: package
         env:

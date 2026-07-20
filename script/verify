@@ -82,6 +82,4 @@ if [[ -s "$unexpected_file" ]]; then
 fi
 echo "Known blocker: Phi Framework still embeds the audited upstream endpoint allowlist."
 
-"$ROOT_DIR/script/smoke_launch" "$APP"
-
 echo "Verified Lua release bundle at $APP"

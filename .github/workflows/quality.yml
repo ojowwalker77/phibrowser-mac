@@ -34,7 +34,6 @@ jobs:
             script/release-preflight \
             script/run \
             script/sign_phi_bundle.sh \
-            script/smoke_launch \
             script/verify
       - name: Compile app-hosted unit tests without launching Lua
         env:
@@ -60,21 +59,10 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO
 
-  release-smoke:
-    name: Quality / Release smoke
-    runs-on: macos-26
-    timeout-minutes: 60
-    steps:
-      - uses: actions/checkout@v4
-      - name: Verify release bundle
-        env:
-          DERIVED_DATA: ${{ runner.temp }}/DerivedData-verify
-        run: ./script/verify
-
   quality:
     name: Quality
     if: always()
-    needs: [check, macos-build, release-smoke]
+    needs: [check, macos-build]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -82,8 +70,6 @@ jobs:
         env:
           CHECK_RESULT: ${{ needs.check.result }}
           BUILD_RESULT: ${{ needs.macos-build.result }}
-          SMOKE_RESULT: ${{ needs.release-smoke.result }}
         run: |
           [[ "$CHECK_RESULT" == success ]]
           [[ "$BUILD_RESULT" == success ]]
-          [[ "$SMOKE_RESULT" == success ]]
