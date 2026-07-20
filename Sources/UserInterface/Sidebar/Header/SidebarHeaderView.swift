@@ -414,10 +414,26 @@ class SidebarHeaderView: NSView, TitlebarAwareHitTestable {
                 }
             }
             .store(in: &cancellables)
+
+        NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)
+            .map { _ in PhiPreferences.GeneralSettings.loadSidebarPosition() }
+            .removeDuplicates()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                guard let self else { return }
+                self.updateLayoutVisibility(layoutMode: .performance)
+                self.updateSidebarButtonLeftConstraint()
+            }
+            .store(in: &cancellables)
     }
     
     /// Returns the maxX of the leading chrome controls in this header.
     private func leadingChromeMaxXRelativeToSelf() -> CGFloat? {
+        // A right-hand sidebar owns no macOS traffic-light chrome. Those
+        // controls stay at the window's top-left over web content.
+        if PhiPreferences.GeneralSettings.loadSidebarPosition() == .right {
+            return 0
+        }
         if isFloating {
             if browserState?.isInFullScreenMode == true {
                 return 0

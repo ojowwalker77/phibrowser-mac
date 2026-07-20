@@ -1,0 +1,24 @@
+{
+  "manifest_version": 3,
+  "name": "Lua Tracking Protection",
+  "description": "Removes or masks known tracking parameters before followed links navigate.",
+  "version": "1.0.0",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAsfzMxXZotLCRJbx4JtRSfcxk9hm22o+ZkoCoJLcR5SDhv2nWQ5yguFQHo5F674bFHvoXa1CbubYVhRHwEK5g34dhQKc9kLIfczvieA7tIzzv5yUZ+gAX/cawfXotJCaZE8A2BpXseBsGeb3ler5zAR0ems0s6iqX0pXmB/KztZ+AtpnTAR8YEur0XY+yQtscVURCCdCfxfuhhhHZKC826+VjMVGQBVTSbBOSuuRqZoBIzbV9Pxf42wFcq8O5C3Go6MbdxZVenCNEPwPIR0UeJU7qU9omDJiq1gALtIEd+8A9EOa7JCg+uQcVkRlUTxyht1jm9qsRyZjUZ2WYDCNCPQIDAQAB",
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["url-cleaner.js", "content.js"],
+      "run_at": "document_start",
+      "all_frames": true
+    }
+  ],
+  "action": {
+    "default_title": "Lua Tracking Protection",
+    "default_popup": "popup.html"
+  },
+  "permissions": ["storage"],
+  "host_permissions": ["<all_urls>"]
+}

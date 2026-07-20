@@ -111,17 +111,20 @@ private struct ThemeSectionView: View {
 }
 
 private struct AppearanceSectionView: View {
-    @AppStorage(PhiPreferences.GeneralSettings.layoutModeKey)
-    private var layoutModeRawValue: String = PhiPreferences.GeneralSettings.loadLayoutMode().rawValue
+    @AppStorage(PhiPreferences.GeneralSettings.sidebarPositionKey)
+    private var sidebarPositionRawValue: String = PhiPreferences.GeneralSettings.loadSidebarPosition().rawValue
 
     @State private var selectedAppearance: UserAppearanceChoice = ThemeManager.shared.userAppearanceChoice
 
-    private var selectedLayoutMode: Binding<LayoutMode> {
+    private var selectedSidebarPosition: Binding<SidebarPosition> {
         Binding(
-            get: { LayoutMode(rawValue: layoutModeRawValue) ?? PhiPreferences.GeneralSettings.loadLayoutMode() },
-            set: { mode in
-                layoutModeRawValue = mode.rawValue
-                PhiPreferences.GeneralSettings.saveLayoutMode(mode)
+            get: {
+                SidebarPosition(rawValue: sidebarPositionRawValue)
+                    ?? PhiPreferences.GeneralSettings.loadSidebarPosition()
+            },
+            set: { position in
+                sidebarPositionRawValue = position.rawValue
+                PhiPreferences.GeneralSettings.saveSidebarPosition(position)
             }
         )
     }
@@ -129,17 +132,23 @@ private struct AppearanceSectionView: View {
     var body: some View {
         GeneralSectionView(title: NSLocalizedString("Appearance", comment: "General settings - Appearance section title")) {
             GeneralContainerView {
-                GeneralRowView(title: NSLocalizedString("Layout mode", comment: "General settings - Layout mode row title"), alignment: .top) {
-                    HStack(spacing: 16) {
-                        ForEach(LayoutMode.allCases) { mode in
-                            GeneralSttingCardView(
-                                image: Image(layoutImageResource(for: mode)),
-                                action: { selectedLayoutMode.wrappedValue = mode },
-                                selected: selectedLayoutMode.wrappedValue == mode,
-                                title: mode.displayName
-                            )
+                GeneralRowView(title: NSLocalizedString("Layout", comment: "General settings - Fixed layout row title")) {
+                    Text(LayoutMode.performance.displayName)
+                        .font(.system(size: 13, weight: .medium))
+                        .themedForeground(.textPrimary)
+                }
+
+                Divider()
+
+                GeneralRowView(title: NSLocalizedString("Sidebar position", comment: "General settings - Sidebar position row title")) {
+                    Picker("", selection: selectedSidebarPosition) {
+                        ForEach(SidebarPosition.allCases) { position in
+                            Text(position.displayName).tag(position)
                         }
                     }
+                    .labelsHidden()
+                    .pickerStyle(.segmented)
+                    .frame(width: 160)
                 }
 
                 Divider()
@@ -160,17 +169,6 @@ private struct AppearanceSectionView: View {
                     }
                 }
             }
-        }
-    }
-
-    private func layoutImageResource(for mode: LayoutMode) -> ImageResource {
-        switch mode {
-        case .performance:
-            return .tabLayoutPerformance
-        case .balanced:
-            return .tabLayoutBalanced
-        case .comfortable:
-            return .tabLayoutComfortable
         }
     }
 

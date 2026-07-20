@@ -16,10 +16,10 @@ extension AppController {
     static let timeMachineBackupsParentItemTag = 500014
     static let toggleBookmarkBarItemTag = 500003
     static let toggleBookmarkBarOnNewTabItemTag = 500004
-    static let layoutModeDefaultItemTag = 500005
-    static let layoutModeNavigationAtTopItemTag = 500006
-    static let layoutModeTraditionalItemTag = 500007
-    static let layoutModeTitleItemTag = 500008
+    static let sidebarPositionLeftItemTag = 500005
+    static let sidebarPositionRightItemTag = 500006
+    static let removedLayoutModeItemTag = 500007
+    static let sidebarPositionTitleItemTag = 500008
     static let whatsNewItemTag = 500009
     static let bookmarksMenuItemTag = 500010
     static let bookmarksMenuIdentifier = NSUserInterfaceItemIdentifier("phi.bookmarks.menu")
@@ -77,10 +77,10 @@ extension AppController {
                     item.tag == AppController.viewMenuPhiSectionSeparatorTag ||
                     item.tag == AppController.toggleBookmarkBarItemTag ||
                     item.tag == AppController.toggleBookmarkBarOnNewTabItemTag ||
-                    item.tag == AppController.layoutModeDefaultItemTag ||
-                    item.tag == AppController.layoutModeNavigationAtTopItemTag ||
-                    item.tag == AppController.layoutModeTraditionalItemTag ||
-                    item.tag == AppController.layoutModeTitleItemTag ||
+                    item.tag == AppController.sidebarPositionLeftItemTag ||
+                    item.tag == AppController.sidebarPositionRightItemTag ||
+                    item.tag == AppController.removedLayoutModeItemTag ||
+                    item.tag == AppController.sidebarPositionTitleItemTag ||
                     item.tag == AppController.agentAutoViewItemTag
                 }
 
@@ -90,47 +90,20 @@ extension AppController {
                     submenu.addItem(topSeparator)
                 }
                 
-                let layoutTtitle = NSMenuItem.sectionHeader(title: NSLocalizedString("Layout Mode", comment: "View menu - Layout mode section header in View menu"))
-                layoutTtitle.tag = AppController.layoutModeTitleItemTag
-                submenu.addItem(layoutTtitle)
-                
-                let navigationAtTopItem = NSMenuItem(title: LayoutMode.balanced.displayName,
-                                                     action: #selector(selectLayoutMode(_:)),
-                                                     keyEquivalent: "")
-                navigationAtTopItem.tag = AppController.layoutModeNavigationAtTopItemTag
-                navigationAtTopItem.target = self
-                submenu.addItem(navigationAtTopItem)
-                
-                let defaultLayoutItem = NSMenuItem(title: LayoutMode.performance.displayName,
-                                                   action: #selector(selectLayoutMode(_:)),
-                                                   keyEquivalent: "")
-                defaultLayoutItem.tag = AppController.layoutModeDefaultItemTag
-                defaultLayoutItem.target = self
-                submenu.addItem(defaultLayoutItem)
+                let sidebarTitle = NSMenuItem.sectionHeader(title: NSLocalizedString("Sidebar Position", comment: "View menu - Sidebar position section header"))
+                sidebarTitle.tag = AppController.sidebarPositionTitleItemTag
+                submenu.addItem(sidebarTitle)
 
-                let traditionalLayoutItem = NSMenuItem(title: LayoutMode.comfortable.displayName,
-                                                       action: #selector(selectLayoutMode(_:)),
-                                                       keyEquivalent: "")
-                traditionalLayoutItem.tag = AppController.layoutModeTraditionalItemTag
-                traditionalLayoutItem.target = self
-                submenu.addItem(traditionalLayoutItem)
-
-                let bookmarkBarSeparator = NSMenuItem.separator()
-                bookmarkBarSeparator.tag = AppController.viewMenuPhiSectionSeparatorTag
-                submenu.addItem(bookmarkBarSeparator)
-                let toggleBookmarkBarItem = NSMenuItem(title: NSLocalizedString("Always Show Bookmark Bar", comment: "View menu - Menu item to always show the bookmark bar"),
-                                                   action: #selector(toggleBookmarkBar(_:)),
-                                                   keyEquivalent: "b")
-                toggleBookmarkBarItem.keyEquivalentModifierMask = [.command, .shift]
-                toggleBookmarkBarItem.tag = AppController.toggleBookmarkBarItemTag
-                toggleBookmarkBarItem.target = self
-                submenu.addItem(toggleBookmarkBarItem)
-                let toggleBookmarkBarOnNewTabItem = NSMenuItem(title: NSLocalizedString("Show Bookmark Bar on New Tab", comment: "View menu - Menu item to show the bookmark bar on new tab pages"),
-                                                   action: #selector(toggleBookmarkBarOnNewTab(_:)),
-                                                   keyEquivalent: "")
-                toggleBookmarkBarOnNewTabItem.tag = AppController.toggleBookmarkBarOnNewTabItemTag
-                toggleBookmarkBarOnNewTabItem.target = self
-                submenu.addItem(toggleBookmarkBarOnNewTabItem)
+                for position in SidebarPosition.allCases {
+                    let item = NSMenuItem(title: position.displayName,
+                                          action: #selector(selectSidebarPosition(_:)),
+                                          keyEquivalent: "")
+                    item.tag = position == .left
+                        ? AppController.sidebarPositionLeftItemTag
+                        : AppController.sidebarPositionRightItemTag
+                    item.target = self
+                    submenu.addItem(item)
+                }
 
                 let sidebarSeparator = NSMenuItem.separator()
                 sidebarSeparator.tag = AppController.viewMenuPhiSectionSeparatorTag
@@ -675,16 +648,14 @@ extension AppController {
         }
     }
 
-    @objc func selectLayoutMode(_ sender: Any?) {
+    @objc func selectSidebarPosition(_ sender: Any?) {
         guard let menuItem = sender as? NSMenuItem else { return }
 
         switch menuItem.tag {
-        case AppController.layoutModeDefaultItemTag:
-            PhiPreferences.GeneralSettings.saveLayoutMode(.performance)
-        case AppController.layoutModeNavigationAtTopItemTag:
-            PhiPreferences.GeneralSettings.saveLayoutMode(.balanced)
-        case AppController.layoutModeTraditionalItemTag:
-            PhiPreferences.GeneralSettings.saveLayoutMode(.comfortable)
+        case AppController.sidebarPositionLeftItemTag:
+            PhiPreferences.GeneralSettings.saveSidebarPosition(.left)
+        case AppController.sidebarPositionRightItemTag:
+            PhiPreferences.GeneralSettings.saveSidebarPosition(.right)
         default:
             break
         }
@@ -1652,13 +1623,6 @@ extension AppController {
             if itemIsInAgentLockedMenu(menuItem) { return false }
         }
 
-        // Toggle Sidebar is unavailable in the traditional layout.
-        if item.action == #selector(toggleSidebar(_:)) {
-            if PhiPreferences.GeneralSettings.loadLayoutMode().isTraditional {
-                return false
-            }
-        }
-        
         if item.action == #selector(showPreferences(_:)) {
             return true
         }
@@ -1674,17 +1638,15 @@ extension AppController {
             }
         }
 
-        if item.action == #selector(selectLayoutMode(_:)) {
+        if item.action == #selector(selectSidebarPosition(_:)) {
             if let menuItem = item as? NSMenuItem {
-                let layoutMode = PhiPreferences.GeneralSettings.loadLayoutMode()
+                let position = PhiPreferences.GeneralSettings.loadSidebarPosition()
 
                 switch menuItem.tag {
-                case AppController.layoutModeDefaultItemTag:
-                    menuItem.state = (layoutMode == .performance) ? .on : .off
-                case AppController.layoutModeNavigationAtTopItemTag:
-                    menuItem.state = (layoutMode == .balanced) ? .on : .off
-                case AppController.layoutModeTraditionalItemTag:
-                    menuItem.state = (layoutMode == .comfortable) ? .on : .off
+                case AppController.sidebarPositionLeftItemTag:
+                    menuItem.state = (position == .left) ? .on : .off
+                case AppController.sidebarPositionRightItemTag:
+                    menuItem.state = (position == .right) ? .on : .off
                 default:
                     break
                 }

@@ -1,0 +1,40 @@
+<!doctype html>
+<!-- Copyright 2026 Phinomenon Inc. Licensed under Apache-2.0. -->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lua Tracking Protection</title>
+  <link rel="stylesheet" href="popup.css">
+  <script src="popup.js" defer></script>
+</head>
+<body>
+  <header>
+    <div>
+      <strong>Tracking Protection</strong>
+      <span>Clean tracking parameters from URLs</span>
+    </div>
+    <label class="switch" aria-label="Enable tracking protection">
+      <input id="enabled" type="checkbox">
+      <span></span>
+    </label>
+  </header>
+
+  <main>
+    <section class="count">
+      <strong id="cleaned">0</strong>
+      <span>parameters cleaned</span>
+    </section>
+
+    <section class="mode">
+      <span>Mode</span>
+      <div role="group" aria-label="Tracking protection mode">
+        <button id="remove" type="button">Remove</button>
+        <button id="mask" type="button">Mask</button>
+      </div>
+    </section>
+
+    <p id="status"></p>
+  </main>
+</body>
+</html>

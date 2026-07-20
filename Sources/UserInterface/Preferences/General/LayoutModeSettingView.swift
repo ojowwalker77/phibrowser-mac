@@ -6,52 +6,47 @@
 import SwiftUI
 
 struct LayoutModeSettingView: View {
-    @AppStorage(PhiPreferences.GeneralSettings.layoutModeKey)
-    private var layoutModeRawValue: String = PhiPreferences.GeneralSettings.loadLayoutMode().rawValue
+    @AppStorage(PhiPreferences.GeneralSettings.sidebarPositionKey)
+    private var sidebarPositionRawValue: String = PhiPreferences.GeneralSettings.loadSidebarPosition().rawValue
 
-    private var selectedLayoutMode: Binding<LayoutMode> {
+    private var selectedSidebarPosition: Binding<SidebarPosition> {
         Binding(
             get: {
-                LayoutMode(rawValue: layoutModeRawValue) ?? PhiPreferences.GeneralSettings.loadLayoutMode()
+                SidebarPosition(rawValue: sidebarPositionRawValue)
+                    ?? PhiPreferences.GeneralSettings.loadSidebarPosition()
             },
-            set: { mode in
-                layoutModeRawValue = mode.rawValue
-                PhiPreferences.GeneralSettings.saveLayoutMode(mode)
+            set: { position in
+                sidebarPositionRawValue = position.rawValue
+                PhiPreferences.GeneralSettings.saveSidebarPosition(position)
             }
         )
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text(NSLocalizedString("Layout Mode", comment: "General settings - Section title for layout configuration"))
+            Text(NSLocalizedString("Layout", comment: "General settings - Section title for layout configuration"))
                 .font(.system(size: 12))
                 .foregroundStyle(Color.secondary)
                 .padding(.bottom, 12)
 
-            HStack(alignment: .top, spacing: 16) {
-                ForEach(LayoutMode.allCases) { mode in
-                    GeneralSttingCardView(
-                        image: Image(layoutImageResource(for: mode)),
-                        action: { selectedLayoutMode.wrappedValue = mode },
-                        selected: selectedLayoutMode.wrappedValue == mode,
-                        title: mode.displayName
-                    )
+            HStack(spacing: 16) {
+                Text(LayoutMode.performance.displayName)
+                    .font(.system(size: 13, weight: .medium))
+
+                Spacer()
+
+                Picker("", selection: selectedSidebarPosition) {
+                    ForEach(SidebarPosition.allCases) { position in
+                        Text(position.displayName).tag(position)
+                    }
                 }
+                .labelsHidden()
+                .pickerStyle(.segmented)
+                .frame(width: 160)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private func layoutImageResource(for mode: LayoutMode) -> ImageResource {
-        switch mode {
-        case .performance:
-            return .tabLayoutPerformance
-        case .balanced:
-            return .tabLayoutBalanced
-        case .comfortable:
-            return .tabLayoutComfortable
-        }
     }
 }
 

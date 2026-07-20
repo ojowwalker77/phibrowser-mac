@@ -125,6 +125,22 @@
                 // privacy boundary until Lua can rebuild the framework.
                 [arguments addObject:@"--disable-crash-reporter"];
 
+                // Lua owns this unpacked MV3 extension and ships it inside the
+                // signed app bundle. Loading it at Chromium startup makes URL
+                // tracking protection available to every profile without a
+                // Web Store install or an external service.
+                NSString *trackingProtectionPath = [mainBundle pathForResource:@"TrackingProtection"
+                                                                        ofType:nil];
+                NSString *trackingProtectionManifest = [trackingProtectionPath
+                    stringByAppendingPathComponent:@"manifest.json"];
+                if (trackingProtectionPath != nil &&
+                    [[NSFileManager defaultManager] fileExistsAtPath:trackingProtectionManifest]) {
+                    [arguments addObject:[NSString stringWithFormat:@"--load-extension=%@",
+                                                                    trackingProtectionPath]];
+                } else {
+                    AppLogError(@"Lua Tracking Protection is missing from the app bundle");
+                }
+
 #if DEBUG || NIGHTLY_BUILD
                 [arguments addObject:@"--phi-ai-debug"];
                 [arguments addObject:@"--phi-no-embed-extensions"];

@@ -218,7 +218,8 @@ final class FloatingTrafficLightsView: NSView {
 
     private var shouldEnableWindowButtonActions: Bool {
         guard browserState?.sidebarCollapsed == true,
-              browserState?.isInFullScreenMode != true else {
+              browserState?.isInFullScreenMode != true,
+              PhiPreferences.GeneralSettings.loadSidebarPosition() == .left else {
             return false
         }
         return !PhiPreferences.GeneralSettings.loadLayoutMode().isTraditional

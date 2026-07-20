@@ -7,7 +7,7 @@ import Cocoa
 
 class LayoutSelectionViewController: OnboardingBaseViewController {
 
-    private var selectedMode: LayoutMode = .balanced
+    private var selectedPosition = PhiPreferences.GeneralSettings.loadSidebarPosition()
 
     private let optionWidth: CGFloat = 456
     private let optionHeight: CGFloat = 116
@@ -34,49 +34,50 @@ class LayoutSelectionViewController: OnboardingBaseViewController {
         return stackView
     }()
 
-    private lazy var performanceOptionView: LayoutOptionView = {
+    private lazy var leftSidebarOptionView: LayoutOptionView = {
         let view = LayoutOptionView(
-            title: NSLocalizedString("Performance", comment: "Onboarding layout selection - Performance option"),
+            title: NSLocalizedString("Sidebar on left", comment: "Onboarding sidebar position - Left option"),
             previewImage: NSImage(resource: .tabLayoutPerformanceOobe),
-            isSelected: selectedMode == .performance
+            isSelected: selectedPosition == .left
         )
         view.onTap = { [weak self] in
-            self?.selectMode(.performance)
+            self?.selectPosition(.left)
         }
         return view
     }()
 
-    private lazy var balancedOptionView: LayoutOptionView = {
+    private lazy var rightSidebarOptionView: LayoutOptionView = {
         let view = LayoutOptionView(
-            title: NSLocalizedString("Balanced", comment: "Onboarding layout selection - Balanced option"),
-            previewImage: NSImage(resource: .tabLayoutBalancedOobe),
-            isSelected: selectedMode == .balanced
+            title: NSLocalizedString("Sidebar on right", comment: "Onboarding sidebar position - Right option"),
+            previewImage: Self.rightSidebarPreview,
+            isSelected: selectedPosition == .right
         )
         view.onTap = { [weak self] in
-            self?.selectMode(.balanced)
+            self?.selectPosition(.right)
         }
         return view
     }()
 
-    private lazy var comfortableOptionView: LayoutOptionView = {
-        let view = LayoutOptionView(
-            title: NSLocalizedString("Comfortable", comment: "Onboarding layout selection - Comfortable option"),
-            previewImage: NSImage(resource: .tabLayoutComfortableOobe),
-            isSelected: selectedMode == .comfortable
-        )
-        view.onTap = { [weak self] in
-            self?.selectMode(.comfortable)
+    private static var rightSidebarPreview: NSImage {
+        let source = NSImage(resource: .tabLayoutPerformanceOobe)
+        return NSImage(size: source.size, flipped: false) { rect in
+            guard let context = NSGraphicsContext.current?.cgContext else { return false }
+            context.saveGState()
+            context.translateBy(x: rect.width, y: 0)
+            context.scaleBy(x: -1, y: 1)
+            source.draw(in: rect)
+            context.restoreGState()
+            return true
         }
-        return view
-    }()
+    }
 
     // MARK: - Lifecycle
 
     override func loadView() {
         super.loadView()
         titleLabel.stringValue = NSLocalizedString(
-            "Layout selection",
-            comment: "Onboarding layout selection - Page title"
+            "Sidebar position",
+            comment: "Onboarding sidebar position - Page title"
         )
         skipButton.isHidden = true
         setupLayoutOptions()
@@ -88,7 +89,7 @@ class LayoutSelectionViewController: OnboardingBaseViewController {
         view.addSubview(optionsContainer)
         optionsContainer.addSubview(optionsStackView)
 
-        let optionViews = [balancedOptionView, performanceOptionView, comfortableOptionView]
+        let optionViews = [leftSidebarOptionView, rightSidebarOptionView]
         for optionView in optionViews {
             optionsStackView.addArrangedSubview(optionView)
             optionView.snp.makeConstraints { make in
@@ -108,17 +109,17 @@ class LayoutSelectionViewController: OnboardingBaseViewController {
         }
     }
 
-    private func selectMode(_ mode: LayoutMode) {
-        selectedMode = mode
-        performanceOptionView.setSelected(mode == .performance)
-        balancedOptionView.setSelected(mode == .balanced)
-        comfortableOptionView.setSelected(mode == .comfortable)
+    private func selectPosition(_ position: SidebarPosition) {
+        selectedPosition = position
+        leftSidebarOptionView.setSelected(position == .left)
+        rightSidebarOptionView.setSelected(position == .right)
     }
 
     // MARK: - Actions
 
     override func nextButtonTapped(_ sender: NSButton? = nil) {
-        PhiPreferences.GeneralSettings.saveLayoutMode(selectedMode)
+        PhiPreferences.GeneralSettings.saveLayoutMode()
+        PhiPreferences.GeneralSettings.saveSidebarPosition(selectedPosition)
         nextClosure?(true)
     }
 }

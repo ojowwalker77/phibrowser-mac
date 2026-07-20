@@ -28,6 +28,8 @@ struct WebContentHeaderView: View {
     @State private var extensionsModel: WebContentHeaderExtensionsModel
     @State private var isExtensionPopoverShown = false
     @State private var totalHeaderWidth: CGFloat = 10000
+    @AppStorage(PhiPreferences.GeneralSettings.sidebarPositionKey)
+    private var sidebarPositionRawValue = PhiPreferences.GeneralSettings.loadSidebarPosition().rawValue
 
     init(
         state: WebContentHeaderState,
@@ -147,7 +149,9 @@ struct WebContentHeaderView: View {
         HStack(spacing: 8) {
             if state.showSidebarButton {
                 NavigationButton(
-                    systemName: "sidebar.left",
+                    systemName: sidebarPositionRawValue == SidebarPosition.right.rawValue
+                        ? "sidebar.right"
+                        : "sidebar.left",
                     accessibilityLabel: NSLocalizedString("Toggle Sidebar", comment: "Web content header - Accessibility description for sidebar toggle button"),
                     onAnchorResolved: onSidebarAnchorResolved,
                     action: onSidebarTap

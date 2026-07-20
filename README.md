@@ -12,6 +12,7 @@ focuses on the core browsing experience.
 - Native macOS windows, sidebars, settings, and system integration
 - Chromium tabs, profiles, extensions, downloads, bookmarks, and DevTools
 - Spaces for organizing tabs and profiles
+- Built-in local tracking-parameter protection with Remove and Mask modes
 - An optional local CDP skill for supervised browser automation
 
 Inherited Phi account, connector, rollback, crash-help, and update services
@@ -85,6 +86,23 @@ use isolated Lua profile directories and must never touch the release profile.
 The old `phi://` URL scheme remains accepted temporarily alongside canonical
 `lua://` links. macOS permissions and keychain items tied to the former bundle
 identifier may require reapproval.
+
+## Tracking protection
+
+Lua bundles a local Chromium extension that recognizes common advertising and
+email attribution parameters such as `gclid`, `fbclid`, `msclkid`, and
+`utm_*`. Remove mode strips them; Mask mode retains the parameter names while
+replacing their values. The extension can be paused and keeps a per-profile
+counter in Chromium extension storage. It has no server, account, or telemetry.
+The feature was inspired by the public
+[`donttrackme`](https://github.com/kiwi-init/donttrackme) project and was
+implemented for Chromium as source-owned Lua code.
+
+Followed links are cleaned before their destination navigation. When a tracked
+URL is pasted, opened externally, or reached through a redirect, the initial
+request may already contain its parameters; Lua then cleans the visible URL in
+place. This is URL hygiene, not a network request blocker or a substitute for
+engine-level anti-fingerprinting.
 
 ## Contributing and releases
 

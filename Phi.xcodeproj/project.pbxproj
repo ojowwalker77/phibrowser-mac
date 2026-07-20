@@ -381,6 +381,7 @@
 		D1F600042FD6000000000004 /* DiffableOutlineDiffPlanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1F600032FD6000000000003 /* DiffableOutlineDiffPlanner.swift */; };
 		D1F600062FD6000000000006 /* DiffableOutlineView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1F600052FD6000000000005 /* DiffableOutlineView.swift */; };
 		D1F600082FD6000000000008 /* SidebarDiffableSnapshotBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1F600072FD6000000000007 /* SidebarDiffableSnapshotBuilder.swift */; };
+		D7A000022FE7000000000002 /* TrackingProtection in Resources */ = {isa = PBXBuildFile; fileRef = D7A000012FE7000000000001 /* TrackingProtection */; };
 		DEBE00000000000000000005 /* DeveloperSettingViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEBE00000000000000000002 /* DeveloperSettingViewController.swift */; };
 		DEBE00000000000000000006 /* DeveloperSettingHostingViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEBE00000000000000000003 /* DeveloperSettingHostingViewController.swift */; };
 		DEBE00000000000000000007 /* DeveloperSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEBE00000000000000000004 /* DeveloperSettingsView.swift */; };
@@ -856,6 +857,7 @@
 		D1F600032FD6000000000003 /* DiffableOutlineDiffPlanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiffableOutlineDiffPlanner.swift; sourceTree = "<group>"; };
 		D1F600052FD6000000000005 /* DiffableOutlineView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiffableOutlineView.swift; sourceTree = "<group>"; };
 		D1F600072FD6000000000007 /* SidebarDiffableSnapshotBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarDiffableSnapshotBuilder.swift; sourceTree = "<group>"; };
+		D7A000012FE7000000000001 /* TrackingProtection */ = {isa = PBXFileReference; lastKnownFileType = folder; path = TrackingProtection; sourceTree = "<group>"; };
 		DEBE00000000000000000002 /* DeveloperSettingViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeveloperSettingViewController.swift; sourceTree = "<group>"; };
 		DEBE00000000000000000003 /* DeveloperSettingHostingViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeveloperSettingHostingViewController.swift; sourceTree = "<group>"; };
 		DEBE00000000000000000004 /* DeveloperSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeveloperSettingsView.swift; sourceTree = "<group>"; };
@@ -1528,6 +1530,7 @@
 		B0C469752E3B158D007F0C7A /* Resources */ = {
 			isa = PBXGroup;
 			children = (
+				D7A000012FE7000000000001 /* TrackingProtection */,
 				8EC502142F67AF7F00CE7338 /* DownloadSafety.xcstrings */,
 				375C66372EFB923C00885D78 /* Fonts */,
 				3765817A2EE9637F00D3E031 /* Localizable.xcstrings */,
@@ -2219,6 +2222,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				CDA11ED500000000000000B1 /* claude-skill in Resources */,
+				D7A000022FE7000000000002 /* TrackingProtection in Resources */,
 				37F574482F7A7C5D00879867 /* LuaIcon.icon in Resources */,
 				B0C4694E2E3B10E2007F0C7A /* Assets.xcassets in Resources */,
 				3765817B2EE963AD00D3E031 /* Localizable.xcstrings in Resources */,

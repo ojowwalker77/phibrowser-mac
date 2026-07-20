@@ -1,0 +1,87 @@
+/* Copyright 2026 Phinomenon Inc. Licensed under Apache-2.0. */
+
+:root {
+  color-scheme: light dark;
+  --background: #ffffff;
+  --surface: #f3f3f5;
+  --text: #171719;
+  --secondary: #6c6c72;
+  --border: #dedee2;
+  --accent: #71717a;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #171719;
+    --surface: #262629;
+    --text: #f5f5f6;
+    --secondary: #a1a1a7;
+    --border: #38383d;
+    --accent: #a1a1aa;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  width: 310px;
+  margin: 0;
+  padding: 16px;
+  background: var(--background);
+  color: var(--text);
+  font: 13px -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+header, .mode {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+header div { display: grid; gap: 3px; }
+header strong { font-size: 14px; }
+header div span, #status, .count span, .mode > span { color: var(--secondary); }
+header div span { font-size: 11px; }
+
+.switch { position: relative; width: 36px; height: 22px; flex: 0 0 auto; }
+.switch input { position: absolute; opacity: 0; }
+.switch span {
+  position: absolute;
+  inset: 0;
+  border-radius: 11px;
+  background: var(--border);
+  transition: background 120ms ease;
+}
+.switch span::after {
+  content: "";
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  top: 2px;
+  left: 2px;
+  border-radius: 50%;
+  background: white;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 22%);
+  transition: transform 120ms ease;
+}
+.switch input:checked + span { background: var(--accent); }
+.switch input:checked + span::after { transform: translateX(14px); }
+
+main { display: grid; gap: 12px; margin-top: 14px; }
+.count { display: grid; place-items: center; gap: 3px; padding: 14px; border-radius: 10px; background: var(--surface); }
+.count strong { font-size: 28px; line-height: 1; }
+.count span { font-size: 10px; letter-spacing: .04em; text-transform: uppercase; }
+
+.mode div { display: flex; padding: 2px; border-radius: 8px; background: var(--surface); }
+button {
+  border: 0;
+  border-radius: 6px;
+  padding: 6px 13px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+button.selected { background: var(--accent); color: white; }
+#status { min-height: 32px; margin: 0; font-size: 11px; line-height: 1.45; text-align: center; }

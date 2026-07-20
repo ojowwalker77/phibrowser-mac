@@ -24,8 +24,9 @@ extension WebContentContainerViewController {
         return Self.floatingSidebarDefaultWidth
     }
 
-    var floatingSidebarHiddenLeading: CGFloat {
-        -(currentFloatingWidth + Self.floatingSidebarInset)
+    var floatingSidebarHiddenOffset: CGFloat {
+        let distance = currentFloatingWidth + Self.floatingSidebarInset
+        return PhiPreferences.GeneralSettings.loadSidebarPosition() == .left ? -distance : distance
     }
 
     func setupFloatingSidebarTrigger() {
@@ -33,7 +34,13 @@ extension WebContentContainerViewController {
             guard let self else { return }
             isPointerInsideFloatingSidebarTrigger = true
             let enterPoint = floatingSidebarTriggerView.convert(event.locationInWindow, from: nil)
-            floatingSidebarShownFromRightToLeft = enterPoint.x >= (Self.floatingSidebarTriggerWidth * 0.5)
+            let enteredFromContent: Bool
+            if PhiPreferences.GeneralSettings.loadSidebarPosition() == .left {
+                enteredFromContent = enterPoint.x >= (Self.floatingSidebarTriggerWidth * 0.5)
+            } else {
+                enteredFromContent = enterPoint.x <= (Self.floatingSidebarTriggerWidth * 0.5)
+            }
+            floatingSidebarShownFromContentSide = enteredFromContent
             showFloatingSidebar()
         }
 
@@ -60,8 +67,8 @@ extension WebContentContainerViewController {
         interactionContainerView.onMouseEntered = { [weak self] _ in
             guard let self else { return }
             refreshFloatingSidebarPointerState()
-            if !isPointerInsideFloatingSidebarTrigger && floatingSidebarShownFromRightToLeft {
-                floatingSidebarShownFromRightToLeft = false
+            if !isPointerInsideFloatingSidebarTrigger && floatingSidebarShownFromContentSide {
+                floatingSidebarShownFromContentSide = false
             }
             if isPointerInsideFloatingSidebar {
                 cancelFloatingSidebarHide()
@@ -91,10 +98,6 @@ extension WebContentContainerViewController {
         let panelVisualContainer = panelContentView
 
         interactionContainerView.addSubview(panelVisualContainer)
-        panelVisualContainer.snp.makeConstraints { make in
-            make.leading.equalToSuperview().offset(Self.floatingSidebarInset)
-            make.top.bottom.trailing.equalToSuperview()
-        }
 
         // Sit above `outerBorderLayer` (zPosition = contentOuterBorder) so the
         // unified content-border stroke doesn't paint on top of the panel
@@ -103,19 +106,59 @@ extension WebContentContainerViewController {
         interactionContainerView.layer?.zPosition = WebContentContainerViewController.LayerZIndex.floatingSidebar
 
         view.addSubview(interactionContainerView, positioned: .above, relativeTo: nil)
-        interactionContainerView.snp.makeConstraints { make in
-            floatingSidebarLeadingConstraint = make.leading.equalToSuperview().offset(floatingSidebarHiddenLeading).constraint
-            make.top.equalToSuperview().offset(Self.floatingSidebarInset)
-            make.bottom.equalToSuperview().offset(-Self.floatingSidebarInset)
-            floatingSidebarWidthConstraint = make.width.equalTo(currentFloatingWidth + Self.floatingSidebarInset).constraint
-        }
+        floatingSidebarPanelContentView = panelVisualContainer
+        floatingSidebarContainerView = interactionContainerView
+        updateFloatingSidebarPlacement()
         view.layoutSubtreeIfNeeded()
         interactionContainerView.isHidden = true
         interactionContainerView.alphaValue = 1
 
         floatingSidebarViewController = floatingSidebarVC
         floatingSidebarVC.setContentActive(shouldEnableFloatingSidebar())
-        floatingSidebarContainerView = interactionContainerView
+    }
+
+    func updateFloatingSidebarPlacement() {
+        let position = PhiPreferences.GeneralSettings.loadSidebarPosition()
+
+        floatingSidebarTriggerView.snp.remakeConstraints { make in
+            if position == .left {
+                make.leading.equalToSuperview()
+            } else {
+                make.trailing.equalToSuperview()
+            }
+            make.top.bottom.equalToSuperview()
+            make.width.equalTo(Self.floatingSidebarTriggerWidth)
+        }
+
+        guard let panel = floatingSidebarContainerView,
+              let panelContent = floatingSidebarPanelContentView else { return }
+
+        panelContent.snp.remakeConstraints { make in
+            make.top.bottom.equalToSuperview()
+            if position == .left {
+                make.leading.equalToSuperview().offset(Self.floatingSidebarInset)
+                make.trailing.equalToSuperview()
+            } else {
+                make.leading.equalToSuperview()
+                make.trailing.equalToSuperview().offset(-Self.floatingSidebarInset)
+            }
+        }
+
+        panel.snp.remakeConstraints { make in
+            let horizontalOffset = panel.isHidden ? floatingSidebarHiddenOffset : 0
+            if position == .left {
+                floatingSidebarHorizontalConstraint = make.leading.equalToSuperview()
+                    .offset(horizontalOffset).constraint
+            } else {
+                floatingSidebarHorizontalConstraint = make.trailing.equalToSuperview()
+                    .offset(horizontalOffset).constraint
+            }
+            make.top.equalToSuperview().offset(Self.floatingSidebarInset)
+            make.bottom.equalToSuperview().offset(-Self.floatingSidebarInset)
+            floatingSidebarWidthConstraint = make.width
+                .equalTo(currentFloatingWidth + Self.floatingSidebarInset).constraint
+        }
+        view.layoutSubtreeIfNeeded()
     }
 
     /// A Space switch driven from this panel orders the window out with the
@@ -150,7 +193,7 @@ extension WebContentContainerViewController {
             floatingSidebarTriggerView.isHidden = true
             isPointerInsideFloatingSidebar = false
             isPointerInsideFloatingSidebarTrigger = false
-            floatingSidebarShownFromRightToLeft = false
+            floatingSidebarShownFromContentSide = false
             floatingSidebarViewController?.setContentActive(false)
             hideFloatingSidebar(animated: false)
         } else if floatingSidebarTriggerView.isHidden {
@@ -175,7 +218,7 @@ extension WebContentContainerViewController {
         guard panel.isHidden else { return }
 
         // Ensure panel starts offscreen before sliding in.
-        floatingSidebarLeadingConstraint?.update(offset: floatingSidebarHiddenLeading)
+        floatingSidebarHorizontalConstraint?.update(offset: floatingSidebarHiddenOffset)
         view.layoutSubtreeIfNeeded()
         panel.isHidden = false
         floatingSidebarLastShownAt = Date()
@@ -187,7 +230,7 @@ extension WebContentContainerViewController {
             cancelFloatingSidebarHide()
         }
 
-        floatingSidebarLeadingConstraint?.update(offset: 0)
+        floatingSidebarHorizontalConstraint?.update(offset: 0)
         NSAnimationContext.runAnimationGroup { context in
             context.duration = Self.floatingSidebarShowDuration
             context.timingFunction = CAMediaTimingFunction(name: .easeOut)
@@ -206,7 +249,7 @@ extension WebContentContainerViewController {
         // Pointer-driven hides are already blocked while the form is up
         // (see scheduleFloatingSidebarHide), so this only fires on forced paths.
         floatingSidebarViewController?.dismissCreateSpaceOverlay()
-        floatingSidebarLeadingConstraint?.update(offset: floatingSidebarHiddenLeading)
+        floatingSidebarHorizontalConstraint?.update(offset: floatingSidebarHiddenOffset)
 
         if animated {
             NSAnimationContext.runAnimationGroup { context in
@@ -217,13 +260,13 @@ extension WebContentContainerViewController {
             } completionHandler: {
                 panel.isHidden = true
                 self.floatingSidebarLastShownAt = nil
-                self.floatingSidebarShownFromRightToLeft = false
+                self.floatingSidebarShownFromContentSide = false
             }
         } else {
             view.layoutSubtreeIfNeeded()
             panel.isHidden = true
             floatingSidebarLastShownAt = nil
-            floatingSidebarShownFromRightToLeft = false
+            floatingSidebarShownFromContentSide = false
         }
     }
 
@@ -239,7 +282,7 @@ extension WebContentContainerViewController {
             refreshFloatingSidebarPointerState()
             guard isPointerInsideFloatingSidebar == false else { return }
             guard isPointerInsideFloatingSidebarTrigger == false else { return }
-            if floatingSidebarShownFromRightToLeft, isMouseAtFloatingSidebarLeftSide() {
+            if floatingSidebarShownFromContentSide, isMouseBeyondFloatingSidebarOuterEdge() {
                 return
             }
             hideFloatingSidebar(animated: true)
@@ -281,27 +324,26 @@ extension WebContentContainerViewController {
         return targetView.bounds.contains(locationInView)
     }
 
-    func isMouseAtFloatingSidebarLeftSide() -> Bool {
+    func isMouseBeyondFloatingSidebarOuterEdge() -> Bool {
         guard let panel = floatingSidebarContainerView, panel.isHidden == false else { return false }
         guard let window = panel.window else { return false }
         let mouseLocationInWindow = window.mouseLocationOutsideOfEventStream
-        let panelFrameInWindow = panel.convert(panel.bounds, to: nil)
+        guard let panelContent = floatingSidebarPanelContentView else { return false }
+        let contentFrameInWindow = panelContent.convert(panelContent.bounds, to: nil)
 
-        let withinY = (mouseLocationInWindow.y >= panelFrameInWindow.minY) && (mouseLocationInWindow.y <= panelFrameInWindow.maxY)
-        let visiblePanelMinX = panelFrameInWindow.minX + Self.floatingSidebarInset
-        return withinY && mouseLocationInWindow.x < visiblePanelMinX
+        let withinY = (mouseLocationInWindow.y >= contentFrameInWindow.minY)
+            && (mouseLocationInWindow.y <= contentFrameInWindow.maxY)
+        guard withinY else { return false }
+        if PhiPreferences.GeneralSettings.loadSidebarPosition() == .left {
+            return mouseLocationInWindow.x < contentFrameInWindow.minX
+        }
+        return mouseLocationInWindow.x > contentFrameInWindow.maxX
     }
 
     func isMouseInsideFloatingSidebarVisibleRegion() -> Bool {
-        guard let panel = floatingSidebarContainerView, panel.isHidden == false else { return false }
-        guard let window = panel.window else { return false }
-        let mouseLocationInWindow = window.mouseLocationOutsideOfEventStream
-        let panelFrameInWindow = panel.convert(panel.bounds, to: nil)
-
-        let visiblePanelMinX = panelFrameInWindow.minX + Self.floatingSidebarInset
-        let withinY = (mouseLocationInWindow.y >= panelFrameInWindow.minY) && (mouseLocationInWindow.y <= panelFrameInWindow.maxY)
-        let withinX = (mouseLocationInWindow.x >= visiblePanelMinX) && (mouseLocationInWindow.x <= panelFrameInWindow.maxX)
-        return withinX && withinY
+        guard let panel = floatingSidebarContainerView, panel.isHidden == false,
+              let panelContent = floatingSidebarPanelContentView else { return false }
+        return isMouseInside(view: panelContent)
     }
 }
 

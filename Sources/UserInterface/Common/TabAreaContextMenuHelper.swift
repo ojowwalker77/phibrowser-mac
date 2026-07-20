@@ -55,16 +55,6 @@ final class TabAreaContextMenuHelper: NSObject {
             ).configured { $0.keyEquivalentModifierMask = [.command, .shift]; $0.target = self })
         }
 
-        menu.addItem(.separator())
-
-        let layoutItem = NSMenuItem(
-            title: NSLocalizedString("Layout Mode", comment: "Tab area context menu - Switch layout mode"),
-            action: nil,
-            keyEquivalent: ""
-        )
-        layoutItem.submenu = buildLayoutSubmenu()
-        menu.addItem(layoutItem)
-
         // Active-Space controls, mirroring the Spaces menu / Space right-click.
         // Only surface them while the Spaces feature is enabled and the window
         // participates in Spaces — standalone incognito windows expose none;
@@ -119,30 +109,6 @@ final class TabAreaContextMenuHelper: NSObject {
         }
     }
 
-    @objc private func switchLayoutMode(_ sender: NSMenuItem) {
-        guard let rawValue = sender.representedObject as? String,
-              let mode = LayoutMode(rawValue: rawValue) else { return }
-        PhiPreferences.GeneralSettings.saveLayoutMode(mode)
-    }
-
-    // MARK: - Private
-
-    private func buildLayoutSubmenu() -> NSMenu {
-        let submenu = NSMenu()
-        let currentMode = browserState?.layoutMode
-        for mode in LayoutMode.allCases {
-            let item = NSMenuItem(
-                title: mode.displayName,
-                action: #selector(switchLayoutMode(_:)),
-                keyEquivalent: ""
-            )
-            item.representedObject = mode.rawValue
-            item.target = self
-            item.state = (mode == currentMode) ? .on : .off
-            submenu.addItem(item)
-        }
-        return submenu
-    }
 }
 
 private extension NSMenuItem {

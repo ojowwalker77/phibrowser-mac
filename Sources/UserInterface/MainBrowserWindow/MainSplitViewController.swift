@@ -76,7 +76,7 @@ class MainSplitViewController: NSViewController {
     private var webContentSplitViewItem: NSSplitViewItem!
     private lazy var cancellables = Set<AnyCancellable>()
 
-    private var lastUseHorizontalTabs: Bool?
+    private var lastSidebarPosition: SidebarPosition?
 
     let state: BrowserState
     init(state: BrowserState) {
@@ -104,7 +104,7 @@ class MainSplitViewController: NSViewController {
         setupTitlebarAwareLayout()
 
         DispatchQueue.main.async { [weak self] in
-            self?.splitViewController.splitView.autosaveName = "phiMainBrowserSplitView"
+            self?.updateSplitViewAutosaveName()
         }
     }
 
@@ -115,13 +115,6 @@ class MainSplitViewController: NSViewController {
         state.$sidebarCollapsed
             .sink { [weak self] collapsed in
                 guard let self else { return }
-                // Ignore sidebar expansion updates while traditional layout is active.
-                if PhiPreferences.GeneralSettings.loadLayoutMode().isTraditional {
-                    if !self.sideBarSplitViewItem.isCollapsed {
-                        self.sideBarSplitViewItem.animator().isCollapsed = true
-                    }
-                    return
-                }
                 if self.sideBarSplitViewItem.isCollapsed != collapsed {
                     self.toggleSidebar(nil)
                 }
@@ -132,15 +125,6 @@ class MainSplitViewController: NSViewController {
             .sink { [weak self] isCollapsed in
                 guard let self else { return }
                 self.updateSidebarWidth()
-                // Traditional layout must keep the sidebar collapsed even if split view state
-                // restoration or other external changes try to expand it.
-                if PhiPreferences.GeneralSettings.loadLayoutMode().isTraditional {
-                    if !isCollapsed {
-                        self.sideBarSplitViewItem.isCollapsed = true
-                    }
-                    self.state.sidebarCollapsed = true
-                    return
-                }
                 self.state.toggleSidebar(isCollapsed)
             }
             .store(in: &cancellables)
@@ -153,14 +137,14 @@ class MainSplitViewController: NSViewController {
             }
             .store(in: &cancellables)
 
-        // Rebuild layout when the layout preference changes.
+        // Reorder the shell when the independent sidebar-position preference changes.
         NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)
             .sink { [weak self] _ in
-                self?.updateLayoutForHorizontalTabs()
+                self?.updateShellPreferences()
             }
             .store(in: &cancellables)
 
-        updateLayoutForHorizontalTabs()
+        updateShellPreferences()
     }
 
     override func viewDidAppear() {
@@ -182,8 +166,6 @@ class MainSplitViewController: NSViewController {
     }
 
     func toggleSidebar(_ sender: Any?) {
-        // Sidebar is always collapsed in traditional layout.
-        guard !PhiPreferences.GeneralSettings.loadLayoutMode().isTraditional else { return }
         sideBarSplitViewItem.animator().isCollapsed.toggle()
     }
 
@@ -207,17 +189,12 @@ class MainSplitViewController: NSViewController {
     /// current divider position untouched (useful when only the collapsed
     /// state needs to change).
     func syncSidebar(width: CGFloat?, collapsed: Bool) {
-        if PhiPreferences.GeneralSettings.loadLayoutMode().isTraditional {
-            // Traditional layout pins the sidebar collapsed regardless of the
-            // source window's state; don't fight that here.
-            return
-        }
         if sideBarSplitViewItem.isCollapsed != collapsed {
             sideBarSplitViewItem.isCollapsed = collapsed
         }
         guard !collapsed, let width, width > 0 else { return }
         let clamped = min(max(width, Self.leftItemMinWidth), Self.leftItemMaxWidth)
-        splitViewController.splitView.setPosition(clamped, ofDividerAt: 0)
+        setSidebarWidth(clamped)
     }
 
     func toggleAIChat(_ sender: Any?) {
@@ -252,44 +229,81 @@ class MainSplitViewController: NSViewController {
     }
 
     private func setupSplitViewItems() {
-        setupLeftSplitViewItem()
+        setupSidebarSplitViewItem()
         setupWebContentSplitViewItem()
+
+        if PhiPreferences.GeneralSettings.loadSidebarPosition() == .left {
+            splitViewController.addSplitViewItem(sideBarSplitViewItem)
+            splitViewController.addSplitViewItem(webContentSplitViewItem)
+        } else {
+            splitViewController.addSplitViewItem(webContentSplitViewItem)
+            splitViewController.addSplitViewItem(sideBarSplitViewItem)
+        }
     }
 
-    private func setupLeftSplitViewItem() {
+    private func setupSidebarSplitViewItem() {
         sideBarSplitViewItem = NSSplitViewItem(viewController: sidebarPanelContainerViewController)
         sideBarSplitViewItem.minimumThickness = Self.leftItemMinWidth
         sideBarSplitViewItem.maximumThickness = Self.leftItemMaxWidth
         sideBarSplitViewItem.canCollapse = true
         sideBarSplitViewItem.holdingPriority = .init(rawValue: 260)
-        
-        if PhiPreferences.GeneralSettings.loadLayoutMode().isTraditional {
-            sideBarSplitViewItem.isCollapsed = true
-        }
-
-        splitViewController.addSplitViewItem(sideBarSplitViewItem)
     }
 
     private func setupWebContentSplitViewItem() {
         webContentSplitViewItem = NSSplitViewItem(contentListWithViewController: webContentContainerViewController)
         webContentSplitViewItem.holdingPriority = .init(rawValue: 240)
-        splitViewController.addSplitViewItem(webContentSplitViewItem)
     }
 
-    /// Updates the split-view layout based on the current tab-bar mode.
-    private func updateLayoutForHorizontalTabs() {
-        let traditionalLayout = PhiPreferences.GeneralSettings.loadLayoutMode().isTraditional
-        if lastUseHorizontalTabs != nil && traditionalLayout == lastUseHorizontalTabs {
+    private func updateShellPreferences() {
+        PhiPreferences.GeneralSettings.saveLayoutMode()
+
+        let position = PhiPreferences.GeneralSettings.loadSidebarPosition()
+        guard position != lastSidebarPosition else { return }
+
+        let previousPosition = lastSidebarPosition
+        lastSidebarPosition = position
+
+        guard previousPosition != nil else {
+            updateSplitViewAutosaveName()
+            setSidebarCollapsed(state.sidebarCollapsed, animated: false)
             return
         }
 
-        lastUseHorizontalTabs = traditionalLayout
-
-        if traditionalLayout {
-            setSidebarCollapsed(true, animated: false)
-        } else {
-            setSidebarCollapsed(false, animated: false)
+        let sidebarWidth = sideBarSplitViewItem.isCollapsed
+            ? nil
+            : sideBarSplitViewItem.viewController.view.frame.width
+        let wasCollapsed = sideBarSplitViewItem.isCollapsed
+        let desiredIndex = position == .left ? 0 : 1
+        guard splitViewController.splitViewItems.firstIndex(where: { $0 === sideBarSplitViewItem }) != desiredIndex else {
+            updateSplitViewAutosaveName()
+            return
         }
+
+        splitViewController.removeSplitViewItem(sideBarSplitViewItem)
+        splitViewController.insertSplitViewItem(sideBarSplitViewItem, at: desiredIndex)
+        updateSplitViewAutosaveName()
+        sideBarSplitViewItem.isCollapsed = wasCollapsed
+        splitViewController.view.layoutSubtreeIfNeeded()
+        if let sidebarWidth, !wasCollapsed {
+            setSidebarWidth(sidebarWidth)
+        }
+        updateSidebarWidth()
+    }
+
+    private func updateSplitViewAutosaveName() {
+        let position = PhiPreferences.GeneralSettings.loadSidebarPosition()
+        splitViewController.splitView.autosaveName = "luaMainBrowserSplitView-\(position.rawValue)"
+    }
+
+    private func setSidebarWidth(_ width: CGFloat) {
+        let splitView = splitViewController.splitView
+        let position: CGFloat
+        if PhiPreferences.GeneralSettings.loadSidebarPosition() == .left {
+            position = width
+        } else {
+            position = max(0, splitView.bounds.width - width - splitView.dividerThickness)
+        }
+        splitView.setPosition(position, ofDividerAt: 0)
     }
 
     private func setSidebarCollapsed(_ collapsed: Bool, animated: Bool) {
@@ -307,8 +321,7 @@ class MainSplitViewController: NSViewController {
         guard arguments.contains("-uitest"),
               let widthFlagIndex = arguments.firstIndex(of: "-sidebarHeaderWidth"),
               arguments.indices.contains(widthFlagIndex + 1),
-              let requestedWidth = Double(arguments[widthFlagIndex + 1]),
-              !PhiPreferences.GeneralSettings.loadLayoutMode().isTraditional else {
+              let requestedWidth = Double(arguments[widthFlagIndex + 1]) else {
             return
         }
 
@@ -321,10 +334,6 @@ class MainSplitViewController: NSViewController {
     }
 
     private func applySidebarHeaderWidthOverrideForUITests(width: CGFloat) {
-        guard !PhiPreferences.GeneralSettings.loadLayoutMode().isTraditional else {
-            return
-        }
-
         syncSidebar(width: width, collapsed: false)
         view.layoutSubtreeIfNeeded()
         splitViewController.splitView.layoutSubtreeIfNeeded()

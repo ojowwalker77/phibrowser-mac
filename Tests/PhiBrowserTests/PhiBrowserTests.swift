@@ -8,6 +8,44 @@ import AppKit
 @testable import Phi
 
 final class PhiBrowserTests: XCTestCase {
+    func testLuaNormalizesLegacyLayoutChoicesToPerformance() {
+        let defaults = UserDefaults.standard
+        let key = PhiPreferences.GeneralSettings.layoutModeKey
+        let original = defaults.object(forKey: key)
+        defer {
+            if let original {
+                defaults.set(original, forKey: key)
+            } else {
+                defaults.removeObject(forKey: key)
+            }
+        }
+
+        defaults.set(LayoutMode.comfortable.rawValue, forKey: key)
+
+        XCTAssertEqual(PhiPreferences.GeneralSettings.loadLayoutMode(), .performance)
+        XCTAssertEqual(defaults.string(forKey: key), LayoutMode.performance.rawValue)
+        XCTAssertEqual(LayoutMode.allCases, [.performance])
+    }
+
+    func testSidebarPositionDefaultsLeftAndPersistsRight() {
+        let defaults = UserDefaults.standard
+        let key = PhiPreferences.GeneralSettings.sidebarPositionKey
+        let original = defaults.object(forKey: key)
+        defer {
+            if let original {
+                defaults.set(original, forKey: key)
+            } else {
+                defaults.removeObject(forKey: key)
+            }
+        }
+
+        defaults.removeObject(forKey: key)
+        XCTAssertEqual(PhiPreferences.GeneralSettings.loadSidebarPosition(), .left)
+
+        PhiPreferences.GeneralSettings.saveSidebarPosition(.right)
+        XCTAssertEqual(PhiPreferences.GeneralSettings.loadSidebarPosition(), .right)
+    }
+
     func testCopyURLShortcutIsCustomizableFromEditShortcuts() {
         XCTAssertEqual(
             Shortcuts.DefaultShortcuts[.PHI_COPY_URL],

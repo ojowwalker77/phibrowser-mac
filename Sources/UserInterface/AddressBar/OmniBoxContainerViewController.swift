@@ -549,12 +549,14 @@ final class OmniBoxContainerViewController: NSViewController {
         let actualWidth = min(contentSize.width, parentBounds.width)
 
         let sidebarWidth = browserState?.sidebarWidth ?? 0
-        let rightAreaWidth = parentBounds.width - sidebarWidth
+        let contentAreaWidth = parentBounds.width - sidebarWidth
         let x: CGFloat
-        if sidebarWidth == 0 || rightAreaWidth < actualWidth {
+        if sidebarWidth == 0 || contentAreaWidth < actualWidth {
             x = max((parentBounds.width - actualWidth) / 2, 0)
+        } else if PhiPreferences.GeneralSettings.loadSidebarPosition() == .left {
+            x = max(sidebarWidth + (contentAreaWidth - actualWidth) / 2, 0)
         } else {
-            x = max(sidebarWidth + (rightAreaWidth - actualWidth) / 2, 0)
+            x = max((contentAreaWidth - actualWidth) / 2, 0)
         }
         
         let anchoredTop = (parentBounds.height + anchoredHeight) / 2

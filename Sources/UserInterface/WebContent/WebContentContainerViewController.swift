@@ -224,17 +224,18 @@ class WebContentContainerViewController: NSViewController {
     /// Titlebar aware area for handling double-click on titlebar
     private var titleAwareArea = TitlebarAwareView()
     
-    /// Left-edge hover trigger for showing floating sidebar when main sidebar is collapsed.
+    /// Edge hover trigger for showing the floating sidebar when the docked sidebar is collapsed.
     lazy var floatingSidebarTriggerView = MouseTrackingAreaView()
 
     var floatingSidebarContainerView: NSView?
+    var floatingSidebarPanelContentView: NSView?
     var floatingSidebarViewController: FloatingSidebarViewController?
-    var floatingSidebarLeadingConstraint: Constraint?
+    var floatingSidebarHorizontalConstraint: Constraint?
     var floatingSidebarWidthConstraint: Constraint?
     var floatingSidebarHideWorkItem: DispatchWorkItem?
     var floatingSidebarEnableWorkItem: DispatchWorkItem?
     var floatingSidebarLastShownAt: Date?
-    var floatingSidebarShownFromRightToLeft = false
+    var floatingSidebarShownFromContentSide = false
     /// Hides the panel when its window leaves the screen (a Space switch
     /// orders the leaving window out with its panel still up) — without
     /// this the stale panel would greet the user when that window next
@@ -339,12 +340,9 @@ class WebContentContainerViewController: NSViewController {
             }
         }
         
-        // Add left-edge hover trigger for floating sidebar.
+        // Add the configured edge hover trigger for the floating sidebar.
         view.addSubview(floatingSidebarTriggerView)
-        floatingSidebarTriggerView.snp.makeConstraints { make in
-            make.leading.top.bottom.equalToSuperview()
-            make.width.equalTo(Self.floatingSidebarTriggerWidth)
-        }
+        updateFloatingSidebarPlacement()
         setupFloatingSidebarTrigger()
         
         // Add titlebar aware area
@@ -492,6 +490,15 @@ class WebContentContainerViewController: NSViewController {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
                 self?.updateLayoutForMode()
+            }
+            .store(in: &cancellables)
+
+        NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)
+            .map { _ in PhiPreferences.GeneralSettings.loadSidebarPosition() }
+            .removeDuplicates()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.updateFloatingSidebarPlacement()
             }
             .store(in: &cancellables)
 

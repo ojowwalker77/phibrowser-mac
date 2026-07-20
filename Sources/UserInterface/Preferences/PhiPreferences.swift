@@ -15,9 +15,14 @@ extension UserDefaults {
 }
 
 enum LayoutMode: String, CaseIterable, Identifiable {
-    case balanced     // vertical tabs + address bar at the top of webcontent
-    case performance  // vertical tabs
-    case comfortable  // horizontal tabs
+    // Performance is Lua's only supported layout. The other raw values remain
+    // decodeable while existing profiles migrate, so older stored preferences
+    // never fail to load midway through an app update.
+    case balanced
+    case performance
+    case comfortable
+
+    static let allCases: [LayoutMode] = [.performance]
 
     var id: String { rawValue }
 
@@ -34,6 +39,22 @@ enum LayoutMode: String, CaseIterable, Identifiable {
 
     var isTraditional: Bool { self == .comfortable }
     var showsNavigationAtTop: Bool { self != .performance }
+}
+
+enum SidebarPosition: String, CaseIterable, Identifiable {
+    case left
+    case right
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .left:
+            return NSLocalizedString("Left", comment: "Sidebar position - Left side")
+        case .right:
+            return NSLocalizedString("Right", comment: "Sidebar position - Right side")
+        }
+    }
 }
 
 enum PhiPreferences: String {
@@ -85,31 +106,35 @@ extension PhiPreferences {
         }
 
         static let layoutModeKey = "layoutMode"
+        static let sidebarPositionKey = "sidebarPosition"
 
         static func loadLayoutMode() -> LayoutMode {
             let defaults = UserDefaults.standard
 
-            if let rawValue = defaults.string(forKey: Self.layoutModeKey),
-               let mode = LayoutMode(rawValue: rawValue) {
-                return mode
+            // Lua deliberately ships one layout. Normalize old Phi choices at
+            // the preference boundary so every consumer observes the same
+            // stable state instead of carrying compatibility branches into UI.
+            if defaults.string(forKey: Self.layoutModeKey) != LayoutMode.performance.rawValue {
+                defaults.set(LayoutMode.performance.rawValue, forKey: Self.layoutModeKey)
             }
-
-            // Backward compatibility for old dual-bool encoding.
-            let traditionalLayout = UserDefaults.standard.value(forKey: Self.traditionalLayout.rawValue) as? Bool
-            let navigationAtTop = UserDefaults.standard.value(forKey: Self.navigationAtTop.rawValue) as? Bool
-            if traditionalLayout == true {
-                return .comfortable
-            } else if navigationAtTop == true {
-                return .balanced
-            } else {
-                // default value
-                return .performance
-            }
+            return .performance
         }
 
-        static func saveLayoutMode(_ mode: LayoutMode) {
+        static func saveLayoutMode(_: LayoutMode = .performance) {
             let defaults = UserDefaults.standard
-            defaults.set(mode.rawValue, forKey: Self.layoutModeKey)
+            defaults.set(LayoutMode.performance.rawValue, forKey: Self.layoutModeKey)
+        }
+
+        static func loadSidebarPosition() -> SidebarPosition {
+            guard let rawValue = UserDefaults.standard.string(forKey: Self.sidebarPositionKey),
+                  let position = SidebarPosition(rawValue: rawValue) else {
+                return .left
+            }
+            return position
+        }
+
+        static func saveSidebarPosition(_ position: SidebarPosition) {
+            UserDefaults.standard.set(position.rawValue, forKey: Self.sidebarPositionKey)
         }
 
         /// Duration of the cross-Space swap animation, in seconds. Drives the

@@ -43,6 +43,16 @@ plutil -extract CFBundleURLTypes json -o - "$info" | grep -q 'lua' || {
   echo "LuaIcon.icns was not compiled into the app." >&2
   exit 1
 }
+tracking_protection="$APP/Contents/Resources/TrackingProtection"
+[[ -f "$tracking_protection/manifest.json" ]] || {
+  echo "Lua Tracking Protection is missing from the release bundle." >&2
+  exit 1
+}
+plutil -convert xml1 -o /dev/null "$tracking_protection/manifest.json"
+grep -q '"url-cleaner.js", "content.js"' "$tracking_protection/manifest.json" || {
+  echo "Lua Tracking Protection content scripts are not configured." >&2
+  exit 1
+}
 
 if grep -R -E 'ota\.phibrowser\.com|account\.phibrowser\.com|ai\.phibrowser\.com' "$APP/Contents/Resources" || \
    strings -a "$APP/Contents/MacOS/Lua" | grep -E 'ota\.phibrowser\.com|account\.phibrowser\.com|ai\.phibrowser\.com'; then

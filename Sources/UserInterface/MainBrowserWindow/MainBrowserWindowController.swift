@@ -228,7 +228,11 @@ class MainBrowserWindowController: NSWindowController {
             .sink { [weak self] collapsed, fullScreen, _ in
                 guard let self, let window = self.window  else { return }
                 let traditionalLayout = PhiPreferences.GeneralSettings.loadLayoutMode().isTraditional
-                let hideTrafficLights = !fullScreen && collapsed && !traditionalLayout
+                let sidebarPosition = PhiPreferences.GeneralSettings.loadSidebarPosition()
+                let hideTrafficLights = !fullScreen
+                    && collapsed
+                    && !traditionalLayout
+                    && sidebarPosition == .left
                 
                 window.standardWindowButton(.closeButton)?.isHidden = hideTrafficLights
                 window.standardWindowButton(.miniaturizeButton)?.isHidden = hideTrafficLights
