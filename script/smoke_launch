@@ -51,7 +51,32 @@ print_crash_diagnostics() {
   done
 
   [[ -n "$crash_report" ]] || {
-    echo "No Lua crash report was available for symbolication." >&2
+    local debugger_log="$PROFILE_DIR/Lua-lldb.log"
+    local debugger_pid=""
+
+    echo "No Lua crash report was available; reproducing once under LLDB." >&2
+    lldb \
+      --batch \
+      --one-line run \
+      --one-line-on-crash 'thread backtrace all' \
+      -- "$EXECUTABLE" \
+      -uitest 1 \
+      "--user-data-dir=$PROFILE_DIR-lldb" \
+      >"$debugger_log" 2>&1 &
+    debugger_pid=$!
+
+    for _ in {1..60}; do
+      if ! kill -0 "$debugger_pid" 2>/dev/null; then
+        wait "$debugger_pid" 2>/dev/null || true
+        cat "$debugger_log" >&2
+        return 0
+      fi
+      sleep 0.25
+    done
+
+    kill -KILL "$debugger_pid" 2>/dev/null || true
+    wait "$debugger_pid" 2>/dev/null || true
+    cat "$debugger_log" >&2
     return 0
   }
 
